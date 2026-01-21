@@ -18,7 +18,7 @@ app.secret_key = "basket_uncle_direct_trade_key_999"
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///direct_trade_mall.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# 토스 페이먼츠 API 키 설정 (사장님 제공 키)
+# 토스 페이먼츠 API 키 설정 (제공해주신 테스트 키)
 TOSS_CLIENT_KEY = "test_ck_DpexMgkW36zB9qm5m4yd3GbR5ozO"
 TOSS_SECRET_KEY = "test_sk_0RnYX2w532E5k7JYaJye8NeyqApQ"
 
@@ -56,7 +56,6 @@ class Product(db.Model):
     stock = db.Column(db.Integer, default=10) 
     deadline = db.Column(db.DateTime)          
     is_active = db.Column(db.Boolean, default=True)
-    tax_type = db.Column(db.String(20), default='과세') # '과세' 또는 '면세' 추가
 
 class Cart(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -74,8 +73,8 @@ class Order(db.Model):
     product_details = db.Column(db.Text) 
     total_price = db.Column(db.Integer)
     status = db.Column(db.String(20), default='결제완료') 
-    order_id = db.Column(db.String(100)) 
-    payment_key = db.Column(db.String(200)) 
+    order_id = db.Column(db.String(100)) # 토스 주문번호
+    payment_key = db.Column(db.String(200)) # 토스 결제키
     created_at = db.Column(db.DateTime, default=datetime.now)
 
 @login_manager.user_loader
@@ -120,7 +119,7 @@ HEADER_HTML = """
             <div class="flex justify-between h-16 items-center">
                 <div class="flex items-center">
                     <a href="/" class="text-2xl font-bold text-green-600">🧺 바구니삼촌</a>
-                    <span class="ml-4 text-gray-400 hidden md:block text-xs">| 농산물/공구/반찬</span>
+                    <span class="ml-4 text-gray-400 hidden md:block text-xs">| 시장가격 당일배송</span>
                 </div>
                 <div class="flex items-center gap-4 text-sm">
                     {% if current_user.is_authenticated %}
@@ -140,19 +139,6 @@ HEADER_HTML = """
             </div>
         </div>
     </nav>
-    
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        <div class="max-w-7xl mx-auto px-4 mt-4">
-          {% for message in messages %}
-            <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative text-sm" role="alert">
-              <span class="block sm:inline">{{ message }}</span>
-            </div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
-
     <main class="min-h-screen">
 """
 
@@ -161,7 +147,7 @@ FOOTER_HTML = """
     <footer class="bg-white py-12 border-t mt-20">
         <div class="max-w-7xl mx-auto px-4 text-center">
             <p class="text-green-600 font-bold mb-2 italic">BASKET UNCLE</p>
-            <p class="text-gray-400 text-xs">농산물, 공동구매, 반찬까지 삼촌이 직접 챙깁니다.</p>
+            <p class="text-gray-400 text-xs">매일 아침 시장 가격 그대로, 당일 배송해 드립니다.</p>
             <p class="text-gray-400 text-[10px] mt-4">© 2026 Basket Uncle. All Rights Reserved.</p>
         </div>
     </footer>
@@ -204,7 +190,6 @@ def inject_globals():
 
 @app.route('/')
 def index():
-    main_categories = ['전체', '농산물', '공동구매', '반찬']
     cat = request.args.get('category', '전체')
     if cat == '전체':
         products = Product.query.filter_by(is_active=True).all()
@@ -214,15 +199,15 @@ def index():
     content = """
     <div class="bg-gradient-to-r from-green-600 to-green-700 text-white py-10 px-4">
         <div class="max-w-7xl mx-auto">
-            <h2 class="text-2xl font-black mb-2 leading-tight">바구니삼촌이 직접 골랐습니다<br>농산물 · 공구 · 반찬 🍱</h2>
-            <p class="text-green-100 text-xs">시장의 신선함과 공동구매의 혜택을 한 번에!</p>
+            <h2 class="text-2xl font-black mb-2 leading-tight">오늘 아침 시장가격 그대로<br>문 앞까지 당일 배송 🚀</h2>
+            <p class="text-green-100 text-xs">중간 유통 마진 없이 신선함을 직접 배달합니다.</p>
         </div>
     </div>
 
     <div class="max-w-7xl mx-auto px-4 py-8">
         <div class="flex gap-2 overflow-x-auto pb-6 no-scrollbar">
-            {% for c in main_categories %}
-            <a href="/?category={{c}}" class="px-6 py-2.5 rounded-full border text-xs font-bold {% if request.args.get('category','전체') == c %}bg-green-600 text-white border-green-600 shadow-md{% else %}bg-white text-gray-500 hover:border-green-300{% endif %} transition-all">
+            {% for c in ['전체', '과일', '채소', '쌀/잡곡', '기타'] %}
+            <a href="/?category={{c}}" class="px-5 py-2 rounded-full border text-xs font-bold {% if request.args.get('category','전체') == c %}bg-green-600 text-white border-green-600{% else %}bg-white text-gray-500{% endif %}">
                 {{c}}
             </a>
             {% endfor %}
@@ -238,14 +223,10 @@ def index():
                 {% endif %}
                 
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-gray-50 overflow-hidden">
-                    <img src="{{ p.image_url }}" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400?text=준비중'">
+                    <img src="{{ p.image_url }}" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400?text=이미지준비중'">
                     <div class="absolute bottom-2 left-2 flex flex-col gap-1">
                         <span class="bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full">잔여 {{ p.stock }}개</span>
-                        <span class="bg-green-600 text-white text-[9px] px-2 py-0.5 rounded-full font-bold">{{ p.category }}</span>
                     </div>
-                    {% if p.tax_type == '면세' %}
-                    <span class="absolute top-2 right-2 bg-blue-500 text-white text-[8px] px-1.5 py-0.5 rounded font-bold">면세</span>
-                    {% endif %}
                 </a>
                 
                 <div class="p-3 flex flex-col flex-1">
@@ -275,7 +256,7 @@ def index():
         </div>
     </div>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, products=products, main_categories=main_categories)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, products=products)
 
 @app.route('/product/<int:pid>')
 def product_detail(pid):
@@ -286,19 +267,20 @@ def product_detail(pid):
     <div class="max-w-4xl mx-auto px-4 py-10">
         <div class="grid md:grid-cols-2 gap-8 mb-12">
             <div class="aspect-square rounded-2xl overflow-hidden border">
-                <img src="{{ p.image_url }}" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/600x600?text=준비중'">
+                <img src="{{ p.image_url }}" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/600x600?text=이미지준비중'">
             </div>
             <div class="flex flex-col justify-center">
-                <div class="flex items-center gap-2 mb-2">
-                    <span class="text-green-600 font-bold text-xs">{{ p.category }} | {{ p.origin }}</span>
-                    <span class="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{{ p.tax_type }}</span>
-                </div>
+                <span class="text-green-600 font-bold text-xs mb-2">{{ p.origin }} | {{ p.farmer }}</span>
                 <h2 class="text-2xl font-black text-gray-800 mb-4">{{ p.name }}</h2>
                 <p class="text-gray-400 text-sm mb-6">{{ p.spec }}</p>
                 <div class="bg-gray-50 p-6 rounded-2xl mb-8">
                     <div class="flex justify-between items-center mb-2">
                         <span class="text-gray-500 text-sm">판매가</span>
                         <span class="text-2xl font-black text-gray-900">{{ "{:,}".format(p.price) }}원</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs text-gray-400">
+                        <span>배송정보</span>
+                        <span>당일 수확 / 오후 6시 이전 배송</span>
                     </div>
                 </div>
                 {% if not is_expired and not is_out_of_stock %}
@@ -310,19 +292,22 @@ def product_detail(pid):
                 {% endif %}
             </div>
         </div>
-        <div class="border-t pt-10 text-center">
-            <h3 class="font-bold text-lg mb-6 border-l-4 border-green-600 pl-4 text-left">상세 설명</h3>
-            {% if p.detail_image_url %}
-            <img src="{{ p.detail_image_url }}" class="max-w-full mx-auto rounded-lg shadow-sm">
-            {% else %}
-            <div class="py-20 bg-gray-50 rounded-xl text-gray-400 text-sm italic">"상세 정보를 준비 중입니다."</div>
-            {% endif %}
+
+        <div class="border-t pt-10">
+            <h3 class="font-bold text-lg mb-6 border-l-4 border-green-600 pl-4">상세 설명</h3>
+            <div class="text-center">
+                {% if p.detail_image_url %}
+                <img src="{{ p.detail_image_url }}" class="max-w-full mx-auto rounded-lg shadow-sm">
+                {% else %}
+                <div class="py-20 bg-gray-50 rounded-xl text-gray-400 text-sm italic">"가장 신선한 상태로 삼촌이 직접 골라 보내드립니다."</div>
+                {% endif %}
+            </div>
         </div>
     </div>
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, p=p, is_expired=is_expired, is_out_of_stock=is_out_of_stock)
 
-# --- 회원 관리 / 로그인 ---
+# --- 회원가입 / 로그인 / 로그아웃 ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -337,10 +322,10 @@ def login():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        if User.query.filter_by(email=request.form['email']).first(): flash("이미 사용 중인 이메일입니다."); return redirect('/register')
         hashed_pw = generate_password_hash(request.form['password'])
-        db.session.add(User(email=request.form['email'], password=hashed_pw, name=request.form['name'], phone=request.form['phone']))
-        db.session.commit(); flash("가입 완료! 로그인해 주세요."); return redirect('/login')
+        new_user = User(email=request.form['email'], password=hashed_pw, name=request.form['name'], phone=request.form['phone'])
+        db.session.add(new_user); db.session.commit()
+        return redirect('/login')
     content = """<div class="max-w-md mx-auto mt-10 p-8 bg-white rounded-3xl shadow-xl border border-gray-50"><h2 class="text-2xl font-black text-center mb-8 text-gray-800">회원가입</h2><form method="POST" class="space-y-4"><input name="name" placeholder="이름" class="w-full p-4 bg-gray-50 border-none rounded-2xl outline-none" required><input name="email" type="email" placeholder="이메일" class="w-full p-4 bg-gray-50 border-none rounded-2xl outline-none" required><input name="password" type="password" placeholder="비밀번호" class="w-full p-4 bg-gray-50 border-none rounded-2xl outline-none" required><input name="phone" placeholder="연락처" class="w-full p-4 bg-gray-50 border-none rounded-2xl outline-none" required><button class="w-full bg-green-600 text-white p-5 rounded-2xl font-black text-lg shadow-lg hover:bg-green-700 transition mt-4">가입하기</button></form></div>"""
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
 
@@ -351,20 +336,51 @@ def logout(): logout_user(); return redirect('/')
 @login_required
 def add_cart(pid):
     p = Product.query.get(pid)
-    if (p.deadline and p.deadline < datetime.now()) or p.stock <= 0: flash("마감된 상품입니다."); return redirect('/')
+    if (p.deadline and p.deadline < datetime.now()) or p.stock <= 0:
+        flash("이미 마감되었거나 품절된 상품입니다.")
+        return redirect('/')
     item = Cart.query.filter_by(user_id=current_user.id, product_id=pid).first()
     if item: item.quantity += 1
     else: db.session.add(Cart(user_id=current_user.id, product_id=pid, product_name=p.name, price=p.price))
-    db.session.commit(); return redirect('/')
+    db.session.commit()
+    return redirect('/')
 
 @app.route('/cart')
 @login_required
 def cart():
     items = Cart.query.filter_by(user_id=current_user.id).all(); total = sum(i.price * i.quantity for i in items)
-    content = """<div class="max-w-3xl mx-auto py-12 px-4"><h2 class="text-2xl font-black mb-8">내 장바구니</h2><div class="bg-white rounded-3xl shadow-sm border overflow-hidden">{% if items %}<div class="p-6 space-y-4">{% for i in items %}<div class="flex justify-between items-center border-b pb-4"><div><p class="font-bold text-gray-800 text-sm">{{ i.product_name }}</p><p class="text-xs text-gray-400">{{ i.price }}원 x {{ i.quantity }}개</p></div><span class="font-bold text-green-600">{{ i.price * i.quantity }}원</span></div>{% endfor %}</div><div class="bg-gray-50 p-6 flex justify-between items-center"><span class="font-bold text-sm">최종 결제 예정 금액</span><span class="text-2xl font-black text-green-600">{{ total }}원</span></div><div class="p-6"><a href="/order/payment" class="block text-center bg-green-600 text-white py-4 rounded-2xl font-black shadow-lg hover:bg-green-700">지금 결제하기</a></div>{% else %}<div class="p-20 text-center text-gray-400 text-sm">비어있습니다.</div>{% endif %}</div></div>"""
+    content = """
+    <div class="max-w-3xl mx-auto py-12 px-4">
+        <h2 class="text-2xl font-black mb-8">내 장바구니</h2>
+        <div class="bg-white rounded-3xl shadow-sm border overflow-hidden">
+            {% if items %}
+                <div class="p-6 space-y-4">
+                    {% for i in items %}
+                    <div class="flex justify-between items-center border-b pb-4">
+                        <div>
+                            <p class="font-bold text-gray-800 text-sm">{{ i.product_name }}</p>
+                            <p class="text-xs text-gray-400">{{ i.price }}원 x {{ i.quantity }}개</p>
+                        </div>
+                        <span class="font-bold text-green-600">{{ i.price * i.quantity }}원</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="bg-gray-50 p-6 flex justify-between items-center">
+                    <span class="font-bold text-sm">최종 결제 예정 금액</span>
+                    <span class="text-2xl font-black text-green-600">{{ total }}원</span>
+                </div>
+                <div class="p-6">
+                    <a href="/order/payment" class="block text-center bg-green-600 text-white py-4 rounded-2xl font-black shadow-lg hover:bg-green-700">지금 결제하기</a>
+                </div>
+            {% else %}
+                <div class="p-20 text-center text-gray-400 text-sm">장바구니가 비어있습니다.</div>
+            {% endif %}
+        </div>
+    </div>
+    """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, items=items, total=total)
 
-# --- 💳 토스 페이먼츠 결제 연동 ---
+# --- 토스 결제 요청 페이지 ---
 @app.route('/order/payment')
 @login_required
 def order_payment():
@@ -376,10 +392,11 @@ def order_payment():
     
     content = f"""
     <div class="max-w-md mx-auto py-20 px-4 text-center">
-        <h2 class="text-xl font-black mb-4">결제 요청</h2>
-        <div class="bg-white p-6 rounded-2xl shadow-sm border mb-8 text-left text-sm">
-            <div class="flex justify-between mb-2"><span class="text-gray-400">주문명</span><span class="font-bold">{order_name}</span></div>
-            <div class="flex justify-between"><span class="text-gray-400">결제금액</span><span class="font-black text-green-600">{total:,}원</span></div>
+        <h2 class="text-xl font-black mb-4">결제를 진행합니다</h2>
+        <p class="text-gray-500 mb-8 text-sm">토스 페이먼츠 안전 결제창으로 연결됩니다.</p>
+        <div class="bg-white p-6 rounded-2xl shadow-sm border mb-8 text-left">
+            <div class="flex justify-between mb-2"><span class="text-gray-400 text-xs">주문상품</span><span class="text-xs font-bold">{order_name}</span></div>
+            <div class="flex justify-between"><span class="text-gray-400 text-xs">결제금액</span><span class="text-sm font-black text-green-600">{total:,}원</span></div>
         </div>
         <button id="payment-button" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg">결제하기</button>
     </div>
@@ -399,140 +416,234 @@ def order_payment():
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
 
+# --- 결제 성공 핸들러 (서버 승인 로직) ---
 @app.route('/payment/success')
 @login_required
 def payment_success():
-    payment_key, order_id, amount = request.args.get('paymentKey'), request.args.get('orderId'), request.args.get('amount')
-    # 서버측 결제 승인 확인 (Secret Key 사용)
+    payment_key = request.args.get('paymentKey')
+    order_id = request.args.get('orderId')
+    amount = request.args.get('amount')
+
+    # 1. 토스 서버에 최종 결제 승인 요청 (Security Check)
     url = "https://api.tosspayments.com/v1/payments/confirm"
-    encoded_auth = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
-    res = requests.post(url, json={"paymentKey": payment_key, "amount": amount, "orderId": order_id}, headers={"Authorization": f"Basic {encoded_auth}", "Content-Type": "application/json"})
+    # 시크릿 키를 Base64 인코딩하여 인증 헤더 생성
+    secret = TOSS_SECRET_KEY + ":"
+    encoded_secret = base64.b64encode(secret.encode()).decode()
+    
+    headers = {
+        "Authorization": f"Basic {encoded_secret}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "paymentKey": payment_key,
+        "amount": amount,
+        "orderId": order_id
+    }
+    
+    res = requests.post(url, json=payload, headers=headers)
     
     if res.status_code == 200:
+        # 2. 결제 승인 성공 시 DB 주문 기록 생성
         items = Cart.query.filter_by(user_id=current_user.id).all()
         details = ", ".join([f"{i.product_name}({i.quantity}개)" for i in items])
-        db.session.add(Order(user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, product_details=details, total_price=int(amount), order_id=order_id, payment_key=payment_key, status='결제완료'))
+        
+        # 주문 생성
+        order = Order(
+            user_id=current_user.id,
+            customer_name=current_user.name,
+            customer_phone=current_user.phone,
+            product_details=details,
+            total_price=int(amount),
+            order_id=order_id,
+            payment_key=payment_key,
+            status='결제완료'
+        )
+        db.session.add(order)
+        
+        # 3. 실제 재고 차감 (장바구니에 담을 때 가차감했으므로 확정)
         for i in items:
             p = Product.query.get(i.product_id)
             if p: p.stock -= i.quantity
-        Cart.query.filter_by(user_id=current_user.id).delete(); db.session.commit()
-        return render_template_string(HEADER_HTML + """<div class="max-w-md mx-auto py-32 px-4 text-center"><div class="text-green-600 text-6xl mb-6"><i class="fas fa-check-circle"></i></div><h2 class="text-2xl font-black mb-10">결제가 완료되었습니다!</h2><a href="/" class="bg-gray-800 text-white px-8 py-3 rounded-xl font-bold">홈으로</a></div>""" + FOOTER_HTML)
-    return redirect(url_for('payment_fail', message=res.json().get('message')))
+            
+        # 4. 장바구니 비우기
+        Cart.query.filter_by(user_id=current_user.id).delete()
+        db.session.commit()
+        
+        content = """
+        <div class="max-w-md mx-auto py-32 px-4 text-center">
+            <div class="text-green-600 text-6xl mb-6"><i class="fas fa-check-circle"></i></div>
+            <h2 class="text-2xl font-black mb-2">결제가 완료되었습니다!</h2>
+            <p class="text-gray-500 mb-10 text-sm">신선한 상품으로 삼촌이 곧 달려갈게요.</p>
+            <a href="/" class="inline-block bg-gray-800 text-white px-8 py-3 rounded-xl font-bold">홈으로 이동</a>
+        </div>
+        """
+        return render_template_string(HEADER_HTML + content + FOOTER_HTML)
+    else:
+        # 승인 실패 시
+        return redirect(url_for('payment_fail', message=res.json().get('message')))
 
 @app.route('/payment/fail')
 def payment_fail():
-    content = f"""<div class="max-w-md mx-auto py-32 px-4 text-center"><h2 class="text-2xl font-black mb-2">실패</h2><p class="text-gray-500 mb-10">{request.args.get('message', '오류')}</p><a href="/cart" class="bg-gray-100 px-8 py-3 rounded-xl">돌아가기</a></div>"""
+    message = request.args.get('message', '결제 중 오류가 발생했습니다.')
+    content = f"""
+    <div class="max-w-md mx-auto py-32 px-4 text-center">
+        <div class="text-red-500 text-6xl mb-6"><i class="fas fa-exclamation-triangle"></i></div>
+        <h2 class="text-2xl font-black mb-2">결제에 실패했습니다</h2>
+        <p class="text-gray-500 mb-10 text-sm">{message}</p>
+        <a href="/cart" class="inline-block bg-gray-100 text-gray-600 px-8 py-3 rounded-xl font-bold">장바구니로 돌아가기</a>
+    </div>
+    """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
 
-# --- 관리자 대시보드 ---
+# --- 관리자 기능 ---
 @app.route('/admin')
 @login_required
 def admin_dashboard():
     if not current_user.is_admin: return redirect('/')
-    active_tab = request.args.get('tab', 'products')
-    products, orders, users = Product.query.all(), Order.query.order_by(Order.created_at.desc()).all(), User.query.all()
+    products = Product.query.all()
+    orders = Order.query.order_by(Order.created_at.desc()).all()
     content = """
     <div class="max-w-7xl mx-auto py-10 px-4">
-        <h2 class="text-xl font-black text-orange-700 mb-8">바구니삼촌 관리자</h2>
-        <div class="flex border-b mb-8 text-sm">
-            <a href="/admin?tab=products" class="px-6 py-3 {% if active_tab == 'products' %}border-b-4 border-orange-500 font-bold text-orange-600{% else %}text-gray-400{% endif %}">상품</a>
-            <a href="/admin?tab=orders" class="px-6 py-3 {% if active_tab == 'orders' %}border-b-4 border-orange-500 font-bold text-orange-600{% else %}text-gray-400{% endif %}">주문</a>
-            <a href="/admin?tab=users" class="px-6 py-3 {% if active_tab == 'users' %}border-b-4 border-orange-500 font-bold text-orange-600{% else %}text-gray-400{% endif %}">회원</a>
+        <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <h2 class="text-xl font-black text-orange-700">바구니삼촌 직거래 관리자</h2>
+            <div class="flex gap-2">
+                <a href="/admin/orders/excel" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md"><i class="fas fa-file-excel mr-1"></i> 주문 엑셀 다운로드</a>
+                <a href="/admin/add" class="bg-green-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md">+ 상품 등록</a>
+            </div>
         </div>
 
-        {% if active_tab == 'products' %}
-            <div class="flex justify-end mb-4"><a href="/admin/add" class="bg-green-600 text-white px-4 py-2 rounded-xl text-xs font-bold">+ 등록</a></div>
-            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden text-xs">
-                <table class="w-full text-left">
-                    <thead class="bg-gray-50 border-b"><tr><th class="p-4">카테고리</th><th class="p-4">상품명</th><th class="p-4">과세여부</th><th class="p-4">가격</th><th class="p-4">재고</th><th class="p-4">관리</th></tr></thead>
+        <div class="mb-12">
+            <h3 class="font-bold text-gray-800 mb-4">📦 상품 관리</h3>
+            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-gray-50 border-b">
+                        <tr><th class="p-4">상품명</th><th class="p-4">판매가</th><th class="p-4">잔여수량</th><th class="p-4">마감시간</th><th class="p-4">관리</th></tr>
+                    </thead>
                     <tbody>
                         {% for p in products %}
-                        <tr class="border-b"><td class="p-4 text-gray-400">{{ p.category }}</td><td class="p-4 font-bold">{{ p.name }}</td><td class="p-4 text-gray-400">{{ p.tax_type }}</td><td class="p-4">{{ p.price }}원</td><td class="p-4 text-blue-600">{{ p.stock }}개</td><td class="p-4"><a href="/admin/delete/{{p.id}}" class="text-red-400">삭제</a></td></tr>
+                        <tr class="border-b">
+                            <td class="p-4 font-bold">{{ p.name }}</td>
+                            <td class="p-4">{{ p.price }}원</td>
+                            <td class="p-4 font-bold text-blue-600">{{ p.stock }}개</td>
+                            <td class="p-4 text-red-500 font-bold">{{ p.deadline.strftime('%H:%M') if p.deadline else '미정' }}</td>
+                            <td class="p-4"><a href="/admin/delete/{{p.id}}" class="text-red-400" onclick="return confirm('삭제?')">삭제</a></td>
+                        </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-        {% elif active_tab == 'orders' %}
-            <div class="flex justify-end mb-4"><a href="/admin/orders/excel" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold">엑셀</a></div>
-            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden text-xs">
-                <table class="w-full text-left">
-                    <thead class="bg-gray-50 border-b"><tr><th class="p-4">일시</th><th class="p-4">고객</th><th class="p-4">금액</th></tr></thead>
-                    <tbody>{% for o in orders %}<tr class="border-b"><td class="p-4 text-gray-400">{{ o.created_at.strftime('%m/%d %H:%M') }}</td><td class="p-4"><b>{{ o.customer_name }}</b><br>{{ o.customer_phone }}</td><td class="p-4 text-green-600 font-bold">{{ o.total_price }}원</td></tr>{% endfor %}</tbody>
+        </div>
+
+        <div>
+            <h3 class="font-bold text-gray-800 mb-4">🛒 결제 완료 주문 내역</h3>
+            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-gray-50 border-b">
+                        <tr><th class="p-4">일시</th><th class="p-4">고객명</th><th class="p-4">주문내용</th><th class="p-4">총금액</th><th class="p-4">결제ID</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for o in orders %}
+                        <tr class="border-b">
+                            <td class="p-4 text-gray-400">{{ o.created_at.strftime('%m/%d %H:%M') }}</td>
+                            <td class="p-4 font-bold">{{ o.customer_name }}<br><span class="text-[10px] text-gray-400">{{ o.customer_phone }}</span></td>
+                            <td class="p-4 truncate max-w-[200px]">{{ o.product_details }}</td>
+                            <td class="p-4 font-bold text-green-600">{{ "{:,}".format(o.total_price) }}원</td>
+                            <td class="p-4"><span class="text-[10px] text-gray-300">{{ o.order_id }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
                 </table>
             </div>
-        {% elif active_tab == 'users' %}
-            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden text-xs">
-                <table class="w-full text-left">
-                    <thead class="bg-gray-50 border-b"><tr><th class="p-4">이름</th><th class="p-4">이메일</th><th class="p-4">권한</th><th class="p-4">관리</th></tr></thead>
-                    <tbody>{% for u in users %}<tr class="border-b"><td class="p-4 font-bold">{{ u.name }}</td><td class="p-4">{{ u.email }}</td><td class="p-4">{{ '관리자' if u.is_admin else '회원' }}</td><td class="p-4 flex gap-2"><a href="/admin/user/toggle/{{u.id}}" class="text-blue-500">전환</a><a href="/admin/user/delete/{{u.id}}" class="text-red-400">삭제</a></td></tr>{% endfor %}</tbody>
-                </table>
-            </div>
-        {% endif %}
+        </div>
     </div>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, products=products, orders=orders, users=users, active_tab=active_tab)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, products=products, orders=orders)
+
+@app.route('/admin/orders/excel')
+@login_required
+def admin_orders_excel():
+    if not current_user.is_admin: return redirect('/')
+    orders = Order.query.order_by(Order.created_at.desc()).all()
+    data = [{
+        "주문일시": o.created_at.strftime('%Y-%m-%d %H:%M'),
+        "주문번호": o.order_id,
+        "고객명": o.customer_name,
+        "연락처": o.customer_phone,
+        "주문내역": o.product_details,
+        "결제금액": o.total_price,
+        "상태": o.status
+    } for o in orders]
+    df = pd.DataFrame(data)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Orders')
+    output.seek(0)
+    return send_file(output, download_name=f"orders_{datetime.now().strftime('%Y%m%d')}.xlsx", as_attachment=True)
 
 @app.route('/admin/add', methods=['GET', 'POST'])
 @login_required
 def admin_product_add():
     if not current_user.is_admin: return redirect('/')
     if request.method == 'POST':
-        p = Product(name=request.form['name'], category=request.form['category'], tax_type=request.form['tax_type'], price=int(request.form['price']), spec=request.form['spec'], origin=request.form['origin'], farmer=request.form['farmer'], image_url=save_uploaded_file(request.files.get('main_image')) or "", detail_image_url=save_uploaded_file(request.files.get('detail_image')), stock=int(request.form['stock']), deadline=datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M') if request.form['deadline'] else None, is_active=True)
-        db.session.add(p); db.session.commit(); return redirect('/admin')
-    return render_template_string(HEADER_HTML + """
+        main_img = save_uploaded_file(request.files.get('main_image'))
+        detail_img = save_uploaded_file(request.files.get('detail_image'))
+        dl_str = request.form['deadline']
+        deadline_obj = datetime.strptime(dl_str, '%Y-%m-%dT%H:%M') if dl_str else None
+        p = Product(name=request.form['name'], category=request.form['category'], price=int(request.form['price']), spec=request.form['spec'], origin=request.form['origin'], farmer=request.form['farmer'], image_url=main_img or "https://placehold.co/400x400?text=이미지없음", detail_image_url=detail_img, stock=int(request.form['stock']), deadline=deadline_obj, is_active=True)
+        db.session.add(p); db.session.commit()
+        return redirect('/admin')
+    content = """
     <div class="max-w-xl mx-auto py-12 px-4">
-        <h2 class="text-2xl font-black mb-8 text-orange-700">상품 등록</h2>
+        <h2 class="text-2xl font-black mb-8 text-orange-700">시장가 당일배송 상품 등록</h2>
         <form method="POST" enctype="multipart/form-data" class="bg-white p-8 rounded-3xl shadow-sm border space-y-4 text-sm">
-            <div><label class="block mb-1 font-bold">카테고리</label><select name="category" class="w-full border p-3 rounded-xl"><option>농산물</option><option>공동구매</option><option>반찬</option></select></div>
-            <div><label class="block mb-1 font-bold">과세 구분</label><select name="tax_type" class="w-full border p-3 rounded-xl"><option value="과세">과세 (공산품/가공품)</option><option value="면세">면세 (미가공 식재료/농산물)</option></select></div>
-            <div><label class="block mb-1 font-bold">상품명</label><input name="name" class="w-full border p-3 rounded-xl" required></div>
-            <div class="grid grid-cols-2 gap-4"><div><label class="block mb-1 font-bold">가격</label><input name="price" type="number" class="w-full border p-3 rounded-xl" required></div><div><label class="block mb-1 font-bold">규격</label><input name="spec" class="w-full border p-3 rounded-xl"></div></div>
-            <div class="grid grid-cols-2 gap-4"><div><label class="block mb-1 font-bold">재고</label><input name="stock" type="number" class="w-full border p-3 rounded-xl" value="50"></div><div><label class="block mb-1 font-bold">마감시간</label><input name="deadline" type="datetime-local" class="w-full border p-3 rounded-xl"></div></div>
-            <div><label class="block mb-1 font-bold text-green-700">메인 사진</label><input type="file" name="main_image" class="w-full text-xs"></div>
-            <div><label class="block mb-1 font-bold text-blue-700">상세 사진</label><input type="file" name="detail_image" class="w-full text-xs"></div>
-            <button class="w-full bg-green-600 text-white py-4 rounded-2xl font-black text-lg">등록 완료</button>
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block mb-1 font-bold">카테고리</label><select name="category" class="w-full border p-3 rounded-xl"><option>과일</option><option>채소</option><option>쌀/잡곡</option><option>기타</option></select></div>
+                <div><label class="block mb-1 font-bold">상품명</label><input name="name" class="w-full border p-3 rounded-xl" required></div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block mb-1 font-bold">판매가격</label><input name="price" type="number" class="w-full border p-3 rounded-xl" required></div>
+                <div><label class="block mb-1 font-bold">규격</label><input name="spec" class="w-full border p-3 rounded-xl" placeholder="예: 3kg"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div><label class="block mb-1 font-bold">한정 수량</label><input name="stock" type="number" class="w-full border p-3 rounded-xl" value="10" required></div>
+                <div><label class="block mb-1 font-bold">마감 일시</label><input name="deadline" type="datetime-local" class="w-full border p-3 rounded-xl" required></div>
+            </div>
+            <div><label class="block mb-1 font-bold">산지/농가</label><input name="origin" placeholder="산지" class="w-full border p-3 rounded-xl mb-2"><input name="farmer" placeholder="농가명" class="w-full border p-3 rounded-xl"></div>
+            <div class="bg-green-50 p-4 rounded-xl border border-dashed border-green-200"><label class="block mb-1 font-bold text-green-700">메인 사진</label><input type="file" name="main_image" accept="image/*" class="w-full text-xs"></div>
+            <div class="bg-blue-50 p-4 rounded-xl border border-dashed border-blue-200"><label class="block mb-1 font-bold text-blue-700">상세 사진</label><input type="file" name="detail_image" accept="image/*" class="w-full text-xs"></div>
+            <button class="w-full bg-green-600 text-white py-4 rounded-2xl font-black text-lg shadow-lg">등록 완료</button>
         </form>
     </div>
-    """ + FOOTER_HTML)
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML)
 
 @app.route('/admin/delete/<int:pid>')
 @login_required
 def admin_delete(pid):
     if not current_user.is_admin: return redirect('/')
-    db.session.delete(Product.query.get(pid)); db.session.commit(); return redirect('/admin')
+    p = Product.query.get(pid); db.session.delete(p); db.session.commit()
+    return redirect('/admin')
 
-@app.route('/admin/user/toggle/<int:uid>')
-@login_required
-def admin_user_toggle(uid):
-    if not current_user.is_admin: return redirect('/')
-    u = User.query.get(uid); u.is_admin = not u.is_admin; db.session.commit(); return redirect('/admin?tab=users')
-
-@app.route('/admin/user/delete/<int:uid>')
-@login_required
-def admin_user_delete(uid):
-    if not current_user.is_admin or uid == current_user.id: return redirect('/')
-    db.session.delete(User.query.get(uid)); db.session.commit(); return redirect('/admin?tab=users')
-
-@app.route('/admin/orders/excel')
-@login_required
-def admin_orders_excel():
-    if not current_user.is_admin: return redirect('/')
-    data = [{"일시": o.created_at.strftime('%Y-%m-%d %H:%M'), "고객": o.customer_name, "연락처": o.customer_phone, "내역": o.product_details, "금액": o.total_price} for o in Order.query.all()]
-    df = pd.DataFrame(data); out = BytesIO()
-    with pd.ExcelWriter(out, engine='openpyxl') as w: df.to_excel(w, index=False)
-    out.seek(0); return send_file(out, download_name=f"orders_{datetime.now().strftime('%Y%m%d')}.xlsx", as_attachment=True)
-
-# --- 초기화 로직 ---
 def init_db():
     with app.app_context():
         db.create_all()
-        cols = [("user", "is_admin", "BOOLEAN DEFAULT FALSE"), ("product", "stock", "INTEGER DEFAULT 10"), ("product", "deadline", "DATETIME"), ("product", "detail_image_url", "VARCHAR(500)"), ("product", "tax_type", "VARCHAR(20) DEFAULT '과세'"), ("order", "customer_phone", "VARCHAR(20)"), ("order", "order_id", "VARCHAR(100)"), ("order", "payment_key", "VARCHAR(200)")]
+        cols = [
+            ("product", "stock", "INTEGER DEFAULT 10"), 
+            ("product", "deadline", "DATETIME"),
+            ("product", "detail_image_url", "VARCHAR(500)"),
+            ("order", "customer_phone", "VARCHAR(20)"),
+            ("order", "order_id", "VARCHAR(100)"),
+            ("order", "payment_key", "VARCHAR(200)")
+        ]
         for t, c, ct in cols:
-            try: db.session.execute(text(f"ALTER TABLE {t} ADD COLUMN {c} {ct}")); db.session.commit()
+            try:
+                db.session.execute(text(f"ALTER TABLE {t} ADD COLUMN {c} {ct}"))
+                db.session.commit()
             except: db.session.rollback() 
         if not User.query.filter_by(email="admin@uncle.com").first():
             db.session.add(User(email="admin@uncle.com", password=generate_password_hash("1234"), name="바구니삼촌", is_admin=True))
         db.session.commit()
 
 if __name__ == "__main__":
-    init_db(); app.run(host="0.0.0.0", port=5000, debug=True)
+    init_db()
+    app.run(host="0.0.0.0", port=5000, debug=True)
