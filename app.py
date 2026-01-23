@@ -3,6 +3,7 @@ import requests
 import base64
 from datetime import datetime, timedelta
 from io import BytesIO
+import re
 
 import pandas as pd
 from flask import Flask, render_template_string, request, redirect, url_for, session, send_file, flash, jsonify
@@ -72,7 +73,7 @@ class Cart(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     product_id = db.Column(db.Integer)
     product_name = db.Column(db.String(100))
-    product_category = db.Column(db.String(50)) # 배송비 계산을 위해 추가
+    product_category = db.Column(db.String(50)) 
     price = db.Column(db.Integer)
     quantity = db.Column(db.Integer, default=1)
     tax_type = db.Column(db.String(20), default='과세')
@@ -85,7 +86,7 @@ class Order(db.Model):
     customer_email = db.Column(db.String(120))
     product_details = db.Column(db.Text) 
     total_price = db.Column(db.Integer)
-    delivery_fee = db.Column(db.Integer, default=0) # 배송비 필드 추가
+    delivery_fee = db.Column(db.Integer, default=0) 
     tax_free_amount = db.Column(db.Integer, default=0)
     status = db.Column(db.String(20), default='결제완료') 
     order_id = db.Column(db.String(100)) 
@@ -176,17 +177,6 @@ HEADER_HTML = """
             </div>
         </div>
     </nav>
-    
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        <div class="max-w-7xl mx-auto px-4 mt-4">
-          {% for message in messages %}
-            <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative text-sm font-bold" role="alert">{{ message }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
-
     <main class="min-h-screen">
 """
 
@@ -417,7 +407,6 @@ def register():
         if User.query.filter_by(email=email).first(): flash("이미 가입된 이메일입니다."); return redirect('/register')
         db.session.add(User(email=email, password=generate_password_hash(pw), name=name, phone=phone, address=addr, address_detail=addr_d, entrance_pw=ent_pw, request_memo=memo))
         db.session.commit()
-        # 가입 축하 메시지 요청사항 반영
         flash(f'가입을 축하드립니다. "{name}" 님 로그인 하시면 됩니다.')
         return redirect('/login')
     return render_template_string(HEADER_HTML + """<div class="max-w-md mx-auto mt-10 p-8 bg-white rounded-[2rem] shadow-xl border"><h2 class="text-xl font-black mb-6 text-green-600">회원가입</h2><form method="POST" class="space-y-3 text-xs font-bold"><input name="name" placeholder="성함" class="w-full p-4 bg-gray-50 rounded-xl" required><input name="email" type="email" placeholder="이메일(ID)" class="w-full p-4 bg-gray-50 rounded-xl" required><input name="password" type="password" placeholder="비밀번호" class="w-full p-4 bg-gray-50 rounded-xl" required><input name="phone" placeholder="연락처 (010-0000-0000)" class="w-full p-4 bg-gray-50 rounded-xl" required><div class="flex gap-2"><input id="address" name="address" placeholder="주소" class="flex-1 p-4 bg-gray-100 rounded-xl" readonly required><button type="button" onclick="execDaumPostcode()" class="bg-gray-800 text-white px-4 rounded-xl font-black">검색</button></div><input id="address_detail" name="address_detail" placeholder="상세주소" class="w-full p-4 bg-gray-50 rounded-xl" required><input name="entrance_pw" placeholder="공동현관 비번 (필수)" class="w-full p-4 bg-red-50 rounded-xl" required><input name="request_memo" placeholder="배송 요청사항" class="w-full p-4 bg-white border rounded-xl"><button class="w-full bg-green-600 text-white py-5 rounded-xl font-black text-lg mt-4 shadow-lg">가입 완료</button></form></div>""" + FOOTER_HTML)
@@ -429,7 +418,6 @@ def logout(): logout_user(); return redirect('/')
 @login_required
 def mypage():
     orders = Order.query.filter_by(user_id=current_user.id).order_by(Order.created_at.desc()).all()
-    # 고객센터 정보 추가
     content = """
     <div class="max-w-4xl mx-auto py-10 px-4">
         <h2 class="text-2xl font-black mb-8 border-l-4 border-green-600 pl-4">내 정보</h2>
@@ -454,7 +442,6 @@ def mypage():
             {% endif %}
         </div>
 
-        <!-- 고객센터 문의 섹션 추가 -->
         <div class="bg-blue-50 p-8 rounded-[2rem] border border-blue-100">
             <h3 class="font-black text-gray-800 mb-4 flex items-center gap-2">👨‍🏫 도움이 필요하신가요?</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -487,7 +474,6 @@ def add_cart(pid):
 @login_required
 def cart():
     items = Cart.query.filter_by(user_id=current_user.id).all()
-    # 카테고리별 배송비 계산 (카테고리당 1900원)
     unique_cats = set([i.product_category for i in items])
     delivery_fee = len(unique_cats) * 1900
     subtotal = sum(i.price * i.quantity for i in items)
@@ -551,7 +537,6 @@ def payment_success():
     res = requests.post(url, json={"paymentKey": pk, "amount": amt, "orderId": oid}, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
     if res.status_code == 200:
         items = Cart.query.filter_by(user_id=current_user.id).all()
-        # 관리자 요청사항: 카테고리별 상품 분리하여 문자열 생성
         cat_groups = {}
         for i in items:
             if i.product_category not in cat_groups: cat_groups[i.product_category] = []
@@ -571,6 +556,9 @@ def payment_success():
         return render_template_string(HEADER_HTML + """<div class="max-w-md mx-auto py-32 text-center"><h2 class="text-3xl font-black mb-6">주문 완료!</h2><p class="text-gray-400 mb-10 font-bold">삼촌이 출발합니다!</p><a href="/" class="bg-gray-800 text-white px-10 py-4 rounded-xl font-bold">홈으로</a></div>""" + FOOTER_HTML)
     return redirect('/')
 
+@app.route('/payment/fail')
+def payment_fail(): return "결제 실패!"
+
 # --- 관리자 기능 ---
 @app.route('/admin')
 @login_required
@@ -580,8 +568,50 @@ def admin_dashboard():
     if not is_master and not my_categories: return redirect('/')
 
     tab, sel_cat = request.args.get('tab', 'products'), request.args.get('category', '전체')
-    users, categories, orders = User.query.all(), Category.query.all(), Order.query.order_by(Order.created_at.desc()).all()
     
+    # 주문 통계용 날짜 필터링
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    # 기본값: 오늘 00:00 ~ 내일 00:00
+    if not start_date_str:
+        start_date_str = datetime.now().strftime('%Y-%m-%dT00:00')
+    if not end_date_str:
+        end_date_str = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%dT00:00')
+
+    start_dt = datetime.strptime(start_date_str, '%Y-%m-%dT%H:%M')
+    end_dt = datetime.strptime(end_date_str, '%Y-%m-%dT%H:%M')
+
+    users, categories = User.query.all(), Category.query.all()
+    
+    # 전체 주문 목록
+    all_orders = Order.query.order_by(Order.created_at.desc()).all()
+    
+    # 필터링된 주문 목록 (통계용)
+    filtered_orders = Order.query.filter(Order.created_at >= start_dt, Order.created_at <= end_dt).all()
+    
+    # --- 카테고리별/품목별 집계 로직 (날짜 필터링 적용) ---
+    summary = {} # { category_name: { product_name: {qty: 0, price_sum: 0} } }
+    
+    # 주문 문자열 파싱 (형식: [Cat] Name(Qty) | ...)
+    for o in filtered_orders:
+        parts = o.product_details.split(' | ')
+        for p in parts:
+            match = re.match(r'\[(.*?)\] (.*?)\((\d+)\)', p)
+            if match:
+                cat_n, prod_n, qty = match.groups()
+                qty = int(qty)
+                # 마스터가 아니면 내 카테고리만 집계
+                if not is_master and cat_n not in my_categories: continue
+                
+                if cat_n not in summary: summary[cat_n] = {}
+                if prod_n not in summary[cat_n]: summary[cat_n][prod_n] = {'qty': 0, 'price_sum': 0}
+                
+                summary[cat_n][prod_n]['qty'] += qty
+                # DB에서 실시간 가격 가져오기 (없으면 0)
+                db_p = Product.query.filter_by(name=prod_n).first()
+                if db_p: summary[cat_n][prod_n]['price_sum'] += (db_p.price * qty)
+
     if not is_master:
         if sel_cat == '전체': products = Product.query.filter(Product.category.in_(my_categories)).all()
         else: products = Product.query.filter_by(category=sel_cat).all() if sel_cat in my_categories else []
@@ -594,9 +624,10 @@ def admin_dashboard():
         <div class="flex border-b mb-8 bg-white rounded-t-xl overflow-x-auto no-scrollbar font-black text-[11px]">
             <a href="/admin?tab=products" class="px-6 py-4 {% if tab == 'products' %}border-b-4 border-orange-500 text-orange-600{% endif %}">상품관리</a>
             {% if current_user.is_admin %}<a href="/admin?tab=categories" class="px-6 py-4 {% if tab == 'categories' %}border-b-4 border-orange-500 text-orange-600{% endif %}">카테고리/권한</a>{% endif %}
-            <a href="/admin?tab=orders" class="px-6 py-4 {% if tab == 'orders' %}border-b-4 border-orange-500 text-orange-600{% endif %}">주문관리(상세)</a>
+            <a href="/admin?tab=orders" class="px-6 py-4 {% if tab == 'orders' %}border-b-4 border-orange-500 text-orange-600{% endif %}">주문관리(통계)</a>
             {% if current_user.is_admin %}<a href="/admin?tab=users" class="px-6 py-4 {% if tab == 'users' %}border-b-4 border-orange-500 text-orange-600{% endif %}">회원DB(마스터 전용)</a>{% endif %}
         </div>
+        
         {% if tab == 'products' %}
             <div class="flex justify-between items-center mb-6">
                 <form action="/admin" class="flex gap-2"><input type="hidden" name="tab" value="products"><select name="category" onchange="this.form.submit()" class="border p-2 rounded-xl text-[11px] font-black bg-white"><option value="전체">전체보기</option>{% for c in categories %}{% if current_user.is_admin or c.name in my_categories %}<option value="{{c.name}}" {% if sel_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endif %}{% endfor %}</select></form>
@@ -607,11 +638,63 @@ def admin_dashboard():
                 <tbody>{% for p in products %}<tr><td class="p-4 font-black text-gray-700">{{ p.name }}<br><span class="text-orange-500">[{{p.tax_type}}] {{ p.badge }}</span></td><td class="p-4 text-center font-bold text-blue-600">{{ p.stock }}개</td><td class="p-4 font-bold">{{ "{:,}".format(p.price) }}원</td><td class="p-4 text-center space-x-2"><a href="/admin/edit/{{p.id}}" class="text-blue-500 font-bold">수정</a><a href="/admin/delete/{{p.id}}" class="text-red-300 font-bold">삭제</a></td></tr>{% endfor %}</tbody></table>
             </div>
         {% elif tab == 'orders' %}
-            <div class="flex justify-end mb-6"><a href="/admin/orders/excel" class="bg-orange-600 text-white px-5 py-3 rounded-xl font-black text-[10px]">엑셀 다운로드</a></div>
+            <!-- 날짜/시간별 주문 집계 검색 섹션 -->
+            <div class="bg-white p-6 rounded-3xl border border-green-100 mb-8 shadow-sm">
+                <h3 class="font-black text-green-700 mb-4 flex items-center gap-2"><i class="fas fa-calculator"></i> 장보기용 품목 집계 (날짜/시간 지정)</h3>
+                <form action="/admin" method="GET" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <input type="hidden" name="tab" value="orders">
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-400 ml-1">시작 시간</label>
+                        <input type="datetime-local" name="start_date" value="{{ start_date_str }}" class="w-full border p-3 rounded-xl text-xs font-bold">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-400 ml-1">종료 시간</label>
+                        <input type="datetime-local" name="end_date" value="{{ end_date_str }}" class="w-full border p-3 rounded-xl text-xs font-bold">
+                    </div>
+                    <div class="flex items-end">
+                        <button class="w-full bg-green-600 text-white py-3 rounded-xl font-black text-xs shadow-sm hover:bg-green-700 transition">검색 및 집계하기</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 집계 결과 테이블 -->
+            {% if summary %}
+            <div class="space-y-6 mb-12">
+                {% for cat_n, items in summary.items() %}
+                <div class="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="bg-gray-50 px-6 py-3 border-b flex justify-between items-center">
+                        <span class="font-black text-sm text-gray-800"><i class="fas fa-tag text-orange-400 mr-2"></i> {{ cat_n }} 리스트</span>
+                        <span class="text-[10px] text-gray-400">해당 기간 내 총 {{ items|length }}종 품목</span>
+                    </div>
+                    <table class="w-full text-left text-[11px]">
+                        <thead class="bg-white border-b text-gray-400 font-bold uppercase tracking-wider">
+                            <tr><th class="p-4">품명</th><th class="p-4 text-center">합계수량</th><th class="p-4 text-right">합계금액</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for p_n, data in items.items() %}
+                            <tr class="border-b hover:bg-orange-50/30">
+                                <td class="p-4 font-black text-gray-700">{{ p_n }}</td>
+                                <td class="p-4 text-center font-black text-blue-600 text-sm">{{ data.qty }}개</td>
+                                <td class="p-4 text-right font-black text-gray-900">{{ "{:,}".format(data.price_sum) }}원</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="bg-white p-10 rounded-3xl border border-dashed text-center text-gray-400 font-bold text-sm mb-12">선택한 기간 내에 주문 내역이 없습니다.</div>
+            {% endif %}
+
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="font-black text-gray-800">최근 전체 주문 내역 (목록)</h3>
+                <a href="/admin/orders/excel" class="bg-orange-600 text-white px-5 py-3 rounded-xl font-black text-[10px]">전체 엑셀 다운로드</a>
+            </div>
             <div class="bg-white rounded-2xl shadow-sm border overflow-x-auto text-[10px]">
                 <table class="w-full text-left min-w-[1100px]">
                     <thead class="bg-gray-50 border-b text-gray-400"><tr><th class="p-4">일시/주문번호</th><th class="p-4">고객(ID)/연락처</th><th class="p-4">배송주소/요청사항</th><th class="p-4">상품상세 (카테고리별 분리)</th><th class="p-4 text-right">금액(배송비)</th></tr></thead>
-                    <tbody>{% for o in orders %}<tr class="border-b"><td class="p-4"><b>{{ o.created_at.strftime('%m/%d %H:%M') }}</b><br><span class="text-gray-300 text-[9px]">{{ o.order_id }}</span></td><td class="p-4"><b>{{ o.customer_name }}</b><br>{{ o.customer_email }}<br>{{ o.customer_phone }}</td><td class="p-4 leading-relaxed"><span class="text-blue-600 font-bold">{{ o.delivery_address }}</span><br><span class="text-orange-500 font-bold">📝{{ o.request_memo }}</span></td><td class="p-4 font-bold text-gray-600">{{ o.product_details }}</td><td class="p-4 text-right font-black"><b>{{ "{:,}".format(o.total_price) }}원</b><br><span class="text-[9px] text-gray-300">(배송비:{{ "{:,}".format(o.delivery_fee) }})</span></td></tr>{% endfor %}</tbody>
+                    <tbody>{% for o in all_orders %}<tr class="border-b"><td class="p-4"><b>{{ o.created_at.strftime('%m/%d %H:%M') }}</b><br><span class="text-gray-300 text-[9px]">{{ o.order_id }}</span></td><td class="p-4"><b>{{ o.customer_name }}</b><br>{{ o.customer_email }}<br>{{ o.customer_phone }}</td><td class="p-4 leading-relaxed"><span class="text-blue-600 font-bold">{{ o.delivery_address }}</span><br><span class="text-orange-500 font-bold">📝{{ o.request_memo }}</span></td><td class="p-4 font-bold text-gray-600">{{ o.product_details }}</td><td class="p-4 text-right font-black"><b>{{ "{:,}".format(o.total_price) }}원</b><br><span class="text-[9px] text-gray-300">(배송비:{{ "{:,}".format(o.delivery_fee) }})</span></td></tr>{% endfor %}</tbody>
                 </table>
             </div>
         {% elif tab == 'users' and current_user.is_admin %}
@@ -626,7 +709,7 @@ def admin_dashboard():
         {% endif %}
     </div>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, products=products, orders=orders, users=users, categories=categories, tab=tab, sel_cat=sel_cat, my_categories=my_categories)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, products=products, all_orders=all_orders, filtered_orders=filtered_orders, summary=summary, users=users, categories=categories, tab=tab, sel_cat=sel_cat, my_categories=my_categories, start_date_str=start_date_str, end_date_str=end_date_str)
 
 @app.route('/admin/add', methods=['GET', 'POST'])
 @login_required
@@ -696,7 +779,6 @@ def admin_orders_excel():
 def init_db():
     with app.app_context():
         db.create_all()
-        # 컬럼 자동 보수 및 배송비 필드 추가
         cols = [
             ("user", "request_memo", "VARCHAR(500)"), 
             ("category", "tax_type", "VARCHAR(20) DEFAULT '과세'"), 
@@ -716,10 +798,6 @@ def init_db():
             db.session.add(User(email="admin@uncle.com", password=generate_password_hash("1234"), name="바구니삼촌", is_admin=True))
         if not Category.query.first():
             db.session.add(Category(name="농산물", tax_type="면세")); db.session.add(Category(name="공동구매", tax_type="과세")); db.session.add(Category(name="반찬", tax_type="과세"))
-        if not Product.query.first():
-            items = [("농산물", "산지직송 꿀부사 사과", 12000, "2kg", "청송", "삼촌추천", "면세", 20), ("농산물", "제주 당도타이벡 감귤", 8500, "3kg", "제주", "오늘마감", "면세", 15), ("공동구매", "대용량 베이킹소다 세제", 15900, "4L x 2", "국산", "강력추천", "과세", 50), ("반찬", "고소한 견과류 멸치볶음", 6500, "150g", "국산", "삼촌추천", "과세", 10)]
-            for cat, name, price, spec, origin, badge, tax, stock in items:
-                db.session.add(Product(category=cat, name=name, price=price, spec=spec, origin=origin, badge=badge, tax_type=tax, farmer="바구니농가", stock=stock, deadline=datetime.now()+timedelta(hours=12), is_active=True))
         db.session.commit()
 
 if __name__ == "__main__":
