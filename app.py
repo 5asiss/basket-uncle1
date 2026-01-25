@@ -178,8 +178,8 @@ HEADER_HTML = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>바구니삼촌 - 배송 서비스의 혁신</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://js.tosspayments.com/v1/payment"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -351,7 +351,6 @@ FOOTER_HTML = """
                 <div class="text-left md:text-right space-y-4">
                     <p class="font-bold text-gray-200 text-lg mb-4 font-black">Customer Center</p>
                     <div class="flex flex-col md:items-end gap-3 text-left md:text-right">
-                        <!-- 앱 바로가기 버튼 (푸터) -->
                         <button onclick="alert('브라우저 설정 메뉴에서 [홈 화면에 추가]를 눌러주세요!')" class="bg-green-600 text-white px-6 py-3 rounded-2xl font-black text-xs shadow-xl transition hover:scale-105 active:scale-95 flex items-center gap-2 w-fit">
                             <i class="fas fa-mobile-alt"></i> 📱 홈화면에 바로가기 추가
                         </button>
@@ -546,7 +545,7 @@ def index():
                 단순 판매가 아닌, 유통 구조를 혁신하는 <span class="text-white underline decoration-green-500 decoration-4 underline-offset-8">배송 서비스</span> 입니다.
             </p>
             <div class="flex flex-col md:flex-row justify-center md:justify-start items-center gap-6">
-                <a href="#products" class="bg-green-600 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95 text-base md:text-lg text-center">쇼핑하러 가기</a>
+                <a href="#products" class="bg-green-600 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95 text-center">쇼핑하러 가기</a>
                 <button onclick="alert('브라우저 메뉴의 [홈 화면에 추가]를 선택해주세요!')" class="bg-white/10 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black text-base md:text-lg transition hover:bg-white/20 border border-white/20">📱 바로가기 추가</button>
                 <a href="/about" class="text-white/60 hover:text-white font-bold border-b border-white/20 pb-1 transition text-xs md:text-base">바구니삼촌이란? <i class="fas fa-arrow-right ml-2"></i></a>
             </div>
@@ -556,14 +555,14 @@ def index():
 
     <div id="products" class="max-w-7xl mx-auto px-4 py-16 text-left">
         {% if query %}
-            <p class="mb-12 font-black text-gray-400 text-lg md:text-xl border-b border-gray-100 pb-6 text-left">
+            <p class="mb-8 font-black text-gray-400 text-lg md:text-xl border-b border-gray-100 pb-4 text-left">
                 <span class="text-green-600">"{{ query }}"</span>에 대한 상품 검색 결과입니다.
             </p>
         {% endif %}
 
         {% if latest_reviews and not query %}
-        <section class="mb-24 text-left">
-            <div class="mb-12 flex justify-between items-end border-b border-gray-100 pb-6 text-left">
+        <section class="mb-12 text-left">
+            <div class="mb-6 flex justify-between items-end border-b border-gray-100 pb-4 text-left">
                 <h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter">
                     <span class="w-1.5 h-8 bg-orange-400 rounded-full"></span> 📸 생생한 구매 후기
                 </h2>
@@ -583,8 +582,8 @@ def index():
         {% endif %}
 
         {% if random_latest and not query %}
-        <section class="mb-24 text-left">
-            <div class="mb-12 flex justify-between items-end border-b border-gray-100 pb-6 text-left">
+        <section class="mb-12 text-left">
+            <div class="mb-6 flex justify-between items-end border-b border-gray-100 pb-4 text-left">
                 <h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter">
                     <span class="w-1.5 h-8 bg-blue-500 rounded-full"></span> ✨ 최신 상품
                 </h2>
@@ -614,8 +613,8 @@ def index():
         {% endif %}
 
         {% if closing_today and not query %}
-        <section class="mb-24 text-left">
-            <div class="mb-12 flex justify-between items-end border-b border-gray-100 pb-6 text-left">
+        <section class="mb-12 text-left">
+            <div class="mb-6 flex justify-between items-end border-b border-gray-100 pb-4 text-left">
                 <h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter">
                     <span class="w-1.5 h-8 bg-red-500 rounded-full"></span> 🔥 오늘 마감 임박!
                 </h2>
@@ -646,8 +645,8 @@ def index():
         {% endif %}
         
         {% for cat, products in grouped_products.items() %}
-        <section class="mb-24 text-left">
-            <div class="mb-12 flex justify-between items-end border-b border-gray-100 pb-6 text-left">
+        <section class="mb-12 text-left">
+            <div class="mb-6 flex justify-between items-end border-b border-gray-100 pb-4 text-left">
                 <div class="text-left">
                     <h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter text-left">
                         <span class="w-1.5 h-8 bg-green-500 rounded-full"></span> {{ cat.name }} 리스트
@@ -844,7 +843,6 @@ def product_detail(pid):
 
     content = """
     <div class="max-w-4xl mx-auto px-4 md:px-6 py-16 md:py-24 font-black text-left">
-        <!-- 상단 상품 정보 -->
         <div class="grid md:grid-cols-2 gap-10 md:gap-16 mb-24 text-left">
             <div class="relative text-left">
                 <img src="{{ p.image_url }}" class="w-full aspect-square object-contain border border-gray-100 rounded-[3rem] bg-white p-8 md:p-12 shadow-sm text-left">
@@ -880,7 +878,6 @@ def product_detail(pid):
             </div>
         </div>
         
-        <!-- 상품 상세 내용 -->
         <div class="border-t border-gray-100 pt-20 text-left">
             <h3 class="font-black text-2xl md:text-3xl mb-16 border-l-8 border-green-600 pl-6 text-gray-800 text-left">상세 정보</h3>
             <div class="flex flex-col gap-10 bg-white p-4 md:p-10 rounded-3xl md:rounded-[4rem] border border-gray-50 shadow-sm text-left">
@@ -894,7 +891,6 @@ def product_detail(pid):
                 </div>
             </div>
 
-            <!-- 사진 리뷰 영역 -->
             {% if product_reviews %}
             <div class="mt-24 bg-white p-8 md:p-16 rounded-[3rem] md:rounded-[4rem] border border-gray-100 shadow-sm text-left">
                 <h3 class="text-2xl md:text-4xl font-black mb-12 flex items-center gap-4 text-left">
@@ -918,7 +914,6 @@ def product_detail(pid):
             </div>
             {% endif %}
             
-            <!-- 배송 및 환불 상세 안내 (복구 완료) -->
             <div class="mt-20 p-8 md:p-16 bg-gray-50 rounded-[2.5rem] md:rounded-[4rem] text-[10px] md:text-sm text-gray-400 leading-relaxed border border-gray-100 font-black text-left">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-20 text-left">
                     <div class="text-left">
@@ -948,7 +943,6 @@ def product_detail(pid):
             </div>
         </div>
 
-        <!-- 연관 추천 상품 (가로 스크롤) -->
         {% if keyword_recommends %}
         <div class="mt-24 border-t border-gray-100 pt-20 text-left">
             <h3 class="font-black text-2xl md:text-3xl mb-12 flex items-center gap-4 tracking-tighter text-left text-left">
@@ -968,7 +962,6 @@ def product_detail(pid):
         </div>
         {% endif %}
 
-        <!-- 최신 상품 (가로 스크롤) -->
         <div class="mt-16 border-t border-gray-100 pt-20 text-left text-left">
             <h3 class="font-black text-2xl md:text-3xl mb-12 flex items-center gap-4 tracking-tighter text-left text-left">
                 <span class="w-2 h-10 bg-blue-500 rounded-full text-left"></span> ✨ 최근 등록 상품
@@ -986,7 +979,6 @@ def product_detail(pid):
             </div>
         </div>
 
-        <!-- 하단 탐색 영역 -->
         <div class="mt-24 border-t border-gray-100 pt-20 space-y-10 text-left">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-left text-left">
                 <a href="/category/최신상품" class="bg-gray-800 text-white py-6 md:py-8 rounded-[2rem] text-center text-sm md:text-base font-black shadow-xl hover:bg-gray-700 transition flex items-center justify-center gap-3">
@@ -1008,7 +1000,6 @@ def product_detail(pid):
             </div>
         </div>
 
-        <!-- 사업자 정보 요약 -->
         {% if cat_info and cat_info.biz_name %}
         <div class="mt-24 border-t border-gray-100 pt-20 text-left">
             <div class="bg-gray-50 p-10 md:p-20 rounded-[3.5rem] md:rounded-[5rem] border border-gray-100 shadow-sm text-left">
@@ -1159,7 +1150,7 @@ def mypage():
     <div class="max-w-4xl mx-auto py-16 md:py-24 px-4 font-black text-left">
         <h2 class="text-3xl md:text-5xl font-black mb-16 border-l-8 border-green-600 pl-8 tracking-tighter uppercase italic text-left">My Center</h2>
         
-        <div class="bg-white p-10 md:p-16 rounded-[3rem] md:rounded-[5rem] shadow-xl border border-gray-50 mb-20 relative overflow-hidden text-left text-left">
+        <div class="bg-white p-10 md:p-16 rounded-[3rem] md:rounded-[4rem] shadow-xl border border-gray-50 mb-20 relative overflow-hidden text-left text-left">
             <div class="relative z-10 text-left">
                 <p class="text-2xl md:text-4xl font-black mb-3 text-gray-800 text-left">{{ current_user.name }} 고객님</p>
                 <p class="text-gray-400 font-bold mb-12 text-sm md:text-lg text-left">{{ current_user.email }}</p>
@@ -1202,7 +1193,6 @@ def mypage():
         </div>
     </div>
 
-    <!-- 리뷰 작성용 팝업 모달 -->
     <div id="review-modal" class="hidden fixed inset-0 bg-black/70 z-[3000] flex items-center justify-center p-6 text-left">
         <div class="bg-white w-full max-w-md rounded-[3rem] overflow-hidden shadow-2xl text-left text-left">
             <div class="bg-green-600 p-10 text-white text-left text-left">
