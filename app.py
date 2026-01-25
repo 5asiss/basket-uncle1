@@ -347,6 +347,10 @@ FOOTER_HTML = """
             'agency': {
                 'title': '구매대행 안내',
                 'content': '바구니삼촌은 배송 전문 서비스로, 고객님의 요청에 따라 상품을 대신 구매하고 배송해 드립니다.'
+            },
+            'e_commerce': {
+                'title': '전자상거래 이용자 유의사항',
+                'content': '본 서비스는 통신판매중개업이 아닌 구매대행/배송 서비스입니다. 이용자는 전자상거래법에 따른 청약철회 권리를 행사할 수 있으나, 구매대행의 특성상 단순 변심에 의한 반품 시 현지 배송비 및 대행 비용이 발생할 수 있음을 확인합니다.'
             }
         };
 
@@ -756,12 +760,18 @@ def product_detail(pid):
     detail_images = p.detail_image_url.split(',') if p.detail_image_url else []
     cat_info = Category.query.filter_by(name=p.category).first()
     
+    # [특수] 최신 상품 5개 랜덤 노출 로직 추가
+    latest_all = Product.query.filter(Product.is_active == True, Product.id != pid).order_by(Product.id.desc()).limit(20).all()
+    random_recommends = random.sample(latest_all, min(len(latest_all), 5)) if latest_all else []
+
     content = """
     <div class="max-w-4xl mx-auto px-4 py-16 font-black">
         <div class="grid md:grid-cols-2 gap-8 md:gap-10 mb-20">
             <img src="{{ p.image_url }}" class="w-full aspect-square object-contain border rounded-[2rem] md:rounded-[3rem] bg-white p-4 md:p-8">
             <div class="flex flex-col justify-center">
-                <span class="bg-green-50 text-green-600 px-4 py-1 rounded-full text-[10px] md:text-[11px] w-fit mb-4">{{ p.category }}</span>
+                <div class="flex gap-2 mb-4">
+                    <span class="bg-green-50 text-green-600 px-4 py-1 rounded-full text-[10px] md:text-[11px] w-fit">{{ p.category }}</span>
+                </div>
                 <h2 class="text-2xl md:text-5xl text-gray-800 mb-4 leading-tight tracking-tighter">{{ p.name }}</h2>
                 <p class="text-green-600 text-base md:text-lg mb-4 font-bold">{{ p.description or '' }}</p>
                 <div class="space-y-2 mb-8 text-[10px] md:text-xs text-gray-400">
@@ -770,10 +780,16 @@ def product_detail(pid):
                 </div>
                 <div class="bg-gray-50 p-6 md:p-8 rounded-[1.5rem] md:rounded-[2.5rem] mb-10 border border-gray-100 text-3xl md:text-6xl font-black text-green-600">{{ "{:,}".format(p.price) }}원</div>
                 {% if p.stock > 0 and not is_expired %}
-                <button onclick="addToCart('{{p.id}}')" class="w-full bg-green-600 text-white py-5 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-lg md:text-xl shadow-2xl active:scale-95 transition-transform">장바구니 담기</button>
+                <button onclick="addToCart('{{p.id}}')" class="w-full bg-green-600 text-white py-5 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-lg md:text-xl shadow-2xl active:scale-95 transition-transform mb-4">장바구니 담기</button>
                 {% else %}
-                <button class="w-full bg-gray-300 text-white py-5 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-lg md:text-xl cursor-not-allowed italic">대행마감</button>
+                <button class="w-full bg-gray-300 text-white py-5 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-lg md:text-xl cursor-not-allowed italic mb-4">대행마감</button>
                 {% endif %}
+                
+                <!-- [수정] 전체보기 버튼 추가 -->
+                <div class="grid grid-cols-2 gap-3">
+                    <a href="/category/{{ p.category }}" class="bg-white border-2 border-green-600 text-green-600 py-3 rounded-xl text-center text-xs font-black hover:bg-green-50 transition">이 판매자 상품 전체보기</a>
+                    <a href="/category/최신상품" class="bg-gray-800 text-white py-3 rounded-xl text-center text-xs font-black hover:bg-gray-700 transition">최신 대행 상품 전체보기</a>
+                </div>
             </div>
         </div>
         
@@ -788,19 +804,31 @@ def product_detail(pid):
                     <div>
                         <h4 class="text-gray-700 mb-4 border-b pb-1 font-black text-[11px] uppercase tracking-widest">배송정보</h4>
                         <p class="mb-1"><span class="inline-block w-16 md:w-20 font-black">배송방법</span>신선/냉장/냉동</p>
-                        <p class="mb-1"><span class="inline-block w-16 md:w-20 font-black">배송비</span>구매금액별 상이</p>
+                        <p class="mb-1"><span class="inline-block w-16 md:w-20 font-black text-orange-500">배송비</span>카테고리별 1,900원(5만원 초과시 1,900원 추가)</p>
                         <p class="mb-1"><span class="inline-block w-16 md:w-20 font-black">묶음배송</span>가능</p>
-                        <p><span class="inline-block w-16 md:w-20 font-black">배송기간</span>송도 전 지역 상이 (결제 전 문구 확인 필수)</p>
                     </div>
                     <div>
                         <h4 class="text-gray-700 mb-4 border-b pb-1 font-black text-[11px] uppercase tracking-widest">교환/반품안내</h4>
                         <p class="mb-1"><span class="inline-block w-16 md:w-20 font-black">비용</span>상품에 따라 다름</p>
                         <p class="mb-4"><span class="inline-block w-16 md:w-20 font-black">방법</span>전화 문의 후 상태 설정</p>
-                        <div class="mt-4 border-t pt-4">
-                            <p class="text-gray-700 font-black mb-2 text-[10px]">제한사항: 가치 훼손 시 불가능</p>
-                        </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- [신규] 최신 상품 5개 랜덤 노출 -->
+        <div class="mt-20 border-t pt-16">
+            <h3 class="font-black text-xl md:text-2xl mb-10 flex items-center gap-3 tracking-tighter">✨ 이런 대행 상품은 어떠세요?</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                {% for rp in random_recommends %}
+                <a href="/product/{{rp.id}}" class="group">
+                    <div class="bg-white rounded-2xl border border-gray-100 p-2 overflow-hidden shadow-sm transition group-hover:shadow-md">
+                        <img src="{{ rp.image_url }}" class="w-full aspect-square object-contain mb-3 rounded-xl bg-gray-50">
+                        <p class="text-[10px] md:text-[11px] font-black text-gray-800 truncate">{{ rp.name }}</p>
+                        <p class="text-[10px] md:text-[12px] font-black text-green-600 mt-1">{{ "{:,}".format(rp.price) }}원</p>
+                    </div>
+                </a>
+                {% endfor %}
             </div>
         </div>
 
@@ -836,7 +864,7 @@ def product_detail(pid):
         </div>
         {% endif %}
     </div>"""
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, p=p, is_expired=is_expired, detail_images=detail_images, cat_info=cat_info)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, p=p, is_expired=is_expired, detail_images=detail_images, cat_info=cat_info, random_recommends=random_recommends)
 
 @app.route('/category/seller/<int:cid>')
 def seller_info_page(cid):
@@ -891,6 +919,11 @@ def register():
     if request.method == 'POST':
         name, email, pw, phone = request.form['name'], request.form['email'], request.form['password'], request.form['phone']
         addr, addr_d, ent_pw, memo = request.form['address'], request.form['address_detail'], request.form['entrance_pw'], request.form['request_memo']
+        
+        # [수정] 필수 동의 체크 확인
+        if not request.form.get('consent_e_commerce'):
+            flash("전자상거래 이용 약관에 동의해야 합니다."); return redirect('/register')
+
         if User.query.filter_by(email=email).first(): flash("이미 존재하는 계정입니다."); return redirect('/register')
         new_user = User(email=email, password=generate_password_hash(pw), name=name, phone=phone, address=addr, address_detail=addr_d, entrance_pw=ent_pw, request_memo=memo)
         db.session.add(new_user); db.session.commit(); return redirect('/login')
@@ -906,6 +939,15 @@ def register():
             <input name="address_detail" placeholder="상세주소 (동/호수)" class="w-full p-4 md:p-5 bg-gray-50 rounded-2xl font-black text-sm md:text-base" required>
             <input name="entrance_pw" placeholder="공동현관 비번 (필수)" class="w-full p-4 md:p-5 bg-red-50 rounded-2xl font-black border border-red-100 text-sm md:text-base" required>
             <textarea name="request_memo" placeholder="배송 요청사항" class="w-full p-4 md:p-5 bg-white border border-gray-100 rounded-2xl font-black h-24 text-sm md:text-base"></textarea>
+            
+            <!-- [신규] 전자상거래 동의 체크박스 추가 -->
+            <div class="p-4 bg-gray-50 rounded-2xl border border-gray-100 text-[10px] space-y-2 mt-4">
+                <label class="flex items-start gap-2 cursor-pointer group">
+                    <input type="checkbox" name="consent_e_commerce" class="mt-0.5 w-3 h-3 rounded-full border-gray-300 text-green-600 focus:ring-green-500" required>
+                    <span class="group-hover:text-gray-800 transition leading-tight">[필수] <a href="javascript:void(0)" onclick="openUncleModal('e_commerce')" class="underline decoration-green-300">전자상거래 이용자 유의사항</a> 및 대행 서비스 이용에 동의합니다.</span>
+                </label>
+            </div>
+
             <button class="w-full bg-green-600 text-white py-5 md:py-6 rounded-2xl font-black text-lg md:text-xl shadow-xl mt-6 hover:bg-green-700 transition">가입 완료</button>
         </form>
     </div>""" + FOOTER_HTML)
@@ -985,9 +1027,15 @@ def delete_cart(pid):
 @login_required
 def cart():
     items = Cart.query.filter_by(user_id=current_user.id).all()
-    cat_counts = {}
-    for i in items: cat_counts[i.product_category] = cat_counts.get(i.product_category, 0) + i.quantity
-    delivery_fee = sum([((count-1) // 4 + 1) * 1900 for count in cat_counts.values()]) if items else 0
+    
+    # [수정] 배송비 계산 로직 변경: 카테고리별 합계 금액 기반
+    cat_price_sums = {}
+    for i in items: 
+        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
+    
+    # 카테고리별로 50,000원당 1,900원 추가 (기본 1,900원 포함)
+    delivery_fee = sum([( (amt // 50001) + 1) * 1900 for amt in cat_price_sums.values()]) if items else 0
+    
     subtotal = sum(i.price * i.quantity for i in items)
     total = subtotal + delivery_fee
     content = """
@@ -1014,11 +1062,12 @@ def cart():
                 {% endfor %}
                 <div class="bg-gray-50 p-6 md:p-10 rounded-[1.5rem] md:rounded-[3rem] space-y-4 mt-12 border border-gray-100">
                     <div class="flex justify-between items-center text-gray-400 font-bold uppercase tracking-widest text-[9px] md:text-xs"><span>Subtotal</span><span>{{ "{:,}".format(subtotal) }}원</span></div>
-                    <div class="flex justify-between items-center text-orange-400 font-bold uppercase tracking-widest text-[9px] md:text-xs"><span>Delivery (송도)</span><span>+ {{ "{:,}".format(delivery_fee) }}원</span></div>
+                    <div class="flex justify-between items-center text-orange-400 font-bold uppercase tracking-widest text-[9px] md:text-xs"><span>Delivery (카테고리별/금액별 산정)</span><span>+ {{ "{:,}".format(delivery_fee) }}원</span></div>
                     <div class="flex justify-between items-center pt-6 border-t border-gray-200 font-black">
                         <span class="text-lg md:text-xl text-gray-700 uppercase italic">Total</span>
                         <span class="text-2xl md:text-4xl text-green-600 italic underline underline-offset-8">{{ "{:,}".format(total) }}원</span>
                     </div>
+                    <p class="text-[9px] text-gray-400 mt-2 italic font-bold">※ 배송비는 카테고리별 1,900원이며, 카테고리별 금액 50,000원 초과 시 50,000원당 1,900원이 추가됩니다.</p>
                 </div>
                 <a href="/order/confirm" class="block text-center bg-green-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2.5rem] font-black text-lg md:text-2xl shadow-2xl mt-12 hover:bg-green-700 transition active:scale-95 italic uppercase tracking-tighter">Order & Payment</a>
             </div>
@@ -1037,9 +1086,13 @@ def cart():
 def order_confirm():
     items = Cart.query.filter_by(user_id=current_user.id).all()
     if not items: return redirect('/')
-    cat_counts = {}
-    for i in items: cat_counts[i.product_category] = cat_counts.get(i.product_category, 0) + i.quantity
-    delivery_fee = sum([((count-1) // 4 + 1) * 1900 for count in cat_counts.values()])
+    
+    # [수정] 배송비 계산 로직 일원화 (금액 기반)
+    cat_price_sums = {}
+    for i in items: 
+        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
+    delivery_fee = sum([( (amt // 50001) + 1) * 1900 for amt in cat_price_sums.values()])
+    
     total = sum(i.price * i.quantity for i in items) + delivery_fee
     content = """
     <div class="max-w-md mx-auto py-20 px-4 font-black text-left">
@@ -1054,6 +1107,12 @@ def order_confirm():
                 <span class="text-gray-400 uppercase italic text-[10px] md:text-sm">Grand Total</span>
                 <span class="text-3xl md:text-4xl text-green-600 italic underline underline-offset-4">{{ "{:,}".format(total) }}원</span>
             </div>
+            
+            <!-- [신규] 배송비 상세 안내 문구 -->
+            <div class="bg-orange-50 p-4 rounded-2xl border border-orange-100 text-[9px] text-orange-700 font-bold leading-relaxed">
+                📢 배송비 안내: 카테고리별 기본 1,900원이며, 개별 카테고리 대행 금액이 50,000원을 초과할 경우 50,000원 단위로 1,900원이 추가 과금됩니다. (현재 적용 배송비: {{ "{:,}".format(delivery_fee) }}원)
+            </div>
+
             <div class="p-6 md:p-8 bg-gray-50 rounded-[1.5rem] md:rounded-[2.5rem] text-[9px] md:text-[10px] text-gray-500 space-y-4 font-black border border-gray-100">
                 <label class="flex items-start gap-3 mb-2 cursor-pointer group">
                     <input type="checkbox" id="consent_agency" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-green-600 focus:ring-green-500" required>
@@ -1074,7 +1133,7 @@ def order_confirm():
             window.location.href = "/order/payment"; 
         }
     </script>"""
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, total=total)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, total=total, delivery_fee=delivery_fee)
 
 @app.route('/order/payment')
 @login_required
@@ -1082,9 +1141,13 @@ def order_payment():
     items = Cart.query.filter_by(user_id=current_user.id).all()
     if not items: return redirect('/')
     subtotal = sum(i.price * i.quantity for i in items)
-    cat_counts = {i.product_category: 0 for i in items}
-    for i in items: cat_counts[i.product_category] += i.quantity
-    delivery_fee = sum([((count-1) // 4 + 1) * 1900 for count in cat_counts.values()])
+    
+    # [수정] 배송비 계산 로직 일원화
+    cat_price_sums = {}
+    for i in items: 
+        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
+    delivery_fee = sum([( (amt // 50001) + 1) * 1900 for amt in cat_price_sums.values()])
+    
     total, tax_free = int(subtotal + delivery_fee), int(sum(i.price * i.quantity for i in items if i.tax_type == '면세'))
     order_id, order_name = f"ORDER_{datetime.now().strftime('%Y%m%d%H%M%S')}_{current_user.id}", f"{items[0].product_name} 외 {len(items)-1}건" if len(items) > 1 else items[0].product_name
     content = """<div class="max-w-md mx-auto py-32 text-center font-black"><div class="w-20 h-20 md:w-24 md:h-24 bg-blue-100 rounded-full flex items-center justify-center text-4xl md:text-5xl mx-auto mb-10 text-blue-600 shadow-2xl animate-pulse">🛡️</div><h2 class="text-2xl md:text-3xl font-black mb-10 text-gray-800 tracking-tighter uppercase italic">Secure Gateway</h2><button id="payment-button" class="w-full bg-blue-600 text-white py-5 md:py-6 rounded-[1.5rem] md:rounded-[2.5rem] font-black text-lg md:text-xl shadow-xl hover:bg-blue-700 transition">결제창 열기</button></div><script>var tossPayments = TossPayments("{{ client_key }}"); document.getElementById('payment-button').addEventListener('click', function() { tossPayments.requestPayment('카드', { amount: {{ total }}, taxFreeAmount: {{ tax_free }}, orderId: '{{ order_id }}', orderName: '{{ order_name }}', customerName: '{{ user_name }}', successUrl: window.location.origin + '/payment/success', failUrl: window.location.origin + '/payment/fail' }).catch(function (error) { if (error.code !== 'USER_CANCEL') alert(error.message); }); });</script>"""
@@ -1102,9 +1165,12 @@ def payment_success():
         for i in items: cat_groups[i.product_category].append(f"{i.product_name}({i.quantity})")
         details = " | ".join([f"[{cat}] {', '.join(prods)}" for cat, prods in cat_groups.items()])
         tax_free_total = sum(i.price * i.quantity for i in items if i.tax_type == '면세')
-        cat_counts = {i.product_category: 0 for i in items}
-        for i in items: cat_counts[i.product_category] += i.quantity
-        delivery_fee = sum([((count-1) // 4 + 1) * 1900 for count in cat_counts.values()])
+        
+        # [수정] 배송비 계산 로직 일원화
+        cat_price_sums = {}
+        for i in items: cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
+        delivery_fee = sum([( (amt // 50001) + 1) * 1900 for amt in cat_price_sums.values()])
+
         db.session.add(Order(user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email, product_details=details, total_price=int(amt), delivery_fee=delivery_fee, tax_free_amount=tax_free_total, order_id=oid, payment_key=pk, delivery_address=f"({current_user.address}) {current_user.address_detail} (현관:{current_user.entrance_pw})", request_memo=current_user.request_memo))
         for i in items:
             p = Product.query.get(i.product_id)
