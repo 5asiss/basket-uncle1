@@ -526,7 +526,7 @@ def index():
             </div>
             <div class="horizontal-scroll no-scrollbar">
                 {% for p in random_latest %}
-                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[200px] md:w-[280px] transition-all hover:shadow-2xl">
+                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] transition-all hover:shadow-2xl">
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
                         <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4" onerror="this.src='https://placehold.co/400x400?text={{ p.name }}'">
                         <div class="absolute top-4 left-4"><span class="bg-blue-500 text-white text-[10px] px-3 py-1 rounded-lg uppercase">NEW</span></div>
@@ -560,7 +560,7 @@ def index():
             </div>
             <div class="horizontal-scroll no-scrollbar">
                 {% for p in closing_today %}
-                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-red-50 overflow-hidden relative flex flex-col w-[200px] md:w-[280px] transition-all hover:shadow-2xl">
+                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-red-50 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] transition-all hover:shadow-2xl">
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
                         <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4">
                         <div class="absolute bottom-4 left-4"><span class="bg-red-600 text-white text-[10px] px-3 py-1 rounded-lg font-black animate-pulse">오늘마감</span></div>
@@ -597,7 +597,7 @@ def index():
             <div class="horizontal-scroll no-scrollbar">
                 {% for p in products %}
                 {% set is_expired = (p.deadline and p.deadline < now) %}
-                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[200px] md:w-[280px] transition-all hover:shadow-2xl {% if is_expired or p.stock <= 0 %}sold-out{% endif %}">
+                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] transition-all hover:shadow-2xl {% if is_expired or p.stock <= 0 %}sold-out{% endif %}">
                     {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-xs">대행마감</div>{% endif %}
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
                         <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4">
