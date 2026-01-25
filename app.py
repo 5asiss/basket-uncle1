@@ -47,6 +47,7 @@ class User(db.Model, UserMixin):
     request_memo = db.Column(db.String(500))
     is_admin = db.Column(db.Boolean, default=False)
     consent_marketing = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now) # 가입일 필드
 
 class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -156,14 +157,14 @@ HEADER_HTML = """
         .sold-out { filter: grayscale(100%); opacity: 0.6; }
         .sold-out-badge { 
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; 
-            border-radius: 8px; font-weight: 800; z-index: 10; border: 2px solid white;
+            background: rgba(0,0,0,0.8); color: white; padding: 5px 10px; 
+            border-radius: 8px; font-weight: 800; z-index: 10; border: 1px solid white;
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .badge-tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: bold; margin-bottom: 4px; display: inline-block; }
+        .badge-tag { font-size: 8px; padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-bottom: 2px; display: inline-block; }
         .horizontal-scroll {
             display: flex; overflow-x: auto; scroll-snap-type: x mandatory; 
-            gap: 12px; padding-bottom: 15px; -webkit-overflow-scrolling: touch;
+            gap: 8px; padding-bottom: 10px; -webkit-overflow-scrolling: touch;
         }
         .horizontal-scroll > div { scroll-snap-align: start; flex-shrink: 0; }
         
@@ -180,9 +181,9 @@ HEADER_HTML = """
         #sidebar-overlay.show { display: block; }
 
         #toast {
-            visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center;
-            border-radius: 50px; padding: 16px; position: fixed; z-index: 1000; left: 50%; bottom: 30px;
-            transform: translateX(-50%); font-size: 14px; font-weight: bold; transition: 0.5s; opacity: 0;
+            visibility: hidden; min-width: 200px; background-color: #333; color: #fff; text-align: center;
+            border-radius: 50px; padding: 12px; position: fixed; z-index: 1000; left: 50%; bottom: 30px;
+            transform: translateX(-50%); font-size: 12px; font-weight: bold; transition: 0.5s; opacity: 0;
         }
         #toast.show { visibility: visible; opacity: 1; bottom: 50px; }
 
@@ -197,7 +198,7 @@ HEADER_HTML = """
     <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
     <div id="sidebar" class="p-8">
         <div class="flex justify-between items-center mb-10">
-            <h3 class="text-xl text-green-600 italic font-black">CATEGORIES</h3>
+            <h3 class="text-xl text-green-600 italic font-black">카테고리</h3>
             <button onclick="toggleSidebar()" class="text-gray-300 text-2xl"><i class="fas fa-times"></i></button>
         </div>
         <nav class="space-y-6 text-sm">
@@ -220,7 +221,7 @@ HEADER_HTML = """
             {% endif %}
         </nav>
         <div class="mt-20 pt-10 border-t border-gray-50">
-            <p class="text-[10px] text-gray-300 uppercase tracking-widest font-black">Customer Center</p>
+            <p class="text-[10px] text-gray-300 uppercase tracking-widest font-black">고객센터</p>
             <p class="text-sm font-black text-gray-400 mt-2 font-black">1666-8320</p>
         </div>
     </div>
@@ -254,7 +255,7 @@ HEADER_HTML = """
                             <i class="fas fa-shopping-cart text-xl"></i>
                             <span id="cart-count-badge" class="absolute top-0 right-0 bg-red-500 text-white text-[9px] rounded-full px-1.5 font-black border-2 border-white">{{ cart_count }}</span>
                         </a>
-                        <a href="/mypage" class="text-gray-600 font-black bg-gray-100 px-3 py-1.5 rounded-full text-[10px] hover:bg-gray-200 transition font-black">MY</a>
+                        <a href="/mypage" class="text-gray-600 font-black bg-gray-100 px-3 py-1.5 rounded-full text-[10px] hover:bg-gray-200 transition font-black">내정보</a>
                     {% else %}
                         <a href="/login" class="text-gray-400 font-black text-[11px] hover:text-green-600 transition">로그인</a>
                     {% endif %}
@@ -299,7 +300,7 @@ FOOTER_HTML = """
                     <p>상호: 바구니삼촌 | 성명: 금창권</p>
                     <p>사업장소재지: 인천광역시 연수구 하모니로158, d동3층317호</p>
                     <p>등록번호: 472-93-02262 | 전화번호: 1666-8320</p>
-                    <div class="pt-4 flex gap-4 opacity-50 underline">
+                    <div class="pt-4 flex gap-4 opacity-50 underline text-[10px]">
                         <a href="javascript:void(0)" onclick="openUncleModal('terms')">이용약관</a>
                         <a href="javascript:void(0)" onclick="openUncleModal('privacy')">개인정보처리방침</a>
                         <a href="javascript:void(0)" onclick="openUncleModal('agency')">구매대행 안내</a>
@@ -316,7 +317,7 @@ FOOTER_HTML = """
                         <p class="text-xs font-black">평일 09:00 ~ 18:00 (1666-8320)</p>
                     </div>
                 </div>
-                <p class="text-[10px] opacity-40 mt-10 font-bold uppercase tracking-widest font-black">© 2026 Basket Uncle. All Rights Reserved.</p>
+                <p class="text-[10px] opacity-40 mt-10 font-bold uppercase tracking-widest font-black">© 2026 바구니삼촌. All Rights Reserved.</p>
             </div>
         </div>
     </footer>
@@ -336,18 +337,8 @@ FOOTER_HTML = """
                     <b>제2조 (서비스의 성격)</b><br>① 회사는 상품을 직접 판매하지 않습니다.<br>② 회사는 이용자의 요청에 따라 상품을 대신 구매하고 배송하는 구매대행·배송대행 서비스를 제공합니다.<br>③ 상품의 가격은 회사가 임의로 정하는 판매가가 아닌, 구매처의 실제 구매 원가를 기준으로 합니다.<br><br>
                     <b>제3조 (가격 구조)</b><br>① 상품 금액: 구매처의 실제 구매 원가<br>② 회사 마진: 없음 (0원)<br>③ 배송비: 카테고리별 정액 배송비 (1,900원)<br>④ 추가 수수료: 없음<br>※ 회사는 가격 구조를 투명하게 공개하며, 별도의 숨겨진 비용을 부과하지 않습니다.`
             },
-            'third_party': {
-                'title': '개인정보 제3자 제공 동의 (필수)',
-                'content': '원활한 주문 처리를 위해 배송지 및 연락처 정보가 구매처와 배송 수행자에게 제공됨을 확인하였습니다.'
-            },
-            'privacy': {
-                'title': '개인정보처리방침',
-                'content': '고객님의 정보를 안전하게 보호하고 관련 법령을 준수합니다.'
-            },
-            'agency': {
-                'title': '구매대행 안내',
-                'content': '바구니삼촌은 배송 전문 서비스로, 고객님의 요청에 따라 상품을 대신 구매하고 배송해 드립니다.'
-            }
+            'privacy': { 'title': '개인정보처리방침', 'content': '고객님의 정보를 안전하게 보호합니다.' },
+            'agency': { 'title': '구매대행 안내', 'content': '우리는 구매를 대행하는 전문 서비스입니다.' }
         };
 
         function openUncleModal(type) {
@@ -364,7 +355,6 @@ FOOTER_HTML = """
             document.body.style.overflow = 'auto';
         }
 
-        // 통합 장바구니 추가 함수 (헤더 정의)
         async function addToCart(productId) {
             try {
                 const response = await fetch(`/cart/add/${productId}`, {
@@ -453,7 +443,6 @@ def inject_globals():
     if current_user.is_authenticated:
         total_qty = db.session.query(db.func.sum(Cart.quantity)).filter(Cart.user_id == current_user.id).scalar()
         cart_count = total_qty if total_qty else 0
-    # 노출 순서에 따른 카테고리 로드
     categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
     managers = [c.manager_email for c in categories if c.manager_email]
     return dict(cart_count=cart_count, now=datetime.now(), managers=managers, nav_categories=categories)
@@ -465,12 +454,9 @@ def index():
     grouped_products = {}
     
     order_logic = (Product.stock <= 0) | (Product.deadline < datetime.now())
-    
-    # [특수 카테고리 1] 최신상품 랜덤 추출 (최근 등록된 20개 중 8개 무작위 선택)
     latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(20).all()
     random_latest = random.sample(latest_all, min(len(latest_all), 8)) if latest_all else []
     
-    # [특수 카테고리 2] 오늘마감 (오늘 23:59 이전에 마감되는 상품)
     today_end = datetime.now().replace(hour=23, minute=59, second=59)
     closing_today = Product.query.filter(
         Product.is_active == True,
@@ -485,58 +471,38 @@ def index():
         if products: grouped_products[cat] = products
     
     content = """
-    <div class="bg-gray-900 text-white py-20 md:py-32 px-4 shadow-inner relative overflow-hidden text-center">
+    <div class="bg-gray-900 text-white py-16 md:py-32 px-4 shadow-inner relative overflow-hidden text-center">
         <div class="max-w-7xl mx-auto relative z-10 font-black">
-            <span class="text-green-400 text-xs md:text-sm font-black mb-6 inline-block uppercase tracking-[0.3em]">Direct Delivery Service</span>
-            <h2 class="text-4xl md:text-7xl font-black mb-8 leading-tight tracking-tighter">
-                우리는 상품을 판매하지 않습니다.<br>
-                <span class="text-green-500 uppercase">Innovation Buying Agent</span>
-            </h2>
-            <div class="w-20 h-1 bg-white/20 mx-auto mb-8"></div>
-            <p class="text-gray-400 text-lg md:text-2xl font-bold max-w-2xl mx-auto mb-12">
-                판매가 아닌 <span class="text-white underline decoration-green-500 decoration-4 underline-offset-8">배송 서비스</span> 입니다.
-            </p>
+            <h2 class="text-3xl md:text-7xl font-black mb-8 leading-tight tracking-tighter italic">우리는 상품을 판매하지 않습니다.<br><span class="text-green-500 uppercase">Innovation Buying Agent</span></h2>
+            <p class="text-gray-400 text-base md:text-2xl font-bold max-w-2xl mx-auto mb-12">판매가 아닌 <span class="text-white underline decoration-green-500 decoration-4 underline-offset-8">배송 서비스</span> 입니다.</p>
             <div class="flex flex-col md:flex-row justify-center items-center gap-6">
-                <a href="#products" class="bg-green-600 text-white px-12 py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95 text-lg">쇼핑하러 가기</a>
+                <a href="#products" class="bg-green-600 text-white px-12 py-4 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95 text-lg">쇼핑하러 가기</a>
                 <a href="/about" class="text-white/60 hover:text-white font-bold border-b border-white/20 pb-1 transition">바구니삼촌 구매대행 몰이란? <i class="fas fa-arrow-right ml-2"></i></a>
             </div>
         </div>
         <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] opacity-30"></div>
     </div>
 
-    <div id="products" class="max-w-7xl mx-auto px-4 py-16">
-        {% if query %}
-            <p class="mb-10 font-black text-gray-400 text-xl border-b pb-4">
-                <span class="text-green-600">"{{ query }}"</span>에 대한 대행 검색 결과입니다.
-            </p>
-        {% endif %}
-
-        <!-- [특수 섹션 1] ✨ 최신 등록 상품 -->
+    <div id="products" class="max-w-7xl mx-auto px-4 py-12">
         {% if random_latest and not query %}
-        <section class="mb-20">
-            <div class="mb-10 flex justify-between items-end border-b border-gray-100 pb-4">
-                <div>
-                    <h2 class="text-2xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter">
-                        <span class="w-2 h-10 bg-blue-500 rounded-full"></span> ✨ 최신 대행 상품
-                    </h2>
-                </div>
-                <a href="/category/최신상품" class="text-[11px] md:text-sm font-bold text-gray-400 hover:text-green-600 flex items-center gap-1">
-                    전체보기 <i class="fas fa-chevron-right text-[10px]"></i>
-                </a>
+        <section class="mb-12">
+            <div class="mb-6 flex justify-between items-end border-b pb-4">
+                <div><h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-2"><span class="w-1.5 h-6 bg-blue-500 rounded-full"></span> ✨ 최신 대행 상품</h2></div>
+                <a href="/category/최신상품" class="text-[10px] md:text-sm font-bold text-gray-400 hover:text-green-600">전체보기 ></a>
             </div>
             <div class="horizontal-scroll no-scrollbar">
                 {% for p in random_latest %}
-                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[200px] md:w-[280px] transition-all hover:shadow-2xl">
+                <div class="product-card bg-white rounded-2xl md:rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[130px] md:w-[260px] transition-all hover:shadow-lg">
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4" onerror="this.src='https://placehold.co/400x400?text={{ p.name }}'">
-                        <div class="absolute top-4 left-4"><span class="bg-blue-500 text-white text-[10px] px-3 py-1 rounded-lg uppercase">NEW</span></div>
+                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-2" onerror="this.src='https://placehold.co/400x400?text={{ p.name }}'">
+                        <div class="absolute top-2 left-2"><span class="bg-blue-500 text-white text-[8px] px-2 py-0.5 rounded uppercase font-black shadow-sm">NEW</span></div>
                     </a>
-                    <div class="p-6 flex flex-col flex-1">
-                        <h3 class="font-black text-gray-800 text-sm md:text-base truncate mb-1">{{ p.name }}</h3>
-                        <p class="text-[11px] text-green-600 mb-1 font-medium">{{ p.description or '' }}</p>
+                    <div class="p-3 flex flex-col flex-1">
+                        <h3 class="font-black text-gray-800 text-[10px] md:text-sm truncate mb-0.5">{{ p.name }}</h3>
+                        <p class="text-[8px] md:text-[11px] text-green-600 mb-2 font-medium truncate">{{ p.description or '' }}</p>
                         <div class="mt-auto flex justify-between items-end">
-                            <span class="text-lg md:text-2xl text-gray-900 font-black">{{ "{:,}".format(p.price) }}원</span>
-                            <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-10 h-10 md:w-12 md:h-12 rounded-2xl text-white shadow-xl hover:bg-green-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus"></i></button>
+                            <span class="text-[10px] md:text-xl text-gray-900 font-black">{{ "{:,}".format(p.price) }}원</span>
+                            <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-6 h-6 md:w-10 md:h-10 rounded-lg text-white shadow-md hover:bg-green-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px]"></i></button>
                         </div>
                     </div>
                 </div>
@@ -545,33 +511,25 @@ def index():
         </section>
         {% endif %}
 
-        <!-- [특수 섹션 2] 🔥 오늘 마감 상품 -->
         {% if closing_today and not query %}
-        <section class="mb-20">
-            <div class="mb-10 flex justify-between items-end border-b border-gray-100 pb-4">
-                <div>
-                    <h2 class="text-2xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter">
-                        <span class="w-2 h-10 bg-red-500 rounded-full"></span> 🔥 오늘 마감 임박!
-                    </h2>
-                </div>
-                <a href="/category/오늘마감" class="text-[11px] md:text-sm font-bold text-gray-400 hover:text-green-600 flex items-center gap-1">
-                    전체보기 <i class="fas fa-chevron-right text-[10px]"></i>
-                </a>
+        <section class="mb-12">
+            <div class="mb-6 flex justify-between items-end border-b pb-4">
+                <div><h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-2"><span class="w-1.5 h-6 bg-red-500 rounded-full"></span> 🔥 오늘 마감 임박!</h2></div>
+                <a href="/category/오늘마감" class="text-[10px] md:text-sm font-bold text-gray-400 hover:text-green-600">전체보기 ></a>
             </div>
             <div class="horizontal-scroll no-scrollbar">
                 {% for p in closing_today %}
-                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-red-50 overflow-hidden relative flex flex-col w-[200px] md:w-[280px] transition-all hover:shadow-2xl">
+                <div class="product-card bg-white rounded-2xl md:rounded-[2rem] shadow-sm border border-red-50 overflow-hidden relative flex flex-col w-[130px] md:w-[260px] transition-all hover:shadow-lg">
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4">
-                        <div class="absolute bottom-4 left-4"><span class="bg-red-600 text-white text-[10px] px-3 py-1 rounded-lg font-black animate-pulse">오늘마감</span></div>
+                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-2">
+                        <div class="absolute bottom-2 left-2"><span class="bg-red-600 text-white text-[8px] px-2 py-0.5 rounded font-black shadow-sm">오늘마감</span></div>
                     </a>
-                    <div class="p-6 flex flex-col flex-1">
-                        <p class="countdown-timer text-[9px] font-bold text-red-500 mb-2" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
-                        <h3 class="font-black text-gray-800 text-sm md:text-base truncate mb-1">{{ p.name }}</h3>
-                        <p class="text-[11px] text-green-600 mb-1 font-medium">{{ p.description or '' }}</p>
+                    <div class="p-3 flex flex-col flex-1">
+                        <p class="countdown-timer text-[8px] font-bold text-red-500 mb-1" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                        <h3 class="font-black text-gray-800 text-[10px] md:text-sm truncate mb-0.5">{{ p.name }}</h3>
                         <div class="mt-auto flex justify-between items-end">
-                            <span class="text-lg md:text-2xl text-gray-900 font-black">{{ "{:,}".format(p.price) }}원</span>
-                            <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-10 h-10 md:w-12 md:h-12 rounded-2xl text-white shadow-xl hover:bg-green-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus"></i></button>
+                            <span class="text-[10px] md:text-xl text-gray-900 font-black">{{ "{:,}".format(p.price) }}원</span>
+                            <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-6 h-6 md:w-10 md:h-10 rounded-lg text-white shadow-md hover:bg-green-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px]"></i></button>
                         </div>
                     </div>
                 </div>
@@ -580,41 +538,42 @@ def index():
         </section>
         {% endif %}
         
-        <!-- [일반 카테고리 리스트] -->
         {% for cat, products in grouped_products.items() %}
-        <section class="mb-20">
-            <div class="mb-10 flex justify-between items-end border-b border-gray-100 pb-4">
+        <section class="mb-12">
+            <div class="mb-6 flex justify-between items-end border-b pb-4">
                 <div>
-                    <h2 class="text-2xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter">
-                        <span class="w-2 h-10 bg-green-500 rounded-full"></span> {{ cat.name }} 리스트
-                    </h2>
-                    {% if cat.description %}<p class="text-xs text-gray-400 mt-2 font-bold">{{ cat.description }}</p>{% endif %}
+                    <h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-2"><span class="w-1.5 h-6 bg-green-500 rounded-full"></span> {{ cat.name }}</h2>
+                    {% if cat.description %}<p class="text-[10px] md:text-xs text-gray-400 mt-1 font-bold">{{ cat.description }}</p>{% endif %}
                 </div>
-                <a href="/category/{{ cat.name }}" class="text-[11px] md:text-sm font-bold text-gray-400 hover:text-green-600 flex items-center gap-1">
-                    전체보기 <i class="fas fa-chevron-right text-[10px]"></i>
-                </a>
+                <a href="/category/{{ cat.name }}" class="text-[10px] md:text-sm font-bold text-gray-400 hover:text-green-600">전체보기 ></a>
             </div>
-            <div class="horizontal-scroll no-scrollbar">
+            <!-- 모바일 3열 배치 그리드 적용 (grid-cols-3) -->
+            <div class="grid grid-cols-3 md:grid-cols-4 gap-3 md:gap-8">
                 {% for p in products %}
                 {% set is_expired = (p.deadline and p.deadline < now) %}
-                <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[200px] md:w-[280px] transition-all hover:shadow-2xl {% if is_expired or p.stock <= 0 %}sold-out{% endif %}">
-                    {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-xs">대행마감</div>{% endif %}
+                <div class="product-card bg-white rounded-xl md:rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-lg {% if is_expired or p.stock <= 0 %}sold-out{% endif %}">
+                    {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-[8px] md:text-xs font-black">대행마감</div>{% endif %}
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4">
-                        <div class="absolute bottom-4 left-4"><span class="bg-black/70 text-white text-[10px] px-3 py-1 rounded-lg font-black">잔여: {{ p.stock }}개</span></div>
+                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-2">
+                        <div class="absolute bottom-1 left-1 md:bottom-3 md:left-3">
+                            <span class="bg-black/70 text-white text-[7px] md:text-[10px] px-1.5 py-0.5 rounded md:rounded-lg font-black backdrop-blur-sm">잔여: {{ p.stock }}</span>
+                        </div>
                     </a>
-                    <div class="p-6 flex flex-col flex-1">
-                        <p class="countdown-timer text-[9px] font-bold text-red-500 mb-2" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
-                        <h3 class="font-black text-gray-800 text-sm md:text-base truncate mb-1">{{ p.name }}</h3>
-                        <p class="text-[11px] text-green-600 mb-1 font-medium">{{ p.description or '' }}</p>
-                        <div class="mt-auto flex justify-between items-end">
-                            <span class="text-lg md:text-2xl text-gray-900 font-black">{{ "{:,}".format(p.price) }}원</span>
-                            {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-10 h-10 md:w-12 md:h-12 rounded-2xl text-white shadow-xl hover:bg-green-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus"></i></button>{% endif %}
+                    <div class="p-2 md:p-5 flex flex-col flex-1">
+                        <p class="countdown-timer text-[7px] md:text-[9px] font-bold text-red-500 mb-0.5 md:mb-2" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                        <h3 class="font-black text-gray-800 text-[10px] md:text-sm truncate mb-0.5">{{ p.name }}</h3>
+                        <p class="text-[8px] md:text-[11px] text-green-600 mb-1 font-medium truncate">{{ p.description or '' }}</p>
+                        <div class="mt-auto flex justify-between items-center">
+                            <span class="text-[10px] md:text-lg text-gray-900 font-black">{{ "{:,}".format(p.price) }}원</span>
+                            {% if not is_expired and p.stock > 0 %}
+                            <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-5 h-5 md:w-10 md:h-10 rounded md:rounded-xl text-white shadow-md hover:bg-green-700 transition active:scale-90 flex items-center justify-center">
+                                <i class="fas fa-plus text-[8px] md:text-[12px]"></i>
+                            </button>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
                 {% endfor %}
-                <div class="w-8 flex-shrink-0"></div>
             </div>
         </section>
         {% endfor %}
@@ -625,82 +584,62 @@ def index():
 @app.route('/about')
 def about_page():
     content = """
-    <div class="bg-white py-20 px-6 font-black">
+    <div class="bg-white py-16 px-6 font-black text-left">
         <div class="max-w-4xl mx-auto">
-            <nav class="mb-10 text-left"><a href="/" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i> 홈으로 돌아가기</a></nav>
+            <nav class="mb-10"><a href="/" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i> 홈으로 돌아가기</a></nav>
             
-            <!-- 섹션 1: 바구니 삼촌몰 가치 안내 -->
-            <section class="mb-20 text-left">
-                <h2 class="text-4xl md:text-5xl font-black text-gray-800 mb-8 tracking-tighter leading-tight uppercase italic">바구니 삼촌몰</h2>
-                <div class="space-y-8 text-gray-600 text-lg leading-loose">
+            <section class="mb-16">
+                <h2 class="text-4xl md:text-5xl font-black text-gray-800 mb-8 tracking-tighter leading-tight italic">바구니 삼촌몰</h2>
+                <div class="space-y-6 text-gray-600 text-lg leading-relaxed">
                     <p>바구니 삼촌몰은 외부 플랫폼에 의존하지 않고 직접 개발한 시스템으로 운영되어 플랫폼 수수료·중개비 등 불필요한 운영 비용을 최소화한 지역 기반 물류 서비스입니다.</p>
                     <p>송도 지역에 자체 배송 인력과 100명 이상의 물류 인프라를 직접 보유하고 있으며, 송도 동선에 최적화된 최단 거리 배송 로직을 적용해 배송 효율을 높이고 그 결과 배송비 부담을 구조적으로 낮췄습니다.</p>
                 </div>
-                <div class="mt-10 p-10 bg-green-50 rounded-[3rem] border border-green-100 shadow-inner">
-                    <p class="text-green-800 font-black text-2xl mb-6 italic">또한 판매자에게는</p>
-                    <div class="space-y-4">
-                        <p class="text-3xl font-black text-gray-800 flex items-center gap-3">
-                            <span class="w-3 h-3 bg-green-600 rounded-full"></span> 상품 중개 수수료 <span class="text-green-600 underline decoration-4 underline-offset-4 font-black">0원</span>
-                        </p>
-                        <p class="text-3xl font-black text-gray-800 flex items-center gap-3">
-                            <span class="w-3 h-3 bg-green-600 rounded-full"></span> 플랫폼 사용료 <span class="text-green-600 underline decoration-4 underline-offset-4 font-black">0원</span>
-                        </p>
+                <div class="mt-10 p-8 bg-green-50 rounded-[2.5rem] border border-green-100 shadow-inner">
+                    <p class="text-green-800 font-black text-xl mb-4 italic">또한 판매자에게는</p>
+                    <div class="flex flex-col gap-2">
+                        <p class="text-2xl font-black text-gray-800">상품 중개 수수료 <span class="text-green-600 underline">0원</span></p>
+                        <p class="text-2xl font-black text-gray-800">플랫폼 사용료 <span class="text-green-600 underline">0원</span></p>
                     </div>
-                    <p class="mt-8 text-gray-500 font-bold text-base leading-relaxed">을 적용하여 유통 단계에서 발생하는 비용을 사실상 0원 또는 최소 수준으로 설계하였습니다.</p>
+                    <p class="mt-4 text-gray-500 font-bold">을 적용하여 유통 단계에서 발생하는 비용을 사실상 0원 또는 최소 수준으로 설계하였습니다.</p>
                 </div>
-                <p class="mt-12 text-gray-800 font-black text-xl leading-relaxed text-left border-l-8 border-green-600 pl-6">
-                    바구니 삼촌몰은 이렇게 절감된 플랫폼 비용·유통 비용·물류 비용을 모두 소비자에게 직접 환원하는 구조를 지향합니다.
-                </p>
+                <p class="mt-8 text-gray-700 font-bold leading-relaxed border-l-4 border-green-600 pl-4">바구니 삼촌몰은 이렇게 절감된 플랫폼 비용·유통 비용·물류 비용을 모두 소비자에게 직접 환원하는 구조를 지향합니다.</p>
             </section>
 
-            <!-- 섹션 2: 송도 최적화 모델 -->
-            <section class="mb-20 bg-gray-900 p-12 md:p-20 rounded-[4rem] text-white text-left relative overflow-hidden shadow-2xl">
-                <div class="relative z-10">
-                    <h3 class="text-4xl md:text-5xl font-black mb-12 tracking-tighter uppercase italic text-green-400">송도에 맞는 이유</h3>
-                    <ul class="space-y-8 text-xl md:text-2xl font-bold opacity-90">
-                        <li class="flex items-start gap-5">
-                            <span class="text-green-500 mt-1"><i class="fas fa-check-circle"></i></span>
-                            <span>송도 생활권 중심의 근거리 배송 구조</span>
-                        </li>
-                        <li class="flex items-start gap-5">
-                            <span class="text-green-500 mt-1"><i class="fas fa-check-circle"></i></span>
-                            <span>대단지·오피스텔 밀집 환경에 최적화된 운영</span>
-                        </li>
-                        <li class="flex items-start gap-5">
-                            <span class="text-green-500 mt-1"><i class="fas fa-check-circle"></i></span>
-                            <span>외부 택배 의존 없는 자체 물류 시스템</span>
-                        </li>
-                        <li class="flex items-start gap-5">
-                            <span class="text-green-500 mt-1"><i class="fas fa-check-circle"></i></span>
-                            <span>관리사무소·입대위 운영 부담 없는 협업 가능 구조</span>
-                        </li>
-                    </ul>
-                    <div class="mt-16 pt-12 border-t border-white/10">
-                        <p class="text-2xl md:text-4xl font-black tracking-tight text-green-400 italic leading-tight">
-                            송도에서 시작한,<br>송도에 가장 적합한 생활 물류 모델입니다.
-                        </p>
-                    </div>
-                </div>
-                <div class="absolute -right-20 -bottom-20 w-80 h-80 bg-green-500/10 rounded-full blur-3xl"></div>
+            <section class="mb-16 bg-gray-900 p-10 md:p-16 rounded-[3.5rem] text-white">
+                <h3 class="text-3xl md:text-4xl font-black mb-10 tracking-tighter text-green-400">송도에 맞는 이유</h3>
+                <ul class="space-y-6 text-lg font-bold">
+                    <li class="flex items-start gap-4">
+                        <span class="text-green-400 mt-1"><i class="fas fa-check-circle"></i></span>
+                        <span>송도 생활권 중심의 근거리 배송 구조</span>
+                    </li>
+                    <li class="flex items-start gap-4">
+                        <span class="text-green-400 mt-1"><i class="fas fa-check-circle"></i></span>
+                        <span>대단지·오피스텔 밀집 환경에 최적화된 운영</span>
+                    </li>
+                    <li class="flex items-start gap-4">
+                        <span class="text-green-400 mt-1"><i class="fas fa-check-circle"></i></span>
+                        <span>외부 택배 의존 없는 자체 물류 시스템</span>
+                    </li>
+                    <li class="flex items-start gap-4">
+                        <span class="text-green-400 mt-1"><i class="fas fa-check-circle"></i></span>
+                        <span>관리사무소·입대위 운영 부담 없는 협업 가능 구조</span>
+                    </li>
+                </ul>
+                <p class="mt-12 text-2xl font-black text-green-400 italic">송도에서 시작한, 송도에 가장 적합한 생활 물류 모델입니다.</p>
             </section>
 
-            <!-- 섹션 3: 동네 물류 선언 -->
-            <section class="text-center md:text-left">
-                <h3 class="text-3xl md:text-4xl font-black text-gray-800 mb-8 tracking-tighter leading-tight italic">바구니 삼촌은 송도에서 시작한 동네 물류입니다</h3>
-                <div class="space-y-8 text-gray-500 text-lg leading-relaxed">
+            <section>
+                <h3 class="text-3xl font-black text-gray-800 mb-6 tracking-tighter">바구니 삼촌은 송도에서 시작한 동네 물류입니다</h3>
+                <div class="space-y-6 text-gray-500 text-lg leading-loose">
                     <p>바구니 삼촌은 송도에서 직접 운영되는 지역 기반 구매대행·배송 서비스입니다. 송도 생활 패턴과 동선에 맞춰 불필요한 유통비를 줄이고, 필요한 만큼만 합리적으로 전달합니다.</p>
-                    <div class="p-10 bg-orange-50 rounded-[3rem] border border-orange-100 shadow-sm">
-                        <p class="text-gray-900 font-black text-xl md:text-2xl leading-relaxed">
+                    <div class="p-8 bg-orange-50 rounded-[2.5rem] border border-orange-100 shadow-sm">
+                        <p class="text-gray-900 font-black text-xl leading-relaxed">
                             농산물·식자재·생활필수품을 원가 기준으로 대신 구매하고,<br>
-                            카테고리별 배송료 <span class="text-orange-600 underline decoration-4 underline-offset-4">1,900원</span>으로 송도 전 지역에 배송합니다.
+                            카테고리별 배송료 <span class="text-orange-600 underline">1,900원</span>으로 송도 전 지역에 배송합니다.
                         </p>
                     </div>
                 </div>
             </section>
-
-            <div class="mt-24 text-center">
-                <a href="/" class="inline-block bg-green-600 text-white px-20 py-6 rounded-full font-black text-2xl shadow-2xl hover:bg-green-700 transition active:scale-95">쇼핑하러 가기</a>
-            </div>
         </div>
     </div>"""
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
@@ -722,25 +661,22 @@ def category_view(cat_name):
         display_name = f"{cat_name} 대행 리스트"
 
     content = """
-    <div class="max-w-7xl mx-auto px-4 py-16">
-        <h2 class="text-4xl text-gray-800 mb-4 font-black">{{ display_name }}</h2>
-        {% if cat and cat.description %}<p class="text-gray-400 font-bold mb-10 text-lg">{{ cat.description }}</p>{% endif %}
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+    <div class="max-w-7xl mx-auto px-4 py-12">
+        <h2 class="text-3xl md:text-4xl text-gray-800 mb-4 font-black tracking-tighter">{{ display_name }}</h2>
+        {% if cat and cat.description %}<p class="text-gray-400 font-bold mb-8 text-sm md:text-lg">{{ cat.description }}</p>{% endif %}
+        <!-- 모바일 3열 배치 그리드 적용 -->
+        <div class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-8">
             {% for p in products %}
-            {% set is_expired = (p.deadline and p.deadline < now) %}
-            <div class="product-card bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col transition-all hover:shadow-2xl {% if is_expired or p.stock <= 0 %}sold-out{% endif %}">
-                {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-[10px]">대행마감</div>{% endif %}
+            <div class="product-card bg-white rounded-xl md:rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col transition-all hover:shadow-lg">
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                    <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4">
-                    <div class="absolute bottom-3 left-3"><span class="bg-black/70 text-white text-[9px] px-2 py-1 rounded-md font-black backdrop-blur-sm">잔여: {{ p.stock }}개</span></div>
+                    <img src="{{ p.image_url }}" class="w-full h-full object-contain p-2">
+                    <div class="absolute bottom-1 left-1 md:bottom-3 md:left-3"><span class="bg-black/70 text-white text-[7px] md:text-[10px] px-1.5 py-0.5 rounded md:rounded-lg font-black">잔여: {{ p.stock }}</span></div>
                 </a>
-                <div class="p-6 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] font-bold text-red-500 mb-1" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
-                    <h3 class="font-black text-gray-800 text-sm truncate mb-1 leading-tight">{{ p.name }}</h3>
-                    <p class="text-[10px] text-green-600 mb-2 font-medium">{{ p.description or '' }}</p>
+                <div class="p-2 md:p-5 flex flex-col flex-1">
+                    <h3 class="font-black text-gray-800 text-[10px] md:text-sm truncate mb-1">{{ p.name }}</h3>
                     <div class="mt-auto flex justify-between items-center">
-                        <span class="text-lg font-black text-green-600">{{ "{:,}".format(p.price) }}원</span>
-                        {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-8 h-8 rounded-full text-white shadow-lg active:scale-90 transition-transform"><i class="fas fa-plus text-xs"></i></button>{% endif %}
+                        <span class="text-[10px] md:text-lg font-black text-green-600">{{ "{:,}".format(p.price) }}원</span>
+                        <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-5 h-5 md:w-8 md:h-8 rounded-md md:rounded-full text-white shadow-md hover:bg-green-700 transition active:scale-90 flex items-center justify-center"><i class="fas fa-plus text-[8px] md:text-xs"></i></button>
                     </div>
                 </div>
             </div>
@@ -755,36 +691,38 @@ def product_detail(pid):
     is_expired = (p.deadline and p.deadline < datetime.now())
     detail_images = p.detail_image_url.split(',') if p.detail_image_url else []
     cat_info = Category.query.filter_by(name=p.category).first()
-    
     content = """
-    <div class="max-w-4xl mx-auto px-4 py-16 font-black">
+    <div class="max-w-4xl mx-auto px-4 py-12 font-black text-left">
         <div class="grid md:grid-cols-2 gap-10 mb-20">
-            <img src="{{ p.image_url }}" class="w-full aspect-square object-contain border rounded-[3rem] bg-white p-8">
+            <img src="{{ p.image_url }}" class="w-full aspect-square object-contain border rounded-[3rem] bg-white p-8 shadow-sm">
             <div class="flex flex-col justify-center">
-                <span class="bg-green-50 text-green-600 px-4 py-1.5 rounded-full text-[11px] w-fit mb-4">{{ p.category }}</span>
+                <span class="bg-green-50 text-green-600 px-4 py-1.5 rounded-full text-[11px] w-fit mb-4 font-black uppercase tracking-widest">{{ p.category }}</span>
                 <h2 class="text-3xl md:text-5xl text-gray-800 mb-4 leading-tight tracking-tighter">{{ p.name }}</h2>
-                <p class="text-green-600 text-lg mb-4 font-bold">{{ p.description or '' }}</p>
+                <p class="text-green-600 text-lg mb-8 font-bold italic">{{ p.description or '' }}</p>
                 <div class="space-y-2 mb-8 text-xs text-gray-400">
                     <p class="text-blue-500 font-bold"><i class="fas fa-warehouse mr-2"></i> 잔여수량: {{ p.stock }}개</p>
                     <p class="countdown-timer text-red-500 font-bold" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
                 </div>
-                <div class="bg-gray-50 p-8 rounded-[2.5rem] mb-10 border border-gray-100 text-4xl md:text-6xl font-black text-green-600">{{ "{:,}".format(p.price) }}원</div>
+                <div class="bg-gray-50 p-8 rounded-[2.5rem] mb-10 border border-gray-100 text-center md:text-left">
+                    <span class="text-gray-400 text-xs mb-1 block">대행 가격 (VAT 포함)</span>
+                    <p class="text-4xl md:text-6xl font-black text-green-600">{{ "{:,}".format(p.price) }}원</p>
+                </div>
                 {% if p.stock > 0 and not is_expired %}
                 <button onclick="addToCart('{{p.id}}')" class="w-full bg-green-600 text-white py-6 rounded-[2rem] font-black text-xl shadow-2xl active:scale-95 transition-transform">장바구니 담기</button>
                 {% else %}
-                <button class="w-full bg-gray-300 text-white py-6 rounded-[2rem] font-black text-xl cursor-not-allowed italic">대행마감</button>
+                <button class="w-full bg-gray-300 text-white py-6 rounded-[2rem] font-black text-xl cursor-not-allowed italic">대행이 마감되었습니다</button>
                 {% endif %}
             </div>
         </div>
         
         <div class="border-t pt-16">
-            <h3 class="font-black text-2xl mb-12 border-l-8 border-green-600 pl-6 text-gray-800">상세 정보</h3>
-            <div class="flex flex-col gap-6 bg-white p-4 rounded-3xl border">
+            <h3 class="font-black text-2xl mb-12 border-l-8 border-green-600 pl-6 text-gray-800 tracking-tighter">상세 정보</h3>
+            <div class="flex flex-col gap-6 bg-white p-4 rounded-3xl border shadow-sm mb-12">
                 {% for img in detail_images %}<img src="{{ img }}" class="w-full rounded-2xl shadow-sm">{% endfor %}
             </div>
             
-            <div class="mt-12 p-10 bg-gray-50 rounded-[2.5rem] text-[10px] text-gray-400 leading-relaxed border border-gray-100 font-black">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-10 text-left">
+            <div class="p-8 md:p-12 bg-gray-50 rounded-[3rem] text-[10px] text-gray-400 leading-relaxed border border-gray-100 font-black shadow-inner">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
                     <div>
                         <h4 class="text-gray-700 mb-4 border-b pb-1 font-black text-xs uppercase tracking-widest">배송정보</h4>
                         <p class="mb-1"><span class="inline-block w-20 font-black">배송방법</span>신선/냉장/냉동</p>
@@ -798,7 +736,7 @@ def product_detail(pid):
                         <p class="mb-4"><span class="inline-block w-20 font-black">배송방법</span>주문 교환/환불/취소는 전화 문의 후 마켓에서 상태 설정</p>
                         <div class="mt-4 border-t pt-4">
                             <p class="text-gray-700 font-black mb-2 text-[11px]">교환/반품 제한사항</p>
-                            <ul class="list-disc pl-5 space-y-1 opacity-80">
+                            <ul class="list-disc pl-5 space-y-1.5 opacity-80">
                                 <li>주문/제작 상품의 경우, 상품의 제작이 이미 진행된 경우</li>
                                 <li>상품 포장을 개봉하여 사용 또는 설치 완료되어 상품의 가치가 훼손된 경우</li>
                                 <li>고객의 사용, 시간경과, 일부 소비에 의하여 상품의 가치가 현저히 감소한 경우</li>
@@ -814,32 +752,18 @@ def product_detail(pid):
 
         {% if cat_info and cat_info.biz_name %}
         <div class="mt-20 border-t pt-16">
-            <div class="bg-gray-50 p-12 rounded-[3.5rem] border border-gray-100 shadow-sm">
-                <div class="flex items-center gap-4 mb-8 text-left">
-                    <div class="w-12 h-12 bg-green-600 text-white rounded-full flex items-center justify-center text-lg shadow-lg"><i class="fas fa-info"></i></div>
-                    <h4 class="text-2xl font-black text-gray-800">구매대행 상품 안내</h4>
+            <div class="bg-white p-12 rounded-[4rem] border border-gray-100 shadow-xl">
+                <div class="flex items-center gap-4 mb-8">
+                    <div class="w-12 h-12 bg-green-600 text-white rounded-full flex items-center justify-center shadow-lg"><i class="fas fa-info"></i></div>
+                    <h4 class="text-2xl font-black text-gray-800 tracking-tighter">구매대행 상품 안내</h4>
                 </div>
-                <p class="text-gray-500 leading-relaxed mb-10 font-bold text-lg text-left">본 상품은 바구니삼촌이 고객님의 요청에 따라 구매를 대행하는 상품입니다. 실제 판매자 정보는 아래 버튼을 통해 확인 및 문의 가능합니다.</p>
-                
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <a href="/category/seller/{{ cat_info.id }}" class="bg-white border-2 border-gray-200 text-gray-800 px-8 py-5 rounded-[1.5rem] font-black text-sm hover:bg-gray-100 transition shadow-sm flex items-center justify-center gap-3">
-                        <i class="fas fa-address-card text-lg text-gray-400"></i> 판매자 사업자정보보기
-                    </a>
-                    
-                    {% if cat_info.biz_contact %}
-                    <a href="tel:{{ cat_info.biz_contact }}" class="bg-white border-2 border-blue-100 text-blue-600 px-8 py-5 rounded-[1.5rem] font-black text-sm hover:bg-blue-50 transition shadow-sm flex items-center justify-center gap-3">
-                        <i class="fas fa-phone-alt text-lg"></i> 고객센터 연결하기
-                    </a>
-                    {% endif %}
-
-                    {% if cat_info.seller_inquiry_link %}
-                    <a href="{{ cat_info.seller_inquiry_link }}" target="_blank" class="bg-green-600 text-white px-8 py-5 rounded-[1.5rem] font-black text-sm hover:bg-green-700 transition shadow-lg flex items-center justify-center gap-3">
-                        <i class="fas fa-comment-dots text-lg"></i> 판매자에게 문의하기
-                    </a>
-                    {% endif %}
+                <p class="text-gray-500 leading-relaxed mb-10 font-bold text-lg">본 상품은 바구니삼촌이 고객님의 요청에 따라 구매를 대행하는 상품입니다. 실제 판매자 정보는 아래 버튼을 통해 확인 및 문의 가능합니다.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                    <a href="/category/seller/{{ cat_info.id }}" class="bg-white border-2 border-gray-100 text-gray-800 px-6 py-5 rounded-[2rem] font-black text-xs hover:bg-gray-50 transition shadow-sm flex items-center justify-center gap-3"><i class="fas fa-address-card text-gray-400"></i> 사업자 정보 확인</a>
+                    {% if cat_info.biz_contact %}<a href="tel:{{ cat_info.biz_contact }}" class="bg-white border-2 border-blue-50 text-blue-600 px-6 py-5 rounded-[2rem] font-black text-xs hover:bg-blue-50 transition shadow-sm flex items-center justify-center gap-3"><i class="fas fa-phone-alt"></i> 고객센터 연결하기</a>{% endif %}
+                    {% if cat_info.seller_inquiry_link %}<a href="{{ cat_info.seller_inquiry_link }}" target="_blank" class="bg-green-600 text-white px-6 py-5 rounded-[2rem] font-black text-xs hover:bg-green-700 transition shadow-lg flex items-center justify-center gap-3"><i class="fas fa-comment-dots"></i> 실시간 문의하기</a>{% endif %}
                 </div>
-                
-                <p class="mt-10 text-xs text-gray-400 font-bold italic text-left">※ 본 상품은 바구니삼촌 송도 지역 전용 구매대행 상품입니다.</p>
+                <p class="mt-10 text-xs text-gray-400 font-bold italic">※ 본 상품은 바구니삼촌 송도 전 지역 전용 대행 상품입니다.</p>
             </div>
         </div>
         {% endif %}
@@ -850,28 +774,24 @@ def product_detail(pid):
 def seller_info_page(cid):
     cat = Category.query.get_or_404(cid)
     content = """
-    <div class="max-w-xl mx-auto py-20 px-6 font-black">
-        <nav class="mb-10"><a href="javascript:history.back()" class="text-green-600 font-black hover:underline"><i class="fas fa-arrow-left mr-2"></i> 이전으로 돌아가기</a></nav>
+    <div class="max-w-xl mx-auto py-20 px-6 font-black text-left">
+        <nav class="mb-10"><a href="javascript:history.back()" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i> 이전으로 돌아가기</a></nav>
         <div class="bg-white rounded-[4rem] shadow-2xl border border-gray-100 overflow-hidden">
             <div class="bg-green-600 p-12 text-white text-center">
-                <div class="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6 text-3xl"><i class="fas fa-store"></i></div>
-                <h2 class="text-3xl font-black tracking-tight mb-2 italic uppercase">Business Info</h2>
+                <div class="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6 text-3xl shadow-inner"><i class="fas fa-store"></i></div>
+                <h2 class="text-3xl font-black tracking-tight mb-2 uppercase italic">Business Info</h2>
                 <p class="opacity-80 font-bold">본 상품의 실제 판매 사업자 정보입니다.</p>
             </div>
-            
-            <div class="p-12 space-y-10 text-left">
-                <div><p class="text-xs text-gray-400 uppercase tracking-[0.2em] mb-2 font-black">Company Name</p><p class="text-2xl text-gray-800 font-black">상호명 : {{ cat.biz_name }}</p></div>
+            <div class="p-12 space-y-10">
+                <div><p class="text-xs text-gray-400 uppercase tracking-widest mb-2 font-black">Company Name</p><p class="text-2xl text-gray-800 font-black">상호명 : {{ cat.biz_name }}</p></div>
                 <div class="grid grid-cols-2 gap-8">
-                    <div><p class="text-xs text-gray-400 uppercase tracking-[0.2em] mb-2 font-black">Representative</p><p class="text-gray-800 font-black text-lg">대표자 : {{ cat.biz_representative }}</p></div>
-                    <div><p class="text-xs text-gray-400 uppercase tracking-[0.2em] mb-2 font-black">Tax Number</p><p class="text-gray-800 font-black text-lg">{{ cat.biz_reg_number }}</p></div>
+                    <div><p class="text-xs text-gray-400 uppercase tracking-widest mb-2 font-black">Representative</p><p class="text-gray-800 font-black text-lg">대표자 : {{ cat.biz_representative }}</p></div>
+                    <div><p class="text-xs text-gray-400 uppercase tracking-widest mb-2 font-black">Tax Number</p><p class="text-gray-800 font-black text-lg">{{ cat.biz_reg_number }}</p></div>
                 </div>
-                <div><p class="text-xs text-gray-400 uppercase tracking-[0.2em] mb-2 font-black">Location</p><p class="text-gray-700 font-bold leading-relaxed">{{ cat.biz_address }}</p></div>
-                <div class="p-8 bg-gray-50 rounded-[2.5rem] border border-dashed border-gray-200"><p class="text-xs text-gray-400 uppercase tracking-[0.2em] mb-2 font-black">Inquiry Center</p><p class="text-green-600 text-2xl font-black italic">{{ cat.biz_contact }}</p></div>
+                <div><p class="text-xs text-gray-400 uppercase tracking-widest mb-2 font-black">Location</p><p class="text-gray-700 font-bold leading-relaxed">{{ cat.biz_address }}</p></div>
+                <div class="p-8 bg-gray-50 rounded-[2.5rem] border border-dashed border-gray-200"><p class="text-xs text-gray-400 uppercase tracking-widest mb-2 font-black">Inquiry Center</p><p class="text-green-600 text-2xl font-black italic">{{ cat.biz_contact }}</p></div>
             </div>
-            
-            <div class="bg-gray-50 p-6 text-center border-t text-[10px] text-gray-400 font-black uppercase tracking-widest">
-                Basket Uncle Buying Agent Service
-            </div>
+            <div class="bg-gray-50 p-6 text-center border-t text-[10px] text-gray-400 font-black uppercase tracking-widest">Basket Uncle Buying Agent</div>
         </div>
     </div>"""
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, cat=cat)
@@ -882,40 +802,16 @@ def login():
         user = User.query.filter_by(email=request.form.get('email')).first()
         if user and check_password_hash(user.password, request.form.get('password')):
             login_user(user); return redirect('/')
-        flash("로그인 정보를 다시 확인해주세요.")
+        flash("로그인 정보를 확인해주세요."); return redirect('/login')
     return render_template_string(HEADER_HTML + """
-    <div class="max-w-md mx-auto mt-20 p-12 bg-white rounded-[4rem] shadow-2xl border">
+    <div class="max-w-md mx-auto mt-20 p-12 bg-white rounded-[4rem] shadow-2xl border text-left">
         <h2 class="text-3xl font-black text-center mb-12 text-green-600 uppercase italic tracking-tighter">Login</h2>
         <form method="POST" class="space-y-6">
-            <input name="email" type="email" placeholder="이메일 주소" class="w-full p-6 bg-gray-50 rounded-2xl font-black focus:ring-2 focus:ring-green-100 outline-none" required>
-            <input name="password" type="password" placeholder="비밀번호" class="w-full p-6 bg-gray-50 rounded-2xl font-black focus:ring-2 focus:ring-green-100 outline-none" required>
-            <button class="w-full bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-xl hover:bg-green-700 transition">로그인</button>
+            <input name="email" type="email" placeholder="이메일 주소" class="w-full p-6 bg-gray-50 rounded-2xl font-black focus:ring-2 focus:ring-green-100 outline-none shadow-sm" required>
+            <input name="password" type="password" placeholder="비밀번호" class="w-full p-6 bg-gray-50 rounded-2xl font-black focus:ring-2 focus:ring-green-100 outline-none shadow-sm" required>
+            <button class="w-full bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-xl hover:bg-green-700 transition active:scale-95">로그인하기</button>
         </form>
-        <div class="text-center mt-8"><a href="/register" class="text-gray-400 text-xs font-black hover:text-green-600">아직 회원이 아니신가요? 회원가입</a></div>
-    </div>""" + FOOTER_HTML)
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        name, email, pw, phone = request.form['name'], request.form['email'], request.form['password'], request.form['phone']
-        addr, addr_d, ent_pw, memo = request.form['address'], request.form['address_detail'], request.form['entrance_pw'], request.form['request_memo']
-        if User.query.filter_by(email=email).first(): flash("이미 존재하는 계정입니다."); return redirect('/register')
-        new_user = User(email=email, password=generate_password_hash(pw), name=name, phone=phone, address=addr, address_detail=addr_d, entrance_pw=ent_pw, request_memo=memo)
-        db.session.add(new_user); db.session.commit(); return redirect('/login')
-    return render_template_string(HEADER_HTML + """
-    <div class="max-w-md mx-auto mt-10 p-10 bg-white rounded-[3.5rem] shadow-2xl border">
-        <h2 class="text-2xl font-black mb-10 tracking-tighter uppercase italic text-green-600">Join Us</h2>
-        <form method="POST" class="space-y-4">
-            <input name="name" placeholder="실명 성함" class="w-full p-5 bg-gray-50 rounded-2xl font-black" required>
-            <input name="email" type="email" placeholder="이메일(ID)" class="w-full p-5 bg-gray-50 rounded-2xl font-black" required>
-            <input name="password" type="password" placeholder="비밀번호" class="w-full p-5 bg-gray-50 rounded-2xl font-black" required>
-            <input name="phone" placeholder="휴대폰 번호" class="w-full p-5 bg-gray-50 rounded-2xl font-black" required>
-            <div class="flex gap-2"><input id="address" name="address" placeholder="주소" class="flex-1 p-5 bg-gray-100 rounded-2xl font-black" readonly onclick="execDaumPostcode()"><button type="button" onclick="execDaumPostcode()" class="bg-gray-800 text-white px-5 rounded-2xl font-black text-xs">검색</button></div>
-            <input name="address_detail" placeholder="상세주소 (동/호수)" class="w-full p-5 bg-gray-50 rounded-2xl font-black" required>
-            <input name="entrance_pw" placeholder="공동현관 비번 (필수)" class="w-full p-5 bg-red-50 rounded-2xl font-black border border-red-100" required>
-            <textarea name="request_memo" placeholder="배송 요청사항" class="w-full p-5 bg-white border border-gray-100 rounded-2xl font-black h-24"></textarea>
-            <button class="w-full bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-xl mt-6 hover:bg-green-700 transition">가입 완료</button>
-        </form>
+        <div class="text-center mt-10"><a href="/register" class="text-gray-400 text-xs font-black hover:text-green-600 underline underline-offset-4 transition">아직 회원이 아니신가요? 회원가입</a></div>
     </div>""" + FOOTER_HTML)
 
 @app.route('/logout')
@@ -931,13 +827,13 @@ def mypage():
         <div class="bg-white p-12 rounded-[4rem] shadow-xl border mb-12 relative overflow-hidden">
             <div class="relative z-10">
                 <p class="text-3xl font-black mb-2 text-gray-800">{{ current_user.name }} 고객님</p>
-                <p class="text-gray-400 font-bold mb-10 text-sm">{{ current_user.email }}</p>
-                <div class="grid md:grid-cols-2 gap-10 pt-10 border-t border-gray-50">
-                    <div><p class="text-[10px] text-gray-400 uppercase tracking-widest mb-3 font-black">Shipping Address</p><p class="text-gray-700 font-bold text-lg leading-relaxed">{{ current_user.address }}<br>{{ current_user.address_detail }}</p></div>
-                    <div><p class="text-[10px] text-gray-400 uppercase tracking-widest mb-3 font-black">Gate Access</p><p class="text-red-500 font-black text-xl">🔑 {{ current_user.entrance_pw }}</p></div>
+                <p class="text-gray-400 font-bold mb-10 text-sm italic">{{ current_user.email }}</p>
+                <div class="grid md:grid-cols-2 gap-10 pt-10 border-t border-gray-50 text-sm">
+                    <div><p class="text-[10px] text-gray-300 uppercase tracking-widest mb-3 font-black">Shipping Address</p><p class="text-gray-700 font-bold leading-relaxed">{{ current_user.address }}<br>{{ current_user.address_detail }}</p></div>
+                    <div><p class="text-[10px] text-gray-300 uppercase tracking-widest mb-3 font-black">Gate Code</p><p class="text-red-500 font-black text-xl">🔑 GATE: {{ current_user.entrance_pw }}</p></div>
                 </div>
             </div>
-            <a href="/logout" class="absolute top-10 right-10 text-[10px] bg-gray-100 px-4 py-1.5 rounded-full text-gray-400 font-black hover:bg-gray-200 transition">LOGOUT</a>
+            <a href="/logout" class="absolute top-10 right-10 text-[10px] bg-gray-50 px-4 py-1.5 rounded-full text-gray-400 font-black hover:bg-gray-100 transition shadow-sm">LOGOUT</a>
         </div>
         <h3 class="text-2xl font-black mb-8 flex items-center gap-3 italic"><i class="fas fa-truck text-green-600"></i> Delivery History</h3>
         <div class="space-y-6">
@@ -948,12 +844,12 @@ def mypage():
                     <p class="font-black text-gray-800 text-xl leading-tight mb-6">{{ o.product_details }}</p>
                     <div class="flex justify-between items-center pt-6 border-t border-gray-50 font-black">
                         <span class="text-gray-400 text-xs">Total Payment</span>
-                        <span class="text-2xl text-green-600 italic">{{ "{:,}".format(o.total_price) }}원</span>
+                        <span class="text-2xl text-green-600 italic tracking-tighter">{{ "{:,}".format(o.total_price) }}원</span>
                     </div>
                 </div>
                 {% endfor %}
             {% else %}
-                <div class="bg-white p-32 text-center text-gray-300 rounded-[4rem] border border-dashed font-black">대행 이용 내역이 없습니다.</div>
+                <div class="bg-white p-32 text-center text-gray-300 rounded-[4rem] border border-dashed font-black shadow-inner">대행 이용 내역이 존재하지 않습니다.</div>
             {% endif %}
         </div>
     </div>"""
@@ -989,57 +885,6 @@ def delete_cart(pid):
     db.session.commit()
     return redirect('/cart')
 
-@app.route('/cart')
-@login_required
-def cart():
-    items = Cart.query.filter_by(user_id=current_user.id).all()
-    cat_counts = {}
-    for i in items: cat_counts[i.product_category] = cat_counts.get(i.product_category, 0) + i.quantity
-    delivery_fee = sum([((count-1) // 4 + 1) * 1900 for count in cat_counts.values()]) if items else 0
-    subtotal = sum(i.price * i.quantity for i in items)
-    total = subtotal + delivery_fee
-    content = """
-    <div class="max-w-4xl mx-auto py-16 px-6 font-black text-left">
-        <h2 class="text-3xl font-black mb-12 border-l-8 border-green-600 pl-6 tracking-tighter uppercase italic">Shopping Basket</h2>
-        <div class="bg-white rounded-[4rem] shadow-2xl border overflow-hidden">
-            {% if items %}
-            <div class="p-10 space-y-8">
-                {% for i in items %}
-                <div class="flex justify-between items-center border-b border-gray-50 pb-8 last:border-0 last:pb-0">
-                    <div class="flex-1">
-                        <p class="font-black text-xl text-gray-800">{{ i.product_name }}</p>
-                        <p class="text-green-600 font-black text-sm mt-1 italic">{{ "{:,}".format(i.price) }}원</p>
-                    </div>
-                    <div class="flex items-center gap-6 bg-gray-100 px-6 py-3 rounded-2xl">
-                        <button onclick="minusFromCart('{{i.product_id}}')" class="text-gray-400 font-black text-2xl hover:text-red-500 transition">-</button>
-                        <span class="font-black text-xl w-8 text-center">{{ i.quantity }}</span>
-                        <button onclick="addToCart('{{i.product_id}}')" class="text-gray-400 font-black text-2xl hover:text-green-600 transition">+</button>
-                    </div>
-                    <form action="/cart/delete/{{i.product_id}}" method="POST" class="ml-8">
-                        <button class="text-gray-300 hover:text-red-500 transition text-2xl"><i class="fas fa-trash-alt"></i></button>
-                    </form>
-                </div>
-                {% endfor %}
-                <div class="bg-gray-50 p-10 rounded-[3rem] space-y-4 mt-12 border border-gray-100">
-                    <div class="flex justify-between items-center text-gray-400 font-bold uppercase tracking-widest text-xs"><span>Subtotal</span><span>{{ "{:,}".format(subtotal) }}원</span></div>
-                    <div class="flex justify-between items-center text-orange-400 font-bold uppercase tracking-widest text-xs"><span>Delivery Fee (송도 근거리)</span><span>+ {{ "{:,}".format(delivery_fee) }}원</span></div>
-                    <div class="flex justify-between items-center pt-6 border-t border-gray-200 font-black">
-                        <span class="text-xl text-gray-700 uppercase italic">Total Amount</span>
-                        <span class="text-4xl text-green-600 italic underline underline-offset-8">{{ "{:,}".format(total) }}원</span>
-                    </div>
-                </div>
-                <a href="/order/confirm" class="block text-center bg-green-600 text-white py-8 rounded-[2.5rem] font-black text-2xl shadow-2xl mt-12 hover:bg-green-700 transition active:scale-95 italic uppercase tracking-tighter">Order & Payment</a>
-            </div>
-            {% else %}
-            <div class="py-40 text-center text-gray-300 font-black">
-                <p class="text-8xl mb-8 opacity-20">🧺</p><p class="text-2xl mb-12">장바구니가 비어있습니다.</p>
-                <a href="/" class="inline-block bg-green-600 text-white px-12 py-5 rounded-full shadow-2xl font-black text-lg">대행 리스트 보러가기</a>
-            </div>
-            {% endif %}
-        </div>
-    </div>"""
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, items=items, subtotal=subtotal, delivery_fee=delivery_fee, total=total)
-
 @app.route('/order/confirm')
 @login_required
 def order_confirm():
@@ -1053,16 +898,16 @@ def order_confirm():
     <div class="max-w-md mx-auto py-20 px-4 font-black text-left">
         <h2 class="text-3xl font-black mb-10 border-b-4 border-green-600 pb-4 text-center uppercase italic">Checkout</h2>
         <div class="bg-white p-12 rounded-[4rem] shadow-2xl border space-y-10">
-            <div class="p-8 bg-green-50 rounded-[3rem] border border-green-100 text-left relative overflow-hidden">
+            <div class="p-8 bg-green-50 rounded-[3rem] border border-green-100 text-left relative overflow-hidden shadow-inner">
                 <span class="text-green-600 text-[10px] block uppercase font-black tracking-widest mb-3">Delivery To</span>
                 <p class="text-xl leading-relaxed text-gray-800">{{ current_user.address }}<br>{{ current_user.address_detail }}</p>
                 <p class="text-red-500 mt-4 font-black text-lg flex items-center gap-2">🔑 GATE PW: {{ current_user.entrance_pw }}</p>
             </div>
             <div class="flex justify-between items-end pt-4 font-black">
                 <span class="text-gray-400 uppercase italic text-sm">Grand Total</span>
-                <span class="text-4xl text-green-600 italic underline underline-offset-4">{{ "{:,}".format(total) }}원</span>
+                <span class="text-4xl text-green-600 italic underline underline-offset-4 tracking-tighter">{{ "{:,}".format(total) }}원</span>
             </div>
-            <div class="p-8 bg-gray-50 rounded-[2.5rem] text-[10px] text-gray-500 space-y-4 font-black border border-gray-100">
+            <div class="p-8 bg-gray-50 rounded-[2.5rem] text-[10px] text-gray-500 space-y-4 font-black border border-gray-100 shadow-sm">
                 <label class="flex items-start gap-3 mb-2 cursor-pointer group">
                     <input type="checkbox" id="consent_agency" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-green-600 focus:ring-green-500" required>
                     <span class="group-hover:text-gray-800 transition">본인은 바구니삼촌이 상품 판매자가 아니며, 본인의 요청에 따라 상품을 대신 구매하고 배송하는 대행 서비스임을 인지하고 이에 동의합니다.</span>
@@ -1072,7 +917,7 @@ def order_confirm():
                     <span class="group-hover:text-gray-800 transition">[필수] 개인정보 제3자 제공 동의 : 원활한 배송 및 주문 처리를 위해 배송지 및 연락처 정보가 구매처와 배송 수행자에게 제공됨을 확인하였습니다.</span>
                 </label>
             </div>
-            <button onclick="startPayment()" class="w-full bg-green-600 text-white py-7 rounded-[2.5rem] font-black text-2xl shadow-2xl active:scale-95 transition-transform uppercase italic tracking-tighter">Secure Payment</button>
+            <button onclick="startPayment()" class="w-full bg-green-600 text-white py-7 rounded-[2.5rem] font-black text-2xl shadow-xl active:scale-95 transition-transform uppercase italic tracking-tighter hover:bg-green-700">Secure Payment</button>
         </div>
     </div>
     <script>
@@ -1095,33 +940,10 @@ def order_payment():
     delivery_fee = sum([((count-1) // 4 + 1) * 1900 for count in cat_counts.values()])
     total, tax_free = int(subtotal + delivery_fee), int(sum(i.price * i.quantity for i in items if i.tax_type == '면세'))
     order_id, order_name = f"ORDER_{datetime.now().strftime('%Y%m%d%H%M%S')}_{current_user.id}", f"{items[0].product_name} 외 {len(items)-1}건" if len(items) > 1 else items[0].product_name
-    content = """<div class="max-w-md mx-auto py-32 text-center font-black"><div class="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center text-5xl mx-auto mb-10 text-blue-600 shadow-2xl animate-pulse">🛡️</div><h2 class="text-3xl font-black mb-10 text-gray-800 tracking-tighter uppercase italic">Secure Gateway</h2><button id="payment-button" class="w-full bg-blue-600 text-white py-6 rounded-[2.5rem] font-black text-xl shadow-xl hover:bg-blue-700 transition">결제창 열기</button></div><script>var tossPayments = TossPayments("{{ client_key }}"); document.getElementById('payment-button').addEventListener('click', function() { tossPayments.requestPayment('카드', { amount: {{ total }}, taxFreeAmount: {{ tax_free }}, orderId: '{{ order_id }}', orderName: '{{ order_name }}', customerName: '{{ user_name }}', successUrl: window.location.origin + '/payment/success', failUrl: window.location.origin + '/payment/fail' }).catch(function (error) { if (error.code !== 'USER_CANCEL') alert(error.message); }); });</script>"""
+    content = """<div class="max-w-md mx-auto py-32 text-center font-black"><div class="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center text-5xl mx-auto mb-10 text-blue-600 shadow-2xl animate-pulse">🛡️</div><h2 class="text-3xl font-black mb-10 text-gray-800 tracking-tighter uppercase italic">Secure Gateway</h2><button id="payment-button" class="w-full bg-blue-600 text-white py-6 rounded-[2.5rem] font-black text-xl shadow-xl hover:bg-blue-700 transition active:scale-95">결제 창 열기</button></div><script>var tossPayments = TossPayments("{{ client_key }}"); document.getElementById('payment-button').addEventListener('click', function() { tossPayments.requestPayment('카드', { amount: {{ total }}, taxFreeAmount: {{ tax_free }}, orderId: '{{ order_id }}', orderName: '{{ order_name }}', customerName: '{{ user_name }}', successUrl: window.location.origin + '/payment/success', failUrl: window.location.origin + '/payment/fail' }).catch(function (error) { if (error.code !== 'USER_CANCEL') alert(error.message); }); });</script>"""
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, client_key=TOSS_CLIENT_KEY, total=total, tax_free=tax_free, order_id=order_id, order_name=order_name, user_name=current_user.name)
 
-@app.route('/payment/success')
-@login_required
-def payment_success():
-    pk, oid, amt = request.args.get('paymentKey'), request.args.get('orderId'), request.args.get('amount')
-    url, auth_key = "https://api.tosspayments.com/v1/payments/confirm", base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
-    res = requests.post(url, json={"paymentKey": pk, "amount": amt, "orderId": oid}, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
-    if res.status_code == 200:
-        items = Cart.query.filter_by(user_id=current_user.id).all()
-        cat_groups = {i.product_category: [] for i in items}
-        for i in items: cat_groups[i.product_category].append(f"{i.product_name}({i.quantity})")
-        details = " | ".join([f"[{cat}] {', '.join(prods)}" for cat, prods in cat_groups.items()])
-        tax_free_total = sum(i.price * i.quantity for i in items if i.tax_type == '면세')
-        cat_counts = {i.product_category: 0 for i in items}
-        for i in items: cat_counts[i.product_category] += i.quantity
-        delivery_fee = sum([((count-1) // 4 + 1) * 1900 for count in cat_counts.values()])
-        db.session.add(Order(user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email, product_details=details, total_price=int(amt), delivery_fee=delivery_fee, tax_free_amount=tax_free_total, order_id=oid, payment_key=pk, delivery_address=f"({current_user.address}) {current_user.address_detail} (현관:{current_user.entrance_pw})", request_memo=current_user.request_memo))
-        for i in items:
-            p = Product.query.get(i.product_id)
-            if p: p.stock -= i.quantity
-        Cart.query.filter_by(user_id=current_user.id).delete(); db.session.commit()
-        return render_template_string(HEADER_HTML + """<div class="max-w-md mx-auto py-40 text-center font-black"><div class="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center text-white text-5xl mx-auto mb-10 shadow-2xl animate-bounce"><i class="fas fa-check"></i></div><h2 class="text-3xl font-black mb-6">주문 성공!</h2><p class="text-gray-400 font-bold mb-16">배송 일정에 맞춰 찾아뵙겠습니다.</p><a href="/" class="bg-gray-800 text-white px-16 py-5 rounded-full font-black text-xl shadow-xl">홈으로</a></div>""" + FOOTER_HTML)
-    return redirect('/')
-
-# --- 관리자 기능 ---
+# --- 관리자 기능 (상품관리, 카테고리, 회원DB, 주문집계 통합) ---
 @app.route('/admin')
 @login_required
 def admin_dashboard():
@@ -1136,12 +958,18 @@ def admin_dashboard():
         if sel_cat != '전체': q = q.filter_by(category=sel_cat)
         products = q.order_by(Product.id.desc()).all()
         if not is_master: products = [p for p in products if p.category in my_categories]
+    elif tab == 'users' and is_master:
+        # 가입일시 기준 최신순 정렬
+        users = User.query.order_by(User.created_at.desc()).all()
     elif tab == 'orders':
         start_date_str = request.args.get('start_date', datetime.now().strftime('%Y-%m-%dT00:00'))
         end_date_str = request.args.get('end_date', datetime.now().strftime('%Y-%m-%dT23:59'))
         sel_order_cat = request.args.get('order_cat', '전체')
+        
         start_dt = datetime.strptime(start_date_str, '%Y-%m-%dT%H:%M')
         end_dt = datetime.strptime(end_date_str, '%Y-%m-%dT%H:%M')
+        
+        # 날짜 검색 필터링
         all_orders_in_range = Order.query.filter(Order.created_at >= start_dt, Order.created_at <= end_dt).order_by(Order.created_at.desc()).all()
         filtered_orders, summary = [], {}
         for o in all_orders_in_range:
@@ -1163,27 +991,34 @@ def admin_dashboard():
     
     content = """
     <div class="max-w-7xl mx-auto py-10 px-4 font-black">
-        <div class="flex justify-between items-center mb-8"><h2 class="text-xl font-black text-orange-700 italic">Admin Dashboard</h2><div class="flex gap-4"><a href="/logout" class="text-xs text-gray-400">로그아웃</a></div></div>
-        <div class="flex border-b mb-8 bg-white rounded-t-xl overflow-x-auto text-[11px]"><a href="/admin?tab=products" class="px-6 py-4 {% if tab == 'products' %}border-b-4 border-orange-500 text-orange-600{% endif %}">상품관리</a>{% if current_user.is_admin %}<a href="/admin?tab=categories" class="px-6 py-4 {% if tab == 'categories' %}border-b-4 border-orange-500 text-orange-600{% endif %}">카테고리 설정</a>{% endif %}<a href="/admin?tab=orders" class="px-6 py-4 {% if tab == 'orders' %}border-b-4 border-orange-500 text-orange-600{% endif %}">주문집계</a></div>
+        <div class="flex justify-between items-center mb-8"><h2 class="text-xl font-black text-orange-700 italic uppercase">Admin Dashboard</h2><div class="flex gap-4"><a href="/logout" class="text-xs text-gray-400">로그아웃</a></div></div>
+        <div class="flex border-b mb-8 bg-white rounded-t-xl overflow-x-auto text-[11px]"><a href="/admin?tab=products" class="px-6 py-4 {% if tab == 'products' %}border-b-4 border-orange-500 text-orange-600{% endif %} font-black">상품관리</a>{% if current_user.is_admin %}<a href="/admin?tab=categories" class="px-6 py-4 {% if tab == 'categories' %}border-b-4 border-orange-500 text-orange-600{% endif %} font-black">카테고리/판매자</a><a href="/admin?tab=users" class="px-6 py-4 {% if tab == 'users' %}border-b-4 border-orange-500 text-orange-600{% endif %} font-black">회원관리(DB)</a>{% endif %}<a href="/admin?tab=orders" class="px-6 py-4 {% if tab == 'orders' %}border-b-4 border-orange-500 text-orange-600{% endif %} font-black">주문집계/통계</a></div>
+        
         {% if tab == 'products' %}
-            <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4"><form action="/admin" class="flex gap-2"><input type="hidden" name="tab" value="products"><select name="category" onchange="this.form.submit()" class="border p-2 rounded-xl text-[11px] font-black bg-white"><option value="전체">전체보기</option>{% for c in categories %}<option value="{{c.name}}" {% if sel_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></form><div class="flex gap-2"><button onclick="document.getElementById('excel_upload_form').classList.toggle('hidden')" class="bg-blue-600 text-white px-5 py-3 rounded-xl font-black text-[10px]">엑셀 대량 등록</button><a href="/admin/add" class="bg-green-600 text-white px-5 py-3 rounded-xl font-black text-[10px]">+ 개별 상품 등록</a></div></div>
-            <div id="excel_upload_form" class="hidden bg-blue-50 p-6 rounded-2xl mb-8 border border-blue-100"><h3 class="text-blue-700 font-black mb-2 text-sm">엑셀 상품 대량 등록</h3><form action="/admin/product/bulk_upload" method="POST" enctype="multipart/form-data" class="flex gap-2 items-end"><div class="flex-1"><label class="text-[10px] text-blue-400 font-bold mb-1 block">파일 선택 (.xlsx)</label><input type="file" name="excel_file" class="w-full p-2 bg-white rounded-lg text-xs" required></div><button class="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-xs">업로드 시작</button></form></div>
-            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden text-[10px] text-left"><table class="w-full"><thead class="bg-gray-50 border-b text-gray-400 uppercase"><tr><th class="p-4">상품 정보</th><th class="p-4 text-center">재고</th><th class="p-4 text-center">관리</th></tr></thead><tbody>{% for p in products %}<tr class="border-b"><td class="p-4"><b>{{ p.name }}</b> <span class="text-orange-500 text-[8px]">{{ p.badge }}</span><br><span class="text-green-600 font-bold">{{ p.description or '' }}</span><br><span class="text-gray-400">{{ "{:,}".format(p.price) }}원 ({{ p.spec }})</span></td><td class="p-4 text-center">{{ p.stock }}개</td><td class="p-4 text-center space-x-2"><a href="/admin/edit/{{p.id}}" class="text-blue-500">수정</a><a href="/admin/delete/{{p.id}}" class="text-red-300" onclick="return confirm('정말 삭제하시겠습니까?')">삭제</a></td></tr>{% endfor %}</tbody></table></div>
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4"><form action="/admin" class="flex gap-2"><input type="hidden" name="tab" value="products"><select name="category" onchange="this.form.submit()" class="border p-2 rounded-xl text-[11px] font-black bg-white"><option value="전체">전체보기</option>{% for c in nav_categories %}<option value="{{c.name}}" {% if sel_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></form><div class="flex gap-2"><button onclick="document.getElementById('excel_upload_form').classList.toggle('hidden')" class="bg-blue-600 text-white px-5 py-3 rounded-xl font-black text-[10px]">엑셀 대량 등록</button><a href="/admin/add" class="bg-green-600 text-white px-5 py-3 rounded-xl font-black text-[10px]">+ 개별 등록</a></div></div>
+            <div id="excel_upload_form" class="hidden bg-blue-50 p-6 rounded-2xl mb-8 border border-blue-100 shadow-sm"><h3 class="text-blue-700 font-black mb-2 text-sm italic">📥 엑셀 상품 대량 업로드</h3><form action="/admin/product/bulk_upload" method="POST" enctype="multipart/form-data" class="flex gap-2 items-end"><div class="flex-1"><label class="text-[10px] text-blue-400 font-bold mb-1 block uppercase">Select Excel File (.xlsx)</label><input type="file" name="excel_file" class="w-full p-2 bg-white rounded-lg text-xs" required></div><button class="bg-blue-600 text-white px-6 py-3 rounded-xl font-black text-xs hover:bg-blue-700 transition">업로드 시작</button></form></div>
+            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden text-[10px] text-left"><table class="w-full"><thead class="bg-gray-50 border-b text-gray-400 font-black uppercase"><tr><th class="p-4">상품 정보/규격/가격</th><th class="p-4 text-center">잔여재고</th><th class="p-4 text-center">관리</th></tr></thead><tbody>{% for p in products %}<tr class="border-b hover:bg-gray-50 transition"><td class="p-4"><b>{{ p.name }}</b> <span class="text-orange-500 text-[8px]">{{ p.badge }}</span><br><span class="text-green-600 font-bold">{{ p.description or '' }}</span><br><span class="text-gray-400">{{ "{:,}".format(p.price) }}원 ({{ p.spec }})</span></td><td class="p-4 text-center font-bold text-blue-600">{{ p.stock }}개</td><td class="p-4 text-center space-x-2"><a href="/admin/edit/{{p.id}}" class="text-blue-500 font-black">수정</a><a href="/admin/delete/{{p.id}}" class="text-red-300 font-black" onclick="return confirm('정말 삭제하시겠습니까?')">삭제</a></td></tr>{% endfor %}</tbody></table></div>
+        
+        {% elif tab == 'users' and is_master %}
+            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden text-[10px] text-left"><table class="w-full"><thead class="bg-gray-800 text-white font-black uppercase"><tr><th class="p-5 tracking-widest">가입 일시</th><th class="p-5 tracking-widest">고객정보(성함/ID)</th><th class="p-5 tracking-widest">연락처 및 배송 주소</th><th class="p-5 tracking-widest text-center">마케팅</th><th class="p-5 text-center tracking-widest">관리</th></tr></thead><tbody>{% for u in users %}<tr class="border-b hover:bg-gray-50 transition"><td class="p-5 text-gray-400 font-bold">{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '-' }}</td><td class="p-5"><b class="text-gray-900 text-sm">{{ u.name }}</b><br><span class="opacity-50 font-black">{{ u.email }}</span></td><td class="p-5 font-black text-gray-700 leading-relaxed">{{ u.phone }}<br>{{ u.address }} {{ u.address_detail }}</td><td class="p-5 text-center"><span class="{% if u.consent_marketing %}text-blue-500{% else %}text-gray-300{% endif %} font-black uppercase italic">{% if u.consent_marketing %}Agree{% else %}Refuse{% endif %}</span></td><td class="p-5 text-center"><a href="/admin/user/delete/{{u.id}}" class="text-red-400 font-bold hover:underline" onclick="return confirm('회원을 탈퇴 처리하시겠습니까?')">삭제</a></td></tr>{% endfor %}</tbody></table></div>
+            <div class="flex justify-end mt-6"><a href="/admin/users/excel" class="bg-blue-600 text-white px-8 py-3 rounded-xl font-black text-xs shadow-lg uppercase italic">User DB Excel Download</a></div>
+
         {% elif tab == 'categories' %}
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 text-left"><div class="bg-white p-8 rounded-3xl border shadow-sm h-fit"><h3 class="text-xs text-gray-400 uppercase tracking-widest mb-6 font-black">카테고리 및 판매자 추가</h3><form action="/admin/category/add" method="POST" class="space-y-4"><input name="cat_name" placeholder="카테고리명" class="border p-4 rounded-xl w-full font-bold" required><textarea name="description" placeholder="카테고리 한줄 소개" class="border p-4 rounded-xl w-full h-20 font-bold"></textarea><input name="manager_email" placeholder="관리자(매니저) 이메일" class="border p-4 rounded-xl w-full font-bold"><select name="tax_type" class="border p-4 rounded-xl w-full font-bold"><option value="과세">과세</option><option value="면세">면세</option></select><div class="border-t pt-4 space-y-2"><p class="text-[10px] text-green-600 font-bold tracking-widest uppercase">Seller Business Info</p><input name="biz_name" placeholder="상호명" class="border p-4 rounded-xl w-full font-bold"><input name="biz_representative" placeholder="대표자" class="border p-4 rounded-xl w-full font-bold"><input name="biz_reg_number" placeholder="사업자번호" class="border p-4 rounded-xl w-full font-bold"><input name="biz_address" placeholder="주소" class="border p-4 rounded-xl w-full font-bold"><input name="biz_contact" placeholder="연락처" class="border p-4 rounded-xl w-full font-bold"><input name="seller_link" placeholder="문의 링크 URL" class="border p-4 rounded-xl w-full font-bold"></div><button class="w-full bg-green-600 text-white py-4 rounded-xl font-black">생성</button></form></div><div class="bg-white rounded-3xl border shadow-sm overflow-hidden"><table class="w-full text-left text-[11px]"><thead class="bg-gray-50 border-b font-bold uppercase"><tr><th class="p-4">노출순서</th><th class="p-4">카테고리명</th><th class="p-4 text-center">관리</th></tr></thead><tbody>{% for c in categories %}<tr class="border-b"><td class="p-4 flex gap-2"><a href="/admin/category/move/{{c.id}}/up" class="text-blue-500"><i class="fas fa-chevron-up"></i></a><a href="/admin/category/move/{{c.id}}/down" class="text-red-500"><i class="fas fa-chevron-down"></i></a></td><td class="p-4"><b>{{ c.name }}</b><br><span class="text-gray-400">매니저: {{ c.manager_email or '미지정' }}</span></td><td class="p-4 text-center space-x-2"><a href="/admin/category/edit/{{c.id}}" class="text-blue-500">수정</a><a href="/admin/category/delete/{{c.id}}" class="text-red-300">삭제</a></td></tr>{% endfor %}</tbody></table></div></div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 text-left"><div class="bg-white p-10 rounded-[3rem] border shadow-sm h-fit"><h3 class="text-xs text-gray-400 uppercase tracking-widest mb-8 font-black border-b pb-2">카테고리 및 판매자 추가</h3><form action="/admin/category/add" method="POST" class="space-y-4"><input name="cat_name" placeholder="카테고리 이름 (예: 농산물)" class="border p-5 rounded-2xl w-full font-bold focus:ring-2 focus:ring-green-100 outline-none" required><textarea name="description" placeholder="카테고리 한줄 소개" class="border p-5 rounded-2xl w-full h-24 font-bold focus:ring-2 focus:ring-green-100 outline-none"></textarea><input name="manager_email" placeholder="카테고리 매니저 이메일" class="border p-5 rounded-2xl w-full font-bold focus:ring-2 focus:ring-green-100 outline-none"><select name="tax_type" class="border p-5 rounded-2xl w-full font-bold"><option value="과세">과세 상품군</option><option value="면세">면세 상품군</option></select><div class="border-t pt-6 space-y-4"><p class="text-[10px] text-green-600 font-black tracking-widest uppercase">Business Registration Info</p><input name="biz_name" placeholder="상호명" class="border p-4 rounded-xl w-full font-bold"><input name="biz_representative" placeholder="대표자명" class="border p-4 rounded-xl w-full font-bold"><input name="biz_reg_number" placeholder="사업자번호" class="border p-4 rounded-xl w-full font-bold"><input name="biz_address" placeholder="사업장 소재지 주소" class="border p-4 rounded-xl w-full font-bold"><input name="biz_contact" placeholder="고객센터 번호" class="border p-4 rounded-xl w-full font-bold"><input name="seller_link" placeholder="문의 링크 (URL)" class="border p-4 rounded-xl w-full font-bold"></div><button class="w-full bg-green-600 text-white py-5 rounded-2xl font-black text-lg shadow-xl hover:bg-green-700 transition">신규 카테고리 생성</button></form></div><div class="bg-white rounded-[3rem] border shadow-sm overflow-hidden h-fit"><table class="w-full text-left text-[11px]"><thead class="bg-gray-50 border-b font-black uppercase"><tr><th class="p-5">순서</th><th class="p-5">카테고리명/정보</th><th class="p-5 text-center">관리</th></tr></thead><tbody>{% for c in categories %}<tr class="border-b hover:bg-gray-50 transition"><td class="p-5 flex gap-2"><a href="/admin/category/move/{{c.id}}/up" class="text-blue-500"><i class="fas fa-chevron-up"></i></a><a href="/admin/category/move/{{c.id}}/down" class="text-red-500"><i class="fas fa-chevron-down"></i></a></td><td class="p-5"><b>{{ c.name }}</b><br><span class="text-gray-400 font-bold">매니저: {{ c.manager_email or '미지정' }}</span></td><td class="p-5 text-center space-x-3"><a href="/admin/category/edit/{{c.id}}" class="text-blue-500 font-black">수정</a><a href="/admin/category/delete/{{c.id}}" class="text-red-300 font-black" onclick="return confirm('카테고리를 삭제하시겠습니까?')">삭제</a></td></tr>{% endfor %}</tbody></table></div></div>
+        
         {% elif tab == 'orders' %}
-            <div class="bg-white p-8 rounded-3xl border shadow-sm mb-10 text-left"><form action="/admin" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4"><input type="hidden" name="tab" value="orders"><div><label class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Start Date</label><input type="datetime-local" name="start_date" value="{{ start_date_str }}" class="w-full border p-3 rounded-xl font-black mt-1"></div><div><label class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">End Date</label><input type="datetime-local" name="end_date" value="{{ end_date_str }}" class="w-full border p-3 rounded-xl font-black mt-1"></div><div><label class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Category Filter</label><select name="order_cat" class="w-full border p-3 rounded-xl font-black bg-white mt-1"><option value="전체">전체보기</option>{% for c in nav_categories %}<option value="{{c.name}}" {% if sel_order_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></div><div class="flex items-end"><button class="w-full bg-orange-600 text-white py-3 rounded-xl font-black shadow-lg">조회하기</button></div></form></div>
-            <h3 class="text-xl font-black mb-6 italic text-left underline underline-offset-8">📊 품목별 수량 합계</h3>{% for cat_n, items in summary.items() %}<div class="bg-white rounded-[2rem] border overflow-hidden mb-8 shadow-sm text-left"><div class="bg-gray-50 px-8 py-4 border-b text-sm font-black text-green-700 flex justify-between"><span>{{ cat_n }}</span><span class="text-gray-400 font-bold">Total: {{ items.values()|sum }}건</span></div><table class="w-full text-left text-[11px]"><tbody>{% for pn, qt in items.items() %}<tr class="border-b hover:bg-gray-50 transition"><td class="p-4 font-bold text-gray-700">{{ pn }}</td><td class="p-4 text-right font-black text-blue-600 text-sm">{{ qt }}개</td></tr>{% endfor %}</tbody></table></div>{% endfor %}
-            <h3 class="text-xl font-black mt-20 mb-6 italic text-left underline underline-offset-8">📑 고객별 상세 주문 명단</h3><div class="bg-white rounded-[2.5rem] shadow-xl border overflow-x-auto text-left"><table class="w-full text-[10px] font-black min-w-[1200px]"><thead class="bg-gray-800 text-white"><tr><th class="p-5 uppercase tracking-widest">Order Info</th><th class="p-5 uppercase tracking-widest">Customer</th><th class="p-5 uppercase tracking-widest">Shipping & Access</th><th class="p-5 uppercase tracking-widest">Items Detail</th><th class="p-5 text-right uppercase tracking-widest">Amount</th></tr></thead><tbody>{% for o in filtered_orders %}<tr class="border-b hover:bg-green-50 transition"><td class="p-5 text-gray-400 font-bold">{{ o.created_at.strftime('%m/%d %H:%M') }}<br><span class="text-[8px] opacity-50">{{ o.order_id }}</span></td><td class="p-5"><b class="text-gray-900 text-sm">{{ o.customer_name }}</b><br><span class="text-blue-600">{{ o.customer_phone }}</span></td><td class="p-5"><span class="font-bold text-gray-700 block mb-1">{{ o.delivery_address }}</span><span class="text-orange-500 font-black italic block">📝 {{ o.request_memo or '메모없음' }}</span></td><td class="p-5 text-gray-600 leading-relaxed font-bold">{{ o.product_details }}</td><td class="p-5 text-right font-black text-green-600 text-sm">{{ "{:,}".format(o.total_price) }}원</td></tr>{% endfor %}</tbody></table></div>
-            <div class="flex justify-end mt-10"><a href="/admin/orders/excel" class="bg-gray-800 text-white px-10 py-4 rounded-2xl font-black text-xs shadow-2xl hover:scale-105 transition">EXCEL DOWNLOAD</a></div>
+            <div class="bg-white p-8 rounded-3xl border shadow-sm mb-10 text-left shadow-lg"><form action="/admin" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-6"><input type="hidden" name="tab" value="orders"><div><label class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Start Date</label><input type="datetime-local" name="start_date" value="{{ start_date_str }}" class="w-full border p-4 rounded-2xl font-black mt-1 bg-gray-50 focus:ring-2 focus:ring-orange-100 outline-none"></div><div><label class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">End Date</label><input type="datetime-local" name="end_date" value="{{ end_date_str }}" class="w-full border p-4 rounded-2xl font-black mt-1 bg-gray-50 focus:ring-2 focus:ring-orange-100 outline-none"></div><div><label class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Category Filter</label><select name="order_cat" class="w-full border p-4 rounded-2xl font-black bg-white mt-1 shadow-sm"><option value="전체">전체 카테고리</option>{% for c in nav_categories %}<option value="{{c.name}}" {% if sel_order_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></div><div class="flex items-end"><button class="w-full bg-orange-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-orange-700 transition active:scale-95 italic uppercase tracking-tighter">Search Data</button></div></form></div>
+            <h3 class="text-xl font-black mb-6 italic text-left underline underline-offset-8 decoration-orange-500 decoration-4">📊 품목별 수량 합계 (Picking List)</h3>{% for cat_n, items in summary.items() %}<div class="bg-white rounded-[2.5rem] border overflow-hidden mb-8 shadow-sm text-left"><div class="bg-gray-50 px-8 py-4 border-b text-sm font-black text-green-700 flex justify-between"><span>{{ cat_n }}</span><span class="text-gray-400 font-bold">합계: {{ items.values()|sum }}건</span></div><table class="w-full text-left text-[11px] font-black"><tbody>{% for pn, qt in items.items() %}<tr class="border-b hover:bg-gray-50 transition"><td class="p-5 font-bold text-gray-700">{{ pn }}</td><td class="p-5 text-right font-black text-blue-600 text-base italic">{{ qt }}개</td></tr>{% endfor %}</tbody></table></div>{% endfor %}
+            <h3 class="text-xl font-black mt-20 mb-6 italic text-left underline underline-offset-8 decoration-green-500 decoration-4">📑 고객별 상세 주문 명단 (Delivery Sheet)</h3><div class="bg-white rounded-[3rem] shadow-2xl border overflow-x-auto text-left"><table class="w-full text-[10px] font-black min-w-[1200px]"><thead class="bg-gray-800 text-white font-black italic"><tr><th class="p-6 uppercase tracking-widest">Time / No</th><th class="p-6 uppercase tracking-widest">Customer Info</th><th class="p-6 uppercase tracking-widest">Shipping & Access</th><th class="p-6 uppercase tracking-widest">Items Detailed</th><th class="p-6 text-right uppercase tracking-widest">Amount</th></tr></thead><tbody>{% for o in filtered_orders %}<tr class="border-b hover:bg-green-50/30 transition"><td class="p-6 text-gray-400 font-bold">{{ o.created_at.strftime('%m/%d %H:%M') }}<br><span class="text-[8px] opacity-50 tracking-tighter">{{ o.order_id }}</span></td><td class="p-6"><b class="text-gray-900 text-sm underline decoration-green-100">{{ o.customer_name }}</b><br><span class="text-blue-600 italic">{{ o.customer_phone }}</span></td><td class="p-6"><span class="font-bold text-gray-700 block mb-2 leading-relaxed">{{ o.delivery_address }}</span><span class="text-orange-500 font-black italic block bg-orange-50 px-2 py-1 rounded-lg w-fit">📝 {{ o.request_memo or 'No Memo' }}</span></td><td class="p-6 text-gray-600 leading-relaxed font-bold">{{ o.product_details }}</td><td class="p-6 text-right font-black text-green-600 text-base italic underline decoration-green-100">{{ "{:,}".format(o.total_price) }}원</td></tr>{% endfor %}</tbody></table></div>
+            <div class="flex justify-end mt-12"><a href="/admin/orders/excel" class="bg-gray-800 text-white px-10 py-5 rounded-[2rem] font-black text-xs shadow-2xl hover:scale-105 transition uppercase italic tracking-widest">Full History Excel Download</a></div>
         {% endif %}
     </div>"""
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, **locals())
 
-# [복구] 엑셀 대량 등록 라우트
+# [복구] 대량 엑셀 업로드 처리
 @app.route('/admin/product/bulk_upload', methods=['POST'])
 @login_required
-def admin_product_bulk_upload():
+def admin_product_bulk_upload_process():
     if not current_user.is_admin: return redirect('/')
     file = request.files.get('excel_file')
     if not file: return redirect('/admin')
@@ -1191,7 +1026,7 @@ def admin_product_bulk_upload():
         df = pd.read_excel(file)
         required_cols = ['category', 'name', 'price', 'stock']
         if not all(col in df.columns for col in required_cols):
-            flash("엑셀 양식이 잘못되었습니다. (필수: category, name, price, stock)"); return redirect('/admin')
+            flash("엑셀 양식이 잘못되었습니다. 필수 항목을 확인하세요."); return redirect('/admin')
         count = 0
         for _, row in df.iterrows():
             cat_name = str(row['category']).strip()
@@ -1203,6 +1038,7 @@ def admin_product_bulk_upload():
     except Exception as e: db.session.rollback(); flash(f"업로드 실패: {str(e)}")
     return redirect('/admin')
 
+# [복구] 카테고리 로직 통합
 @app.route('/admin/category/add', methods=['POST'])
 @login_required
 def admin_category_add():
@@ -1222,7 +1058,7 @@ def admin_category_edit(cid):
         cat.biz_name, cat.biz_representative, cat.biz_reg_number, cat.biz_address, cat.biz_contact, cat.seller_inquiry_link = request.form.get('biz_name'), request.form.get('biz_representative'), request.form.get('biz_reg_number'), request.form.get('biz_address'), request.form.get('biz_contact'), request.form.get('seller_link')
         cat.seller_name = cat.biz_name
         db.session.commit(); return redirect('/admin?tab=categories')
-    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-20 px-4 font-black text-left"><h2 class="text-3xl font-black mb-10 tracking-tighter uppercase italic text-green-600">Edit Category</h2><form method="POST" class="bg-white p-10 rounded-[3.5rem] shadow-2xl space-y-6"><div><label class="text-[10px] text-gray-400 uppercase font-black tracking-widest">Base Setting</label><input name="cat_name" value="{{cat.name}}" class="border p-5 rounded-2xl w-full font-black mt-1" required><textarea name="description" class="border p-5 rounded-2xl w-full h-24 font-black mt-2" placeholder="한줄 소개">{{cat.description or ''}}</textarea><input name="manager_email" value="{{cat.manager_email or ''}}" class="border p-5 rounded-2xl w-full font-black mt-2" placeholder="매니저 이메일"><select name="tax_type" class="border p-5 rounded-2xl w-full font-black mt-2"><option value="과세" {% if cat.tax_type == '과세' %}selected{% endif %}>과세</option><option value="면세" {% if cat.tax_type == '면세' %}selected{% endif %}>면세</option></select></div><div class="border-t pt-6 space-y-4"><label class="text-[10px] text-green-600 uppercase font-black tracking-widest">Seller Business Info</label><input name="biz_name" value="{{cat.biz_name or ''}}" class="border p-5 rounded-2xl w-full font-black" placeholder="상호명"><input name="biz_representative" value="{{cat.biz_representative or ''}}" class="border p-5 rounded-2xl w-full font-black" placeholder="대표자"><input name="biz_reg_number" value="{{cat.biz_reg_number or ''}}" class="border p-5 rounded-2xl w-full font-black" placeholder="사업자번호"><input name="biz_address" value="{{cat.biz_address or ''}}" class="border p-5 rounded-2xl w-full font-black" placeholder="주소"><input name="biz_contact" value="{{cat.biz_contact or ''}}" class="border p-5 rounded-2xl w-full font-black" placeholder="고객센터"><input name="seller_link" value="{{cat.seller_inquiry_link or ''}}" class="border p-5 rounded-2xl w-full font-black" placeholder="문의 링크 URL"></div><button class="w-full bg-blue-600 text-white py-6 rounded-2xl font-black shadow-xl hover:bg-blue-700 transition italic uppercase">Save Changes</button></form></div>""", cat=cat)
+    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-20 px-4 font-black text-left"><h2 class="text-3xl font-black mb-10 tracking-tighter uppercase italic text-green-600">Category & Seller Edit</h2><form method="POST" class="bg-white p-10 rounded-[3.5rem] shadow-2xl space-y-6"><div><label class="text-[10px] text-gray-400 uppercase font-black tracking-widest">Base Setting</label><input name="cat_name" value="{{cat.name}}" class="border p-5 rounded-2xl w-full font-black mt-1 shadow-sm" required><textarea name="description" class="border p-5 rounded-2xl w-full h-24 font-black mt-2 shadow-sm" placeholder="한줄 소개">{{cat.description or ''}}</textarea><input name="manager_email" value="{{cat.manager_email or ''}}" class="border p-5 rounded-2xl w-full font-black mt-2 shadow-sm" placeholder="매니저 이메일"><select name="tax_type" class="border p-5 rounded-2xl w-full font-black mt-2 shadow-sm"><option value="과세" {% if cat.tax_type == '과세' %}selected{% endif %}>과세</option><option value="면세" {% if cat.tax_type == '면세' %}selected{% endif %}>면세</option></select></div><div class="border-t pt-6 space-y-4"><label class="text-[10px] text-green-600 uppercase font-black tracking-widest">Seller Business Profile</label><input name="biz_name" value="{{cat.biz_name or ''}}" class="border p-5 rounded-2xl w-full font-black shadow-sm" placeholder="상호명"><input name="biz_representative" value="{{cat.biz_representative or ''}}" class="border p-5 rounded-2xl w-full font-black shadow-sm" placeholder="대표자명"><input name="biz_reg_number" value="{{cat.biz_reg_number or ''}}" class="border p-5 rounded-2xl w-full font-black shadow-sm" placeholder="사업자등록번호"><input name="biz_address" value="{{cat.biz_address or ''}}" class="border p-5 rounded-2xl w-full font-black shadow-sm" placeholder="사업장 주소"><input name="biz_contact" value="{{cat.biz_contact or ''}}" class="border p-5 rounded-2xl w-full font-black shadow-sm" placeholder="고객센터 번호"><input name="seller_link" value="{{cat.seller_inquiry_link or ''}}" class="border p-5 rounded-2xl w-full font-black shadow-sm" placeholder="실시간 문의 URL"></div><button class="w-full bg-blue-600 text-white py-6 rounded-2xl font-black shadow-xl hover:bg-blue-700 transition active:scale-95 italic uppercase tracking-tighter">Save All Changes</button></form></div>""", cat=cat)
 
 @app.route('/admin/category/move/<int:cid>/<string:direction>')
 @login_required
@@ -1240,6 +1076,7 @@ def admin_category_delete(cid):
     if not current_user.is_admin: return redirect('/')
     db.session.delete(Category.query.get(cid)); db.session.commit(); return redirect('/admin?tab=categories')
 
+# [복구] 상품 관리 로직 통합
 @app.route('/admin/add', methods=['GET', 'POST'])
 @login_required
 def admin_product_add():
@@ -1251,7 +1088,7 @@ def admin_product_add():
         detail_img_url_str = ",".join(filter(None, [save_uploaded_file(f) for f in detail_files if f.filename != '']))
         new_p = Product(name=request.form['name'], description=request.form['description'], category=cat_name, price=int(request.form['price']), spec=request.form['spec'], origin=request.form['origin'], farmer="바구니삼촌", stock=int(request.form['stock']), image_url=main_img or "", detail_image_url=detail_img_url_str, deadline=datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M') if request.form.get('deadline') else None, badge=request.form['badge'])
         db.session.add(new_p); db.session.commit(); return redirect('/admin')
-    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-10 px-4 font-black text-left"><h2 class="text-3xl font-black mb-10 border-l-8 border-green-600 pl-6 uppercase italic">Add Product</h2><form method="POST" enctype="multipart/form-data" class="bg-white p-10 rounded-[3rem] shadow-2xl space-y-6"><select name="category" class="w-full p-5 bg-gray-50 rounded-2xl font-black focus:ring-2 focus:ring-green-100 outline-none">{% for c in nav_categories %}<option value="{{c.name}}">{{c.name}}</option>{% endfor %}</select><input name="name" placeholder="상품 정식 명칭" class="w-full p-5 bg-gray-50 rounded-2xl font-black" required><input name="description" placeholder="마케팅용 한줄 소개" class="w-full p-5 bg-gray-50 rounded-2xl font-black"><div class="grid grid-cols-2 gap-4"><input name="price" type="number" placeholder="대행 가격(원)" class="p-5 bg-gray-50 rounded-2xl font-black" required><input name="spec" placeholder="규격 (예: 5kg/1박스)" class="p-5 bg-gray-50 rounded-2xl font-black"></div><div class="grid grid-cols-2 gap-4"><input name="stock" type="number" placeholder="한정 수량" class="p-5 bg-gray-50 rounded-2xl font-black" value="50"><input name="deadline" type="datetime-local" class="p-5 bg-gray-50 rounded-2xl font-black"></div><input name="origin" placeholder="원산지 정보" class="w-full p-5 bg-gray-50 rounded-2xl font-black" value="국산"><select name="badge" class="w-full p-5 bg-gray-50 rounded-2xl font-black"><option value="">뱃지없음</option><option value="오늘마감">🔥 오늘마감</option><option value="삼촌추천">⭐ 삼촌추천</option></select><div class="p-6 border-2 border-dashed border-gray-100 rounded-3xl"><label class="text-[10px] text-gray-400 uppercase font-black block mb-3">Main Image (List View)</label><input type="file" name="main_image" class="text-xs"></div><div class="p-6 border-2 border-dashed border-blue-50 rounded-3xl"><label class="text-[10px] text-blue-400 uppercase font-black block mb-3">Detail Images (Multiple)</label><input type="file" name="detail_images" multiple class="text-xs"></div><button class="w-full bg-green-600 text-white py-6 rounded-[2rem] font-black text-2xl shadow-xl hover:bg-green-700 transition active:scale-95 italic uppercase tracking-tighter">Register Product</button></form></div>""")
+    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-10 px-4 font-black text-left"><h2 class="text-3xl font-black mb-10 border-l-8 border-green-600 pl-6 uppercase italic">Add New Product</h2><form method="POST" enctype="multipart/form-data" class="bg-white p-10 rounded-[3.5rem] shadow-2xl space-y-6"><select name="category" class="w-full p-5 bg-gray-50 rounded-2xl font-black focus:ring-2 focus:ring-green-100 outline-none shadow-sm">{% for c in nav_categories %}<option value="{{c.name}}">{{c.name}}</option>{% endfor %}</select><input name="name" placeholder="상품 공식 명칭" class="w-full p-5 bg-gray-50 rounded-2xl font-black shadow-sm" required><input name="description" placeholder="마케팅용 한줄 소개" class="w-full p-5 bg-gray-50 rounded-2xl font-black shadow-sm"><div class="grid grid-cols-2 gap-4"><input name="price" type="number" placeholder="대행가(원)" class="p-5 bg-gray-50 rounded-2xl font-black shadow-sm" required><input name="spec" placeholder="규격 (예: 1박스)" class="p-5 bg-gray-50 rounded-2xl font-black shadow-sm"></div><div class="grid grid-cols-2 gap-4"><input name="stock" type="number" placeholder="한정 재고" class="p-5 bg-gray-50 rounded-2xl font-black shadow-sm" value="50"><input name="deadline" type="datetime-local" class="p-5 bg-gray-50 rounded-2xl font-black shadow-sm"></div><input name="origin" placeholder="원산지" class="w-full p-5 bg-gray-50 rounded-2xl font-black shadow-sm" value="국산"><select name="badge" class="w-full p-5 bg-gray-50 rounded-2xl font-black shadow-sm"><option value="">뱃지 선택</option><option value="오늘마감">🔥 오늘마감</option><option value="삼촌추천">⭐ 삼촌추천</option></select><div class="p-6 border-2 border-dashed border-gray-200 rounded-[2rem] bg-gray-50/50"><label class="text-[10px] text-gray-400 font-black uppercase mb-3 block">Main Thumbnail</label><input type="file" name="main_image" class="text-xs"></div><div class="p-6 border-2 border-dashed border-blue-100 rounded-[2rem] bg-blue-50/30"><label class="text-[10px] text-blue-400 font-black uppercase mb-3 block">Detailed Images (Multiple)</label><input type="file" name="detail_images" multiple class="text-xs"></div><button class="w-full bg-green-600 text-white py-6 rounded-[2rem] font-black text-2xl shadow-xl hover:bg-green-700 transition active:scale-95 italic">REGISTER PRODUCT</button></form></div>""")
 
 @app.route('/admin/edit/<int:pid>', methods=['GET', 'POST'])
 @login_required
@@ -1266,7 +1103,7 @@ def admin_product_edit(pid):
         if detail_files and detail_files[0].filename != '':
             p.detail_image_url = ",".join(filter(None, [save_uploaded_file(f) for f in detail_files if f.filename != '']))
         db.session.commit(); return redirect('/admin')
-    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-10 px-4 font-black text-left"><h2 class="text-3xl font-black mb-10 border-l-8 border-green-600 pl-6 uppercase italic text-gray-800">Edit Product</h2><form method="POST" enctype="multipart/form-data" class="bg-white p-12 rounded-[4rem] shadow-2xl space-y-6"><input name="name" value="{{p.name}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black"><input name="description" value="{{p.description or ''}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black"><input name="price" type="number" value="{{p.price}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black"><input name="stock" type="number" value="{{p.stock}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black"><input name="deadline" type="datetime-local" value="{{ p.deadline.strftime('%Y-%m-%dT%H:%M') if p.deadline else '' }}" class="w-full p-6 bg-gray-50 rounded-2xl font-black"><div class="p-6 border-2 border-dashed border-gray-100 rounded-3xl"><label class="text-[10px] text-blue-600 font-black block mb-2 uppercase">Update Detail Images (Multiple)</label><input type="file" name="detail_images" multiple class="text-xs"></div><button class="w-full bg-blue-600 text-white py-6 rounded-[2rem] font-black text-2xl shadow-xl hover:bg-blue-700 transition italic uppercase">Apply Changes</button></form></div>""", p=p)
+    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-10 px-4 font-black text-left"><h2 class="text-3xl font-black mb-10 border-l-8 border-green-600 pl-6 uppercase italic text-gray-800">Edit Details</h2><form method="POST" enctype="multipart/form-data" class="bg-white p-12 rounded-[4rem] shadow-2xl space-y-6"><input name="name" value="{{p.name}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black shadow-sm"><input name="description" value="{{p.description or ''}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black shadow-sm"><input name="price" type="number" value="{{p.price}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black shadow-sm"><input name="stock" type="number" value="{{p.stock}}" class="w-full p-6 bg-gray-50 rounded-2xl font-black shadow-sm"><input name="deadline" type="datetime-local" value="{{ p.deadline.strftime('%Y-%m-%dT%H:%M') if p.deadline else '' }}" class="w-full p-6 bg-gray-50 rounded-2xl font-black shadow-sm"><div class="p-6 border-2 border-dashed border-gray-100 rounded-[2rem] shadow-inner"><label class="text-[10px] text-blue-600 font-black block mb-2 uppercase">Bulk Detail Images Update</label><input type="file" name="detail_images" multiple class="text-xs"></div><button class="w-full bg-blue-600 text-white py-6 rounded-[2rem] font-black text-2xl shadow-xl hover:bg-blue-700 transition italic uppercase">Save Product</button></form></div>""", p=p)
 
 @app.route('/admin/delete/<int:pid>')
 @login_required
@@ -1280,6 +1117,15 @@ def admin_delete(pid):
 def admin_user_delete(uid):
     if not current_user.is_admin: return redirect('/')
     db.session.delete(User.query.get(uid)); db.session.commit(); return redirect('/admin?tab=users')
+
+@app.route('/admin/users/excel')
+@login_required
+def admin_users_excel():
+    if not current_user.is_admin: return redirect('/admin')
+    data = [{"가입일": u.created_at, "성함": u.name, "ID(이메일)": u.email, "전화번호": u.phone, "주소": u.address, "상세주소": u.address_detail, "마케팅동의": "Y" if u.consent_marketing else "N"} for u in User.query.all()]
+    df = pd.DataFrame(data); out = BytesIO()
+    with pd.ExcelWriter(out, engine='openpyxl') as w: df.to_excel(w, index=False)
+    out.seek(0); return send_file(out, download_name=f"바구니삼촌_회원DB_{datetime.now().strftime('%m%d')}.xlsx", as_attachment=True)
 
 @app.route('/admin/orders/excel')
 @login_required
@@ -1305,17 +1151,19 @@ def admin_orders_excel():
         data.append(row)
     df = pd.DataFrame(data); out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w: df.to_excel(w, index=False)
-    out.seek(0); return send_file(out, download_name=f"UncleOrders_{datetime.now().strftime('%m%d_%H%M')}.xlsx", as_attachment=True)
+    out.seek(0); return send_file(out, download_name=f"바구니삼촌_주문내역_{datetime.now().strftime('%m%d_%H%M')}.xlsx", as_attachment=True)
 
 # --- DB 초기화 ---
 def init_db():
     with app.app_context():
         db.create_all()
-        # SQLite 예약어 "order" 충돌 방지를 위해 컬럼명에 쌍따옴표 추가
+        # SQLite 예약어 "order" 충돌 방지를 위해 컬럼명에 쌍따옴표 추가 및 가입일 필드 대응
         cols = [
             ("product", "description", "VARCHAR(200)"),
             ("product", "detail_image_url", "TEXT"),
             ("user", "request_memo", "VARCHAR(500)"),
+            ("user", "created_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
+            ("user", "consent_marketing", "BOOLEAN DEFAULT FALSE"),
             ("order", "delivery_fee", "INTEGER DEFAULT 0"),
             ("product", "badge", "VARCHAR(50)"),
             ("category", "seller_name", "VARCHAR(100)"),
