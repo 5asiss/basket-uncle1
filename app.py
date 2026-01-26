@@ -177,7 +177,7 @@ HEADER_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>바구니삼촌 - 배송 서비스의 혁신</title>
+    <title>바구니삼촌 - 신개념 6PL 생활서비스 </title>
     <script src="https://js.tosspayments.com/v1/payment"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
@@ -337,7 +337,7 @@ FOOTER_HTML = """
                     <p>상호: 바구니삼촌 | 성명: 금창권</p>
                     <p>사업장소재지: 인천광역시 연수구 하모니로158, d동3층317호 (송도동, 송도 타임스페이스)</p>
                     <p>사업자등록번호: 472-93-02262 | 통신판매업신고: 제 2026-인천연수-0000호</p>
-                    <p>전화번호: 1666-8320 | 이메일: info@basketuncle.com</p>
+                    <p>전화번호: 1666-8320 | 이메일: basamsongdo@gmail.com</p>
                     <div class="pt-8 flex flex-wrap gap-6 opacity-60 underline text-left">
                         <a href="javascript:void(0)" onclick="openUncleModal('terms')" class="hover:text-white transition">이용약관</a>
                         <a href="javascript:void(0)" onclick="openUncleModal('privacy')" class="hover:text-white transition">개인정보처리방침</a>
@@ -351,17 +351,15 @@ FOOTER_HTML = """
                 <div class="text-left md:text-right space-y-4">
                     <p class="font-bold text-gray-200 text-lg mb-4 font-black">Customer Center</p>
                     <div class="flex flex-col md:items-end gap-3 text-left md:text-right">
-                        <button onclick="alert('브라우저 설정 메뉴에서 [홈 화면에 추가]를 눌러주세요!')" class="bg-green-600 text-white px-6 py-3 rounded-2xl font-black text-xs shadow-xl transition hover:scale-105 active:scale-95 flex items-center gap-2 w-fit">
-                            <i class="fas fa-mobile-alt"></i> 📱 홈화면에 바로가기 추가
-                        </button>
+                    
                         <a href="http://pf.kakao.com/_AIuxkn" target="_blank" class="bg-[#FEE500] text-gray-900 px-6 py-3 rounded-2xl font-black text-xs flex items-center gap-2 w-fit shadow-lg transition hover:brightness-105">
-                            <i class="fas fa-comment"></i> 카카오톡 친구추가
+                            <i class="fas fa-comment"></i> 카카오톡 문의하기
                         </a>
                         <p class="text-sm font-black text-gray-300">평일 09:00 ~ 18:00 (점심 12~13시)</p>
-                        <p class="text-xs text-orange-500 font-bold italic text-left md:text-right">인천 연수구 송도동(인천대입구역 생활권) 전용 서비스</p>
+                        <p class="text-xs text-orange-500 font-bold italic text-left md:text-right">인천 연수구 송도동 전용 서비스</p>
                     </div>
                 </div>
-                <p class="text-[11px] opacity-30 mt-16 font-bold uppercase tracking-[0.4em] text-left md:text-right">© 2026 Basket Uncle. All Rights Reserved.</p>
+                <p class="text-[11px] opacity-30 mt-16 font-bold uppercase tracking-[0.4em] text-left md:text-right">© 2026바구니삼촌. All Rights Reserved.</p>
             </div>
         </div>
     </footer>
@@ -513,7 +511,7 @@ def index():
     
     # 최신 상품 20개 중 8개 랜덤
     latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(20).all()
-    random_latest = random.sample(latest_all, min(len(latest_all), 8)) if latest_all else []
+    random_latest = random.sample(latest_all, min(len(latest_all), 30)) if latest_all else []
     
     # 오늘 마감 상품
     today_end = datetime.now().replace(hour=23, minute=59, second=59)
@@ -533,25 +531,44 @@ def index():
         if products: grouped_products[cat] = products
     
     content = """
-    <div class="bg-gray-900 text-white py-20 md:py-32 px-4 shadow-inner relative overflow-hidden text-center text-left">
-        <div class="max-w-7xl mx-auto relative z-10 font-black text-left">
-            <span class="text-green-400 text-[10px] md:text-sm font-black mb-6 inline-block uppercase tracking-[0.3em] text-left">Direct Delivery Service</span>
-            <h1 class="hero-title text-3xl md:text-7xl font-black mb-8 leading-tight tracking-tighter text-left">
-                우리는 상품을 판매하지 않습니다.<br>
-                <span class="text-green-500 uppercase">Premium Service</span>
-            </h1>
-            <div class="w-12 h-1 bg-white/20 mx-auto md:mx-0 mb-8"></div>
-            <p class="hero-desc text-gray-400 text-sm md:text-2xl font-bold max-w-2xl mx-auto md:mx-0 mb-12 text-left">
-                단순 판매가 아닌, 유통 구조를 혁신하는 <span class="text-white underline decoration-green-500 decoration-4 underline-offset-8">배송 서비스</span> 입니다.
-            </p>
-            <div class="flex flex-col md:flex-row justify-center md:justify-start items-center gap-6">
-                <a href="#products" class="bg-green-600 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95 text-center">쇼핑하러 가기</a>
-                <button onclick="alert('브라우저 메뉴의 [홈 화면에 추가]를 선택해주세요!')" class="bg-white/10 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black text-base md:text-lg transition hover:bg-white/20 border border-white/20">📱 바로가기 추가</button>
-                <a href="/about" class="text-white/60 hover:text-white font-bold border-b border-white/20 pb-1 transition text-xs md:text-base">바구니삼촌이란? <i class="fas fa-arrow-right ml-2"></i></a>
-            </div>
+   <div class="bg-gray-900 text-white py-20 md:py-32 px-4 shadow-inner relative overflow-hidden text-center">
+    <div class="max-w-7xl mx-auto relative z-10 font-black text-center">
+        
+        <span class="text-green-400 text-[10px] md:text-sm font-black mb-6 inline-block uppercase tracking-[0.3em]">
+            Direct Delivery Service
+        </span>
+
+        <h1 class="hero-title text-3xl md:text-7xl font-black mb-8 leading-tight tracking-tighter">
+            우리는 상품을 판매하지 않습니다.<br>
+            <span class="text-green-500 uppercase">Premium Service</span>
+        </h1>
+
+        <div class="w-12 h-1 bg-white/20 mx-auto mb-8"></div>
+
+        <p class="hero-desc text-gray-400 text-sm md:text-2xl font-bold max-w-2xl mx-auto mb-12">
+            판매가 아닌,
+            <span class="text-white underline decoration-green-500 decoration-4 underline-offset-8">
+                배송 서비스
+            </span>
+            입니다.
+        </p>
+
+        <div class="flex flex-col md:flex-row justify-center items-center gap-6">
+            <a href="#products"
+               class="bg-green-600 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95">
+                쇼핑하러 가기
+            </a>
+
+            <a href="/about"
+               class="text-white/60 hover:text-white font-bold border-b border-white/20 pb-1 transition text-xs md:text-base">
+                바구니삼촌이란? <i class="fas fa-arrow-right ml-2"></i>
+            </a>
         </div>
-        <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] opacity-30"></div>
+
     </div>
+
+    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] opacity-30"></div>
+</div>
 
     <div id="products" class="max-w-7xl mx-auto px-4 py-16 text-left">
         {% if query %}
@@ -693,75 +710,110 @@ def index():
 
 @app.route('/about')
 def about_page():
-    """브랜드 소개 페이지 (6PL 지향 문구 적용)"""
+    """브랜드 소개 페이지 (디자인 스타일 통합 버전)"""
     content = """
-    <div class="bg-white py-24 md:py-32 px-6 font-black text-left">
-        <div class="max-w-4xl mx-auto text-left">
-            <nav class="mb-16 text-left"><a href="/" class="text-green-600 font-black text-sm md:text-lg flex items-center gap-2 hover:translate-x-1 transition"><i class="fas fa-arrow-left"></i> 홈으로 돌아가기</a></nav>
+    <div class="bg-[#fcfcfc] py-24 md:py-40 px-6 tracking-tight font-medium">
+        <div class="max-w-4xl mx-auto">
             
-            <section class="mb-24 text-left">
-                <h2 class="text-4xl md:text-7xl font-black text-gray-800 mb-12 tracking-tighter uppercase italic text-left">Basket Uncle</h2>
-                <div class="space-y-10 text-gray-600 text-lg md:text-2xl leading-relaxed text-left">
-                    <p class="text-gray-900">바구니 삼촌몰은 단순한 판매 플랫폼이 아닌, 물류 전문가가 설계한 <b>신개념 유통·배송 서비스</b>입니다.</p>
-                    <p>기존 유통 구조에서 분리되어 있던 상품 소싱, 물류 운영, 플랫폼 개발을 하나의 체계로 통합하여, 불필요한 유통 단계를 대폭 축소했습니다.</p>
-                    <p>우리는 기존 4PL(제4자 물류)의 개념을 확장해, 물류 기획·운영을 기반으로 상품 소싱과 자체 플랫폼 개발까지 포함한 <b>‘확장형 물류 서비스(일명 6PL)’</b>에 가까운 새로운 형태의 유통 모델을 지향합니다.</p>
-                    <p>직접 구축한 물류 인프라와 배송 네트워크를 기반으로 중간 유통 마진, 광고비, 플랫폼 수수료를 최소화하고, 그 절감된 비용을 상품 원가와 배송비에 그대로 반영하여 소비자에게는 합리적인 가격을, 판매자에게는 수수료 부담 없는 유통 환경을 제공합니다.</p>
-                </div>
-                
-                <div class="mt-20 p-10 md:p-16 bg-green-50 rounded-[3rem] md:rounded-[4rem] border border-green-100 shadow-inner text-left">
-                    <p class="text-green-800 font-black text-2xl md:text-3xl mb-10 italic text-left">우리의 핵심 가치는 명확합니다.</p>
-                    <div class="grid gap-8 text-left">
-                        <div class="flex items-center gap-6 text-2xl md:text-4xl font-black text-gray-800">
-                            <span class="w-4 h-4 bg-green-600 rounded-full flex-shrink-0"></span>
-                            <span>중간 유통 수수료 <span class="text-green-600 underline decoration-4 underline-offset-8">0원</span></span>
-                        </div>
-                        <div class="flex items-center gap-6 text-2xl md:text-4xl font-black text-gray-800">
-                            <span class="w-4 h-4 bg-green-600 rounded-full flex-shrink-0"></span>
-                            <span>플랫폼 입점 비용 <span class="text-green-600 underline decoration-4 underline-offset-8">0원</span></span>
-                        </div>
-                    </div>
-                    <p class="mt-12 text-gray-500 font-bold text-base md:text-xl leading-relaxed text-left border-t border-green-100 pt-10">
-                        바구니 삼촌몰은 <b>‘상품을 파는 플랫폼’</b>이 아니라, <br class="hidden md:block">
-                        <b>‘유통 구조를 설계하고 배송을 완성하는 물류 중심 서비스’</b>입니다.
+            <nav class="mb-24 flex justify-start">
+                <a href="/" class="group flex items-center gap-2 text-slate-400 hover:text-emerald-600 transition-all duration-300 font-bold">
+                    <span class="w-10 h-10 flex items-center justify-center rounded-full bg-white shadow-sm group-hover:bg-emerald-50 transition-colors">
+                        <i class="fas fa-arrow-left text-xs"></i>
+                    </span>
+                    <span class="text-sm uppercase tracking-widest ml-2">Back to Store</span>
+                </a>
+            </nav>
+            
+            <header class="mb-32 text-left">
+               
+               
+                <div class="space-y-12 text-slate-600 text-xl md:text-3xl leading-relaxed font-semibold">
+                    <p class="text-slate-900 text-2xl md:text-4xl font-black tracking-tighter leading-tight">
+                        바구니 삼촌몰은 단순한 판매 플랫폼이 아닌,<br class="hidden md:block"> 
+                        물류 전문가가 설계한 <b>신개념 유통·배송 서비스</b>입니다.
+                    </p>
+                    <p class="opacity-90">
+                        기존 유통 구조에서 분리되어 있던 상품 소싱, 물류 운영, 플랫폼 개발을 하나의 체계로 통합하여, 불필요한 유통 단계를 대폭 축소했습니다.
+                    </p>
+                    <p class="opacity-90">
+                        우리는 기존 4PL(제4자 물류)의 개념을 확장해, 물류 기획·운영을 기반으로 상품 소싱과 자체 플랫폼 개발까지 포함한 <b>‘확장형 물류 서비스(일명 6PL)’</b>에 가까운 새로운 형태의 유통 모델을 지향합니다.
+                    </p>
+                    <p class="opacity-90">
+                        직접 구축한 물류 인프라와 배송 네트워크를 기반으로 중간 유통 마진, 광고비, 플랫폼 수수료를 최소화하고, 그 절감된 비용을 상품 원가와 배송비에 그대로 반영하여 소비자에게는 합리적인 가격을, 판매자에게는 수수료 부담 없는 유통 환경을 제공합니다.
                     </p>
                 </div>
-            </section>
+            </header>
+            
+            <section class="mb-40">
+                <div class="bg-emerald-50/50 rounded-[48px] p-10 md:p-20 border-none shadow-inner text-left">
+                    <p class="text-emerald-800 font-black text-3xl md:text-4xl mb-16 italic">우리의 핵심 가치는 명확합니다.</p>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-20 mb-20">
+                        <div class="flex flex-col gap-4">
+                            <p class="text-emerald-600 text-sm font-black uppercase tracking-[0.2em] opacity-50">Value 01</p>
+                            <p class="text-3xl md:text-4xl font-black text-slate-800 leading-tight">
+                                중간 유통 수수료<br><span class="text-emerald-600 underline decoration-4 underline-offset-8">0원</span>
+                            </p>
+                        </div>
+                        <div class="flex flex-col gap-4">
+                            <p class="text-emerald-600 text-sm font-black uppercase tracking-[0.2em] opacity-50">Value 02</p>
+                            <p class="text-3xl md:text-4xl font-black text-slate-800 leading-tight">
+                                플랫폼 입점 비용<br><span class="text-emerald-600 underline decoration-4 underline-offset-8">0원</span>
+                            </p>
+                        </div>
+                    </div>
 
-            <section class="mb-24 bg-gray-900 p-12 md:p-24 rounded-[3.5rem] md:rounded-[5rem] text-white text-left relative overflow-hidden shadow-2xl">
-                <div class="relative z-10 text-left">
-                    <h3 class="text-3xl md:text-5xl font-black mb-16 tracking-tighter uppercase italic text-green-400 text-left">송도에 최적화된 6PL 모델</h3>
-                    <ul class="space-y-10 md:space-y-12 text-lg md:text-3xl font-bold opacity-90 text-left">
-                        <li class="flex items-start gap-6 text-left">
-                            <span class="text-green-500 mt-1 flex-shrink-0"><i class="fas fa-check-circle"></i></span>
-                            <span class="text-left">송도 생활권 중심의 직영 배송 네트워크</span>
-                        </li>
-                        <li class="flex items-start gap-6 text-left">
-                            <span class="text-green-500 mt-1 flex-shrink-0"><i class="fas fa-check-circle"></i></span>
-                            <span class="text-left">산지 소싱부터 문 앞 배송까지 직접 관리</span>
-                        </li>
-                        <li class="flex items-start gap-6 text-left">
-                            <span class="text-green-500 mt-1 flex-shrink-0"><i class="fas fa-check-circle"></i></span>
-                            <span class="text-left">자체 기술(IT) 인프라를 통한 비용 절감</span>
-                        </li>
-                        <li class="flex items-start gap-6 text-left">
-                            <span class="text-green-500 mt-1 flex-shrink-0"><i class="fas fa-check-circle"></i></span>
-                            <span class="text-left text-left">불필요한 마케팅비를 뺀 원가 중심 유통</span>
-                        </li>
-                    </ul>
-                    <div class="mt-20 pt-16 border-t border-white/10 text-left text-left">
-                        <p class="text-2xl md:text-5xl font-black tracking-tight text-green-400 italic leading-tight text-left">
-                            가장 합리적인 유통 구조를<br>송도에서 바구니 삼촌이 실현합니다.
+                    <div class="border-t border-emerald-100 pt-16">
+                        <p class="text-slate-500 font-bold text-xl md:text-2xl leading-relaxed">
+                            바구니 삼촌몰은 <span class="text-slate-800 font-black">‘상품을 파는 플랫폼’</span>이 아니라, <br class="hidden md:block">
+                            <span class="text-emerald-600 font-black">‘유통 구조를 설계하고 배송을 완성하는 물류 중심 서비스’</span>입니다.
                         </p>
                     </div>
                 </div>
-                <div class="absolute -right-20 -bottom-20 w-96 h-96 bg-green-500/10 rounded-full blur-[100px] text-left"></div>
             </section>
 
-            <div class="text-center">
-                <a href="/" class="inline-block bg-green-600 text-white px-20 py-6 md:px-24 md:py-8 rounded-full font-black text-xl md:text-3xl shadow-2xl hover:bg-green-700 transition active:scale-95 text-center">지금 상품 확인하기</a>
+            <section class="mb-40 bg-slate-900 p-12 md:p-24 rounded-[64px] text-white shadow-2xl relative overflow-hidden text-left">
+                <div class="relative z-10">
+                    <h3 class="text-3xl md:text-5xl font-black mb-20 tracking-tighter uppercase italic text-emerald-400">송도에 최적화된 6PL 모델</h3>
+                    
+                    <ul class="grid grid-cols-1 md:grid-cols-2 gap-12 text-lg md:text-2xl font-bold opacity-90">
+                        <li class="flex items-start gap-5">
+                            <i class="fas fa-check-circle text-emerald-500 mt-1"></i>
+                            <span>송도 생활권 중심의<br>직영 배송 네트워크</span>
+                        </li>
+                        <li class="flex items-start gap-5">
+                            <i class="fas fa-check-circle text-emerald-500 mt-1"></i>
+                            <span>산지 소싱부터 문 앞 배송까지<br>직접 관리</span>
+                        </li>
+                        <li class="flex items-start gap-5">
+                            <i class="fas fa-check-circle text-emerald-500 mt-1"></i>
+                            <span>자체 기술(IT) 인프라를 통한<br>비용 절감</span>
+                        </li>
+                        <li class="flex items-start gap-5">
+                            <i class="fas fa-check-circle text-emerald-500 mt-1"></i>
+                            <span>불필요한 마케팅비를 뺀<br>원가 중심 유통</span>
+                        </li>
+                    </ul>
+
+                    <div class="mt-24 pt-20 border-t border-white/10">
+                        <p class="text-3xl md:text-6xl font-black tracking-tight text-emerald-400 italic leading-[1.1]">
+                            가장 합리적인 유통 구조를<br>
+                            송도에서 바구니 삼촌이 실현합니다.
+                        </p>
+                    </div>
+                </div>
+                <div class="absolute -right-32 -bottom-32 w-[600px] h-[600px] bg-emerald-500/10 rounded-full blur-[120px]"></div>
+            </section>
+
+            <div class="pb-16 text-center">
+                <a href="/" class="group inline-flex items-center gap-6 bg-emerald-600 text-white px-16 py-8 md:px-24 md:py-10 rounded-[32px] font-black text-2xl md:text-4xl shadow-2xl shadow-emerald-600/30 hover:bg-emerald-500 transition-all active:scale-95 duration-300">
+                    지금 상품 확인하기
+                    <i class="fas fa-arrow-right text-lg md:text-2xl group-hover:translate-x-2 transition-transform"></i>
+                </a>
             </div>
         </div>
-    </div>"""
+    </div>
+    """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
 
 @app.route('/category/<string:cat_name>')
@@ -862,7 +914,7 @@ def product_detail(pid):
                 <div class="space-y-3 mb-10 text-xs md:text-sm text-gray-400 text-left border-l-4 border-gray-100 pl-6 py-2">
                     <p class="text-blue-600 font-bold text-left flex items-center gap-2"><i class="fas fa-warehouse opacity-30"></i> 잔여수량: {{ p.stock }}개 한정</p>
                     <p class="countdown-timer text-red-500 font-bold text-left flex items-center gap-2" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
-                    <p class="text-left flex items-center gap-2"><i class="fas fa-map-marker-alt opacity-30"></i> 원산지: {{ p.origin or '정보없음' }}</p>
+                 
                     <p class="text-left flex items-center gap-2"><i class="fas fa-box-open opacity-30"></i> 규격: {{ p.spec or '일반' }}</p>
                 </div>
                 
@@ -1056,7 +1108,7 @@ def seller_info_page(cid):
             </div>
             
             <div class="bg-gray-50 p-8 text-center border-t border-gray-100 text-[11px] text-gray-400 font-black uppercase tracking-[0.5em] text-center">
-                Basket Uncle Premium Service
+                바구니 삼촌 Premium Service
             </div>
         </div>
     </div>"""
@@ -1407,7 +1459,11 @@ def payment_success():
             if p: p.stock -= i.quantity
         Cart.query.filter_by(user_id=current_user.id).delete(); db.session.commit()
         
-        return render_template_string(HEADER_HTML + """<div class="max-w-md mx-auto py-48 text-center font-black text-center text-center"><div class="w-28 h-28 bg-green-500 rounded-full flex items-center justify-center text-white text-5xl mx-auto mb-12 shadow-2xl animate-bounce text-center"><i class="fas fa-check"></i></div><h2 class="text-3xl md:text-4xl font-black mb-8 text-center">주문 성공!</h2><p class="text-gray-400 font-bold mb-16 text-sm md:text-base text-center">최적의 경로로 배송해 드리겠습니다.</p><div class="flex flex-col gap-5 text-center"><a href="/" class="bg-gray-800 text-white py-5 rounded-full font-black text-lg shadow-xl hover:scale-105 transition text-center">홈으로 돌아가기</a><button onclick="alert('브라우저 메뉴의 [홈 화면에 추가]를 선택해주세요!')" class="bg-green-600 text-white py-5 rounded-full font-black text-lg shadow-xl hover:scale-105 transition text-center">📱 홈화면에 바로가기 추가</button></div></div>""" + FOOTER_HTML)
+        return render_template_string(HEADER_HTML + """<div class="max-w-md mx-auto py-48 text-center font-black text-center text-center">
+                                      <div class="w-28 h-28 bg-green-500 rounded-full flex items-center justify-center text-white text-5xl mx-auto mb-12 shadow-2xl animate-bounce text-center">
+                                      <i class="fas fa-check"></i></div><h2 class="text-3xl md:text-4xl font-black mb-8 text-center">주문 성공!</h2><p class="text-gray-400 font-bold mb-16 text-sm md:text-base text-center">
+                                      최적의 경로로 배송해 드리겠습니다.</p><div class="flex flex-col gap-5 text-center"><a href="/" class="bg-gray-800 text-white py-5 rounded-full font-black text-lg shadow-xl hover:scale-105 transition text-center">
+                                      홈으로 돌아가기</a>)" </div></div>""" + FOOTER_HTML)
     return redirect('/')
 
 # --------------------------------------------------------------------------------
