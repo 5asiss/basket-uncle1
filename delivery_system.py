@@ -205,7 +205,15 @@ def admin_dashboard():
                             <td class="font-black text-slate-800">{{ t.address }}</td>
                             <td class="font-black text-slate-900">{{ t.customer_name }}</td>
                             <td class="text-slate-500 font-medium">{{ t.product_details }}</td>
-                            <td class="text-center font-black text-slate-600">{{ t.driver_name }}</td>
+                           <td class="text-center font-black text-slate-600">
+    {{ t.driver_name }}
+    <div class="flex gap-1 justify-center mt-1">
+        <a href="/cancel/{{t.id}}" class="text-[9px] bg-slate-200 px-1 rounded" title="재배정">재배정</a>
+        <a href="/update_status/{{t.id}}/보류" class="text-[9px] bg-yellow-100 text-yellow-700 px-1 rounded">보류</a>
+        <a href="/update_status/{{t.id}}/취소" class="text-[9px] bg-red-100 text-red-700 px-1 rounded">취소</a>
+    </div>
+</td>
+                            
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -461,11 +469,26 @@ def add_driver():
 def delete_driver(did):
     Driver.query.filter_by(id=did).delete(); db_delivery.session.commit(); return redirect('/drivers')
 
+# [8. 핵심 로직 처리 구역 - cancel_assignment 수정 및 상태 변경 추가]
+
 @app.route('/cancel/<int:tid>')
 def cancel_assignment(tid):
     t = DeliveryTask.query.get(tid)
-    if t: t.driver_id, t.driver_name, t.status = None, '미배정', '대기'; db_delivery.session.commit()
-    return redirect('/')
+    # 기존: 미배정/대기로 복구 (픽업 후에도 재배정 가능하도록 수정 금지 규칙 하에 로직만 확장)
+    if t:
+        t.driver_id, t.driver_name, t.status = None, '미배정', '대기'
+        t.pickup_at = None # 픽업 시간 초기화
+        db_delivery.session.commit()
+    return redirect(request.referrer or '/')
+
+@app.route('/update_status/<int:tid>/<string:new_status>')
+def update_task_status(tid, new_status):
+    # 보류, 취소 등 상태 강제 변경 기능
+    t = DeliveryTask.query.get(tid)
+    if t:
+        t.status = new_status
+        db_delivery.session.commit()
+    return redirect(request.referrer or '/')
 
 def patch_db():
     with app.app_context():

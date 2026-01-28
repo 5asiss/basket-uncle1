@@ -954,7 +954,37 @@ def about_page():
     </div>
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
-
+# [추가] 무한 스크롤을 위한 상품 데이터 제공 API
+@app.route('/api/category_products/<string:cat_name>')
+def api_category_products(cat_name):
+    page = int(request.args.get('page', 1))
+    per_page = 30
+    offset = (page - 1) * per_page
+    
+    query = Product.query.filter_by(is_active=True)
+    if cat_name == '최신상품':
+        query = query.order_by(Product.id.desc())
+    elif cat_name == '오늘마감':
+        today_end = datetime.now().replace(hour=23, minute=59, second=59)
+        query = query.filter(Product.deadline > datetime.now(), Product.deadline <= today_end).order_by(Product.deadline.asc())
+    else:
+        query = query.filter_by(category=cat_name).order_by(Product.id.desc())
+    
+    products = query.offset(offset).limit(per_page).all()
+    
+    res_data = []
+    for p in products:
+        res_data.append({
+            "id": p.id,
+            "name": p.name,
+            "price": p.price,
+            "image_url": p.image_url,
+            "description": p.description or "",
+            "stock": p.stock,
+            "is_sold_out": (p.deadline and p.deadline < datetime.now()) or p.stock <= 0,
+            "deadline": p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else ""
+        })
+    return jsonify(res_data)
 @app.route('/category/<string:cat_name>')
 def category_view(cat_name):
     """카테고리별 상품 목록 뷰"""
