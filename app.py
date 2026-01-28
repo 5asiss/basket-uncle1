@@ -176,7 +176,7 @@ HEADER_HTML = """
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <naver-site-verification: naver59b5d949025941196f1a06981ee6362c.html>
+    <meta name="naver-site-verification" content="11c3f5256fbdca16c2d7008b7cf7d0feff9b056b" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>바구니삼촌 - 신개념 6PL 생활서비스 </title>
     <script src="https://js.tosspayments.com/v1/payment"></script>
