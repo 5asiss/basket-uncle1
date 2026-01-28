@@ -176,6 +176,7 @@ HEADER_HTML = """
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <naver-site-verification: naver59b5d949025941196f1a06981ee6362c.html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>바구니삼촌 - 신개념 6PL 생활서비스 </title>
     <script src="https://js.tosspayments.com/v1/payment"></script>
@@ -310,7 +311,7 @@ HEADER_HTML = """
                         <a href="/mypage" class="text-gray-600 font-black bg-gray-100 px-4 py-2 rounded-full text-[10px] md:text-xs hover:bg-gray-200 transition">MY</a>
                     {% else %}
                         <a href="/login" class="text-gray-400 font-black text-xs md:text-sm hover:text-green-600 transition">로그인</a>
-                        <a href="/register" class="bg-green-600 text-white px-5 py-2.5 rounded-full text-xs font-black shadow-lg hover:bg-green-700 transition hidden sm:block">시작하기</a>
+                        <a href="/register" class="bg-green-600 text-white px-5 py-2.5 rounded-full text-xs font-black shadow-lg hover:bg-green-700 transition hidden sm:block">회원가입</a>
                     {% endif %}
                 </div>
             </div>
@@ -1643,8 +1644,10 @@ def admin_dashboard():
                             it_match = re.match(r'(.*?)\((\d+)\)', item)
                             if it_match: pn, qt = it_match.groups(); summary[cat_n][pn] = summary[cat_n].get(pn, 0) + int(qt)
             if show: filtered_orders.append(o)
-    
+    elif tab == 'reviews':
+        reviews = Review.query.order_by(Review.created_at.desc()).all()
     return render_template_string(HEADER_HTML + """
+            
     <div class="max-w-7xl mx-auto py-12 px-4 md:px-6 font-black text-xs md:text-sm text-left">
         <div class="flex justify-between items-center mb-10 text-left">
             <h2 class="text-2xl md:text-3xl font-black text-orange-700 italic text-left">Admin Panel</h2>
@@ -1655,7 +1658,8 @@ def admin_dashboard():
             <a href="/admin?tab=products" class="px-8 py-5 {% if tab == 'products' %}border-b-4 border-orange-500 text-orange-600{% endif %}">상품 관리</a>
             {% if current_user.is_admin %}<a href="/admin?tab=categories" class="px-8 py-5 {% if tab == 'categories' %}border-b-4 border-orange-500 text-orange-600{% endif %}">카테고리/판매자 설정</a>{% endif %}
             <a href="/admin?tab=orders" class="px-8 py-5 {% if tab == 'orders' %}border-b-4 border-orange-500 text-orange-600{% endif %}">주문 및 배송 집계</a>
-        </div>
+            <a href="/admin?tab=reviews" class="px-8 py-5 {% if tab == 'reviews' %}border-b-4 border-orange-500 text-orange-600{% endif %}">리뷰 관리</a>
+             </div>
         
         {% if tab == 'products' %}
             <div class="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6 text-left">
@@ -1827,8 +1831,25 @@ def admin_dashboard():
                 </table>
             </div>
             
-            <div class="flex justify-end mt-12 text-right">
+<div class="flex justify-end mt-12 text-right">
                 <a href="/admin/orders/excel" class="bg-gray-800 text-white px-10 py-5 rounded-2xl font-black text-xs md:text-sm shadow-2xl hover:scale-105 transition text-center">Excel Download (전체 내역)</a>
+            </div>
+        {% elif tab == 'reviews' %}
+            <div class="bg-white rounded-[2.5rem] shadow-xl border border-gray-50 overflow-hidden">
+                <table class="w-full text-[10px] md:text-xs font-black text-left">
+                    <thead class="bg-gray-800 text-white">
+                        <tr><th class="p-6">상품/작성자</th><th class="p-6">내용</th><th class="p-6 text-center">관리</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for r in reviews %}
+                        <tr class="border-b border-gray-100 hover:bg-red-50/30">
+                            <td class="p-6"><span class="text-green-600">[{{ r.product_name }}]</span><br>{{ r.user_name }}</td>
+                            <td class="p-6">{{ r.content }}</td>
+                            <td class="p-6 text-center"><a href="/admin/review/delete/{{ r.id }}" class="bg-red-500 text-white px-4 py-2 rounded-full" onclick="return confirm('삭제하시겠습니까?')">삭제</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         {% endif %}
     </div>""" + FOOTER_HTML, **locals())
@@ -1881,6 +1902,22 @@ def admin_product_bulk_upload():
     except Exception as e: 
         db.session.rollback()
         flash(f"업로드 실패: {str(e)}"); return redirect('/admin')
+        db.session.commit()
+        flash(f"{count}개의 상품이 성공적으로 등록되었습니다."); return redirect('/admin')
+    except Exception as e: 
+        db.session.rollback()
+        flash(f"업로드 실패: {str(e)}"); return redirect('/admin')
+
+@app.route('/admin/review/delete/<int:rid>')
+@login_required
+def admin_review_delete(rid):
+    if not (current_user.is_admin or Category.query.filter_by(manager_email=current_user.email).first()):
+        return redirect('/')
+    r = Review.query.get_or_404(rid)
+    db.session.delete(r)
+    db.session.commit()
+    flash("리뷰가 삭제되었습니다.")
+    return redirect('/admin?tab=reviews')
 
 # --------------------------------------------------------------------------------
 # 8. 개별 상품 등록/수정/삭제 및 카테고리 관리
