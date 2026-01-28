@@ -363,6 +363,20 @@ FOOTER_HTML = """
             </div>
         </div>
     </footer>
+<!-- 푸터 끝 -->
+</footer>
+
+<!-- ✅ 여기부터 붙여넣기 -->
+<div id="uncleModal" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
+  <div class="bg-white text-black max-w-3xl w-full mx-4 rounded-xl shadow-lg overflow-y-auto max-h-[80vh]">
+    <div class="flex justify-between items-center p-6 border-b">
+      <h2 id="uncleModalTitle" class="text-lg font-bold"></h2>
+      <button onclick="closeUncleModal()" class="text-gray-500 hover:text-black text-xl">✕</button>
+    </div>
+    <div id="uncleModalContent" class="p-6 text-sm leading-relaxed space-y-4"></div>
+  </div>
+</div>
+<!-- ✅ 여기까지 -->
 
     <script>
         function toggleSidebar() {
@@ -481,7 +495,128 @@ FOOTER_HTML = """
             }).open();
         }
     </script>
+<script>
+function openUncleModal(type) {
+  const title = document.getElementById('uncleModalTitle');
+  const content = document.getElementById('uncleModalContent');
+
+  const data = {
+    terms: {
+      title: '이용약관',
+      content: `
+      <p><strong>제1조 (목적)</strong><br>
+      본 약관은 바구니삼촌(이하 "회사")이 제공하는 구매대행 및 배송 중개 서비스의 이용과 관련하여
+      회사와 이용자 간의 권리, 의무 및 책임사항을 규정함을 목적으로 합니다.</p>
+
+      <p><strong>제2조 (서비스의 정의)</strong><br>
+      회사는 상품을 직접 판매하지 않으며,
+      소비자의 요청에 따라 판매자(산지, 도매처 등)와 소비자를 연결하는
+      구매대행 및 배송 중개 서비스를 제공합니다.</p>
+
+      <p><strong>제3조 (서비스 이용 계약)</strong><br>
+      이용자는 본 약관에 동의함으로써 서비스 이용 계약이 성립되며,
+      결제 완료 시 구매대행 서비스 이용에 동의한 것으로 간주합니다.</p>
+
+      <p><strong>제4조 (책임의 구분)</strong><br>
+      상품의 품질, 원산지, 유통기한, 하자에 대한 책임은 판매자에게 있으며,
+      회사는 주문 접수, 결제 처리, 배송 중개 및 고객 응대에 대한 책임을 집니다.</p>
+
+      <p><strong>제5조 (면책 조항)</strong><br>
+      천재지변, 배송사 사정, 판매자 사정 등 회사의 합리적인 통제 범위를 벗어난 사유로
+      발생한 손해에 대하여 회사는 책임을 지지 않습니다.</p>
+      `
+    },
+
+    privacy: {
+      title: '개인정보처리방침',
+      content: `
+      <p><strong>1. 개인정보 수집 항목</strong><br>
+      회사는 서비스 제공을 위해 다음과 같은 개인정보를 수집합니다.<br>
+      - 필수항목: 이름, 휴대전화번호, 배송지 주소, 결제 정보</p>
+
+      <p><strong>2. 개인정보 이용 목적</strong><br>
+      수집된 개인정보는 다음 목적에 한하여 이용됩니다.<br>
+      - 주문 처리 및 배송<br>
+      - 고객 상담 및 민원 처리<br>
+      - 결제 및 환불 처리</p>
+
+      <p><strong>3. 개인정보 보관 및 이용 기간</strong><br>
+      개인정보는 수집 및 이용 목적 달성 시까지 보관하며,
+      관계 법령에 따라 일정 기간 보관 후 안전하게 파기합니다.</p>
+
+      <p><strong>4. 개인정보 제3자 제공</strong><br>
+      회사는 배송 및 주문 처리를 위해 판매자 및 배송업체에 한해
+      최소한의 개인정보를 제공합니다.</p>
+
+      <p><strong>5. 개인정보 보호</strong><br>
+      회사는 개인정보 보호를 위해 기술적·관리적 보호 조치를 취하고 있습니다.</p>
+      `
+    },
+
+    agency: {
+      title: '이용안내',
+      content: `
+      <p><strong>서비스 안내</strong><br>
+      바구니삼촌은 상품을 직접 보유하거나 판매하지 않는
+      구매대행 및 배송 중개 플랫폼입니다.</p>
+
+      <p><strong>주문 절차</strong><br>
+      ① 이용자가 상품 선택 및 결제<br>
+      ② 회사가 판매자에게 구매 요청<br>
+      ③ 판매자가 상품 준비<br>
+      ④ 배송을 통해 고객에게 전달</p>
+
+      <p><strong>결제 안내</strong><br>
+      결제 금액은 상품 대금과 배송비로 구성되며,
+      구매대행 수수료는 별도로 청구되지 않습니다.</p>
+
+      <p><strong>유의사항</strong><br>
+      상품 정보는 판매자가 제공하며,
+      실제 상품은 이미지와 다소 차이가 있을 수 있습니다.</p>
+      `
+    },
+
+    e_commerce: {
+      title: '전자상거래 유의사항',
+      content: `
+      <p><strong>1. 청약 철회 및 환불</strong><br>
+      일반 상품의 경우 전자상거래법에 따라
+      상품 수령 후 7일 이내 청약 철회가 가능합니다.</p>
+
+      <p><strong>2. 농산물 및 신선식품</strong><br>
+      농산물·신선식품은 특성상 단순 변심에 의한
+      환불이 제한될 수 있습니다.</p>
+
+      <p><strong>3. 환불 가능 사유</strong><br>
+      - 상품 하자<br>
+      - 오배송<br>
+      - 상품 훼손</p>
+
+      <p><strong>4. 환불 절차</strong><br>
+      고객센터 접수 후 확인 절차를 거쳐
+      결제 수단으로 환불 처리됩니다.</p>
+
+      <p><strong>5. 분쟁 처리</strong><br>
+      분쟁 발생 시 전자상거래 관련 법령 및
+      소비자 분쟁 해결 기준을 따릅니다.</p>
+      `
+    }
+  };
+
+  title.innerText = data[type].title;
+  content.innerHTML = data[type].content;
+  document.getElementById('uncleModal').classList.remove('hidden');
+  document.getElementById('uncleModal').classList.add('flex');
+}
+
+function closeUncleModal() {
+  document.getElementById('uncleModal').classList.add('hidden');
+  document.getElementById('uncleModal').classList.remove('flex');
+}
+</script>
+
 </body>
+
 </html>
 """
 
@@ -1578,7 +1713,7 @@ def admin_dashboard():
                     <h3 class="text-[11px] md:text-sm text-gray-400 uppercase tracking-widest mb-10 font-black text-left">판매 카테고리 및 사업자 추가</h3>
                     <form action="/admin/category/add" method="POST" class="space-y-5 text-left">
                         <input name="cat_name" placeholder="카테고리명 (예: 산지직송 농산물)" class="border border-gray-100 p-5 rounded-2xl w-full font-black text-sm text-left" required>
-                        <textarea name="description" placeholder="배송기한 예)+1일배송 ,마감후 일괄배송" class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black text-sm text-left"></textarea>
+                        <textarea name="description" placeholder="배송기한 예)+1일배송 ,마감후 " class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black text-sm text-left"></textarea>
                         <input name="manager_email" placeholder="관리 매니저 이메일 (ID)" class="border border-gray-100 p-5 rounded-2xl w-full font-black text-sm text-left">
                         <select name="tax_type" class="border border-gray-100 p-5 rounded-2xl w-full font-black text-sm text-left bg-white"><option value="과세">일반 과세 상품</option><option value="면세">면세 농축산물</option></select>
                         <div class="border-t border-gray-100 pt-8 space-y-4 text-left">
