@@ -1,4 +1,3 @@
-import html
 import os
 import sqlite3
 import requests
@@ -126,56 +125,28 @@ def logi_admin_logout():
 # 6. 관리자 메인 대시보드 (복구된 모든 필터링 및 숫자 현황판)
 # --------------------------------------------------------------------------------
 
-# --------------------------------------------------------------------------------
-# 6. 관리자 메인 대시보드 (에러 수정 버전)
-# --------------------------------------------------------------------------------
-
 @logi_bp.route('/')
 def logi_admin_dashboard():
-    if not session.get('admin_logged_in'): 
-        return redirect(url_for('logi.logi_admin_login'))
+    if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
     
-    # URL 파라미터 가져오기
     st_filter = request.args.get('status', 'all')
     cat_filter = request.args.get('category', '전체')
     q = request.args.get('q', '')
 
-    # [해결]UndefinedVariable 에러 방지를 위해 view_status 정의
-    view_status = st_filter 
-
     query = DeliveryTask.query
-    
-    # 상태 필터링 로직
-    if st_filter == '미배정':
-        query = query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None)
-    elif st_filter == '배정완료':
-        query = query.filter_by(status='배정완료')
-    elif st_filter != 'all':
-        query = query.filter_by(status=st_filter)
+    # 상태 필터링
+    if st_filter == '미배정': query = query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None)
+    elif st_filter == '배정완료': query = query.filter(DeliveryTask.status == '배정완료')
+    elif st_filter != 'all': query = query.filter_by(status=st_filter)
     
     # 카테고리 필터링
-    if cat_filter != '전체':
-        query = query.filter_by(category=cat_filter)
+    if cat_filter != '전체': query = query.filter_by(category=cat_filter)
     
     # 검색어 필터링
-    if q:
-        query = query.filter((DeliveryTask.address.contains(q)) | (DeliveryTask.customer_name.contains(q)))
+    if q: query = query.filter((DeliveryTask.address.contains(q)) | (DeliveryTask.customer_name.contains(q)))
     
     tasks = query.all()
-    tasks.sort(key=lambda x: x.address or "", reverse=True)
-
-    # 완료 화면용 날짜별 요약 데이터 생성
-    daily_summary = {}
-    if view_status == '완료' or view_status == 'complete': # 상태값 확인
-        for t in tasks:
-            if t.completed_at:
-                day_str = t.completed_at.strftime('%m/%d')
-                daily_summary[day_str] = daily_summary.get(day_str, 0) + 1
-    
-    # 날짜 최신순 정렬
-    daily_summary = dict(sorted(daily_summary.items(), reverse=True))
-
-    # 현황판 수치 계산
+    tasks.sort(key=lambda x: (x.address or "", logi_extract_qty(x.product_details)), reverse=True)
     pending_sync_count = 0
     try:
         conn = sqlite3.connect(logi_get_main_db_path())
@@ -183,8 +154,7 @@ def logi_admin_dashboard():
         cursor.execute("SELECT COUNT(*) FROM \"order\" WHERE status = '배송요청'")
         pending_sync_count = cursor.fetchone()[0]
         conn.close()
-    except: 
-        pass
+    except: pass
 
     unassigned_count = DeliveryTask.query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None).count()
     assigned_count = DeliveryTask.query.filter_by(status='배정완료').count()
@@ -194,22 +164,15 @@ def logi_admin_dashboard():
     item_sum = logi_get_item_summary(tasks)
     drivers = Driver.query.all()
     saved_cats = sorted(list(set([t.category for t in DeliveryTask.query.all() if t.category])))
+    # 현황판용 수치 계산
+    unassigned_count = DeliveryTask.query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None).count()
+    assigned_count = DeliveryTask.query.filter_by(status='배정완료').count()
+    picking_count = DeliveryTask.query.filter_by(status='픽업').count()
+    complete_today = DeliveryTask.query.filter_by(status='완료').filter(DeliveryTask.completed_at >= datetime.now().replace(hour=0,minute=0,second=0)).count()
 
-    # 템플릿 렌더링 (view_status를 포함하여 전달)
-    return render_template_string(html, 
-                                  tasks=tasks, 
-                                  pending_sync_count=pending_sync_count,
-                                  unassigned_count=unassigned_count,
-                                  assigned_count=assigned_count,
-                                  picking_count=picking_count,
-                                  complete_today=complete_today,
-                                  item_sum=item_sum,
-                                  drivers=drivers,
-                                  saved_cats=saved_cats,
-                                  current_status=st_filter, 
-                                  current_cat=cat_filter,
-                                  view_status=view_status, # 변수 추가
-                                  daily_summary=daily_summary)
+    item_sum = logi_get_item_summary(tasks)
+    drivers = Driver.query.all()
+    saved_cats = sorted(list(set([t.category for t in DeliveryTask.query.all() if t.category])))
 
     html = """
     <!DOCTYPE html>
@@ -444,24 +407,20 @@ def logi_admin_dashboard():
 
 @logi_bp.route('/work', methods=['GET', 'POST'])
 def logi_driver_work():
-    # [에러 해결] 함수 시작 즉시 모든 변수를 기본값으로 초기화합니다.
-    # 이렇게 하면 아래 어떤 if/else 문을 타더라도 템플릿 렌더링 시 변수가 존재합니다.
+    # 1. 입력값 정제
     driver_name = request.args.get('driver_name', '').strip()
     auth_phone = request.args.get('auth_phone', '').strip().replace('-', '')
-    view_status = request.args.get('view', 'assigned') # 초기값 설정
-    days = int(request.args.get('days', 7))
-    daily_summary = {} # 완료 화면용 통계 데이터
-    tasks = [] # 기본 리스트 초기화
-
-    # 1. 기사 정보 매칭 확인
+    
+    # 2. 기사 정보 매칭 확인 (이름과 전화번호 동시 만족)
     driver = None
     if driver_name and auth_phone:
+        # DB의 전화번호에서도 하이픈을 제거하고 비교하여 검색
         driver = Driver.query.filter(
             Driver.name == driver_name,
             db_delivery.func.replace(Driver.phone, '-', '') == auth_phone
         ).first()
 
-    # 2. 인증 실패 시 (이미 view_status 등이 선언되어 있어 에러가 나지 않음)
+    # 3. 인증 실패 또는 최초 접속 시 로그인 화면 표시
     if not driver:
         return render_template_string("""
         <script src="https://cdn.tailwindcss.com"></script>
@@ -470,40 +429,34 @@ def logi_driver_work():
                 <h1 class="text-2xl font-black text-green-500 mb-8 italic uppercase tracking-widest">Driver Login</h1>
                 <p class="text-slate-400 mb-10 font-bold leading-relaxed text-sm">등록된 성함과 전화번호를<br>입력하여 접속하세요.</p>
                 <form action="{{ url_for('logi.logi_driver_work') }}" method="GET" class="space-y-6">
-                    <input type="text" name="driver_name" placeholder="성함 입력" value="{{driver_name}}" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
-                    <input type="tel" name="auth_phone" placeholder="전화번호" value="{{auth_phone}}" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
+                    <input type="text" name="driver_name" placeholder="성함 입력" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
+                    <input type="tel" name="auth_phone" placeholder="전화번호 (01000000000)" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
                     <button class="w-full bg-green-600 py-6 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">업무 시작하기</button>
                 </form>
             </div>
         </body>
-        """, driver_name=driver_name, auth_phone=auth_phone)
+        """)
 
-    # 3. 오더 쿼리 로직
+    # --- 이후 배송 목록 출력 로직은 기존과 동일함 ---
+
+    view_status = request.args.get('view', 'assigned') 
     query = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id)
-    
-    if view_status == 'assigned':
-        tasks = query.filter(DeliveryTask.status.in_(['배정완료', '대기'])).all()
-    elif view_status == 'pickup':
-        tasks = query.filter_by(status='픽업').all()
-    elif view_status == 'complete':
-        since = datetime.now() - timedelta(days=days)
-        tasks = query.filter(DeliveryTask.status == '완료', DeliveryTask.completed_at >= since).all()
-        # [추가] 날짜별 완료 건수 집계
-        for t in tasks:
-            if t.completed_at:
-                day_str = t.completed_at.strftime('%m/%d')
-                daily_summary[day_str] = daily_summary.get(day_str, 0) + 1
-        daily_summary = dict(sorted(daily_summary.items(), reverse=True))
-    else:
-        tasks = query.filter(DeliveryTask.status != '완료').all()
+    if view_status == 'assigned': tasks = query.filter(DeliveryTask.status.in_(['배정완료', '대기'])).all()
+    elif view_status == 'pickup': tasks = query.filter_by(status='픽업').all()
+   # [수정 전]
+# elif view_status == 'complete': tasks = query.filter_by(status='완료').all()
 
-    # [요청사항] 항시 주소 내림차순 정렬 (reverse=True)
-    tasks.sort(key=lambda x: x.address or "", reverse=True)
-    
+# [수정 후]
+    elif view_status == 'complete':
+      days = int(request.args.get('days', 7)) # 기본 7일
+      since = datetime.now() - timedelta(days=days)
+      tasks = query.filter(DeliveryTask.status == '완료', DeliveryTask.completed_at >= since).all()
+    else: tasks = query.filter(DeliveryTask.status != '완료').all()
+
+    tasks.sort(key=lambda x: (x.address or "", logi_extract_qty(x.product_details)), reverse=True)
     item_sum = logi_get_item_summary(tasks) if view_status != 'complete' else {}
 
-    # 4. 렌더링
-    return render_template_string(html, **locals())
+   # [delivery_system.py 내 logi_driver_work 함수 안의 html 변수 부분 수정]
 
     html = """
 <!DOCTYPE html>
@@ -554,20 +507,19 @@ def logi_driver_work():
             <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=complete" class="tab-btn {% if view_status=='complete' %}active{% endif %}">배송완료</a>
         </div>
 
-        </div>
-
         {% if view_status == 'complete' %}
-        <div class="grid grid-cols-3 gap-2 mb-4 px-2">
-            {% for date, count in daily_summary.items() %}
-            <div class="bg-slate-800/50 border border-slate-700 p-4 rounded-2xl text-center shadow-lg border-b-4 border-b-green-900/30">
-                <p class="text-[10px] font-bold text-slate-500 mb-1 tracking-tighter">{{ date }}</p>
-                <p class="text-xl font-black text-green-500 leading-none">{{ count }}<span class="text-[10px] ml-0.5 text-slate-400">건</span></p>
-            </div>
+        <div class="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar">
+            {% for d in [7, 15, 30] %}
+            <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=complete&days={{d}}" 
+               class="px-4 py-2 rounded-full text-xs font-bold border {% if request.args.get('days')|int == d or (not request.args.get('days') and d==7) %}bg-green-600 border-green-600 text-white{% else %}bg-slate-800 border-slate-700 text-slate-400{% endif %} whitespace-nowrap">
+               최근 {{d}}일
+            </a>
             {% endfor %}
         </div>
         {% endif %}
-        {% if view_status == 'complete' %}
-        <div class="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar px-2">
+
+        {% if view_status != 'complete' %}
+        <div class="bg-slate-900/80 backdrop-blur-md p-4 rounded-2xl mb-4 border border-slate-800">
             <div class="flex justify-between items-end mb-3">
                 <span class="text-[10px] font-black text-slate-500 uppercase">품목별 합계 ({{tasks|length}}건)</span>
             </div>
@@ -578,22 +530,7 @@ def logi_driver_work():
             </div>
         </div>
         {% endif %}
-        {% if view_status == 'complete' %}
-        <div class="grid grid-cols-3 gap-2 mb-6 mx-2">
-            {% for date, count in daily_summary.items() %}
-            <div class="bg-slate-800 border border-slate-700 p-3 rounded-2xl text-center shadow-lg">
-                <p class="text-[10px] font-black text-slate-500 mb-1">{{ date }}</p>
-                <p class="text-lg font-black text-green-500">{{ count }}<span class="text-xs ml-0.5">건</span></p>
-            </div>
-            {% else %}
-            <div class="col-span-3 py-4 text-center text-slate-500 text-xs italic">최근 배송 기록이 없습니다.</div>
-            {% endfor %}
-        </div>
-        {% endif %}
 
-        {% if view_status == 'complete' %}
-        
-        <div class="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar px-2">
         <div class="space-y-3">
             {% for t in tasks %}
             <div class="task-card">
