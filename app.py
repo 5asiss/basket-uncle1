@@ -13,14 +13,37 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from sqlalchemy import text
+from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint 가져오기
 
 # --------------------------------------------------------------------------------
 # 1. 초기 설정 및 Flask 인스턴스 생성
 # --------------------------------------------------------------------------------
+# --- 수정 전 기존 코드 ---
+# app = Flask(__name__)
+# app.register_blueprint(logi_bp) 
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///direct_trade_mall.db'
+# db = SQLAlchemy(app)
+
+# --- 수정 후 (이 부분으로 교체하세요) ---
+from delivery_system import logi_bp, db_delivery  # 배송 시스템 파일에서 객체 가져오기
+
 app = Flask(__name__)
 app.secret_key = "basket_uncle_direct_trade_key_999_secure"
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///direct_trade_mall.db'
+
+# 1. 모든 DB 경로를 설정에 먼저 등록합니다.
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///direct_trade_mall.db' # 쇼핑몰 DB
+app.config['SQLALCHEMY_BINDS'] = {
+    'delivery': 'sqlite:///delivery.db' # 배송 시스템 DB
+}
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# 2. [핵심] 쇼핑몰 주방장(db)을 배송팀(db_delivery)과 공유합니다.
+# 새로 만들지 않고 기존에 정의된 배송팀 주방장 객체를 가져와서 쇼핑몰 앱에 연결합니다.
+db = db_delivery  
+db.init_app(app)
+
+# 3. 배송 관리 시스템 Blueprint 등록 (주소 접두어 /logi 적용됨)
+app.register_blueprint(logi_bp)
 
 # 결제 연동 키 (Toss Payments)
 TOSS_CLIENT_KEY = "test_ck_DpexMgkW36zB9qm5m4yd3GbR5ozO"
@@ -32,7 +55,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-db = SQLAlchemy(app)
+
 login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
@@ -2111,19 +2134,27 @@ def init_db():
 
 import subprocess
 
-if __name__ == "__main__":
-    init_db()
-    
-    # 윈도우 환경에서 디버그 모드 사용 시 자식 프로세스가 중복 실행되는 것을 방지합니다.
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
-        try:
-            delivery_script = os.path.join(os.path.dirname(__file__), 'delivery_system.py')
-            if os.path.exists(delivery_script):
-                print("--- [INFO] 배송 관리 시스템 서버 준비 중... ---")
-                # 환경 변수를 분리하여 독립적인 환경에서 실행되도록 유도합니다.
-                subprocess.Popen(["python", delivery_script])
-        except Exception as e:
-            print(f"--- [ERROR] 배송 서버 가동 실패: {e} ---")
+# --- 수정 전 기존 코드 ---
+# if __name__ == "__main__":
+#     init_db()
+#     if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+#         subprocess.Popen(["python", delivery_script])
+#     app.run(host="0.0.0.0", port=5000, debug=True)
 
-    # 메인 쇼핑몰 서버 실행
-    app.run(host="0.0.0.0", port=5000, debug=True)
+# --- 수정 후 (이 부분으로 교체하세요) ---
+if __name__ == "__main__":
+    with app.app_context():
+        # 쇼핑몰 테이블과 배송 테이블을 각각의 DB 파일에 생성합니다.
+        db.create_all() # BINDS 설정에 따라 자동으로 분리 생성됨
+        
+        # [복구] 배송 시스템 최초 관리자 생성 로직 추가
+        from delivery_system import AdminUser
+        if not AdminUser.query.filter_by(username='admin').first():
+            db.session.add(AdminUser(username="admin", password="1234"))
+            db.session.commit()
+            
+    init_db() # 기존 쇼핑몰 초기화 함수 호출
+    
+    # 로컬 테스트 및 Render 배포 호환 포트 설정
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
