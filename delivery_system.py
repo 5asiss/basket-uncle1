@@ -405,31 +405,37 @@ def logi_admin_dashboard():
 
 # [delivery_system.py 내 logi_driver_work 함수 부분 수정]
 
-@logi_bp.route('/work/<string:token>')
-def logi_driver_work(token):
-    driver = Driver.query.filter_by(token=token).first_or_404()
+@logi_bp.route('/work', methods=['GET', 'POST'])
+def logi_driver_work():
+    # 1. 입력값 정제
+    driver_name = request.args.get('driver_name', '').strip()
+    auth_phone = request.args.get('auth_phone', '').strip().replace('-', '')
     
-    # 1. 환경 및 입력값 정제
-    user_agent = request.headers.get('User-Agent', '').lower()
-    is_mobile = any(m in user_agent for m in ['mobile', 'android', 'iphone', 'ipad', 'blackberry'])
-    auth_phone = request.args.get('auth_phone', '').strip().replace('-', '') # 하이픈 제거
-    db_phone = driver.phone.strip().replace('-', '') # DB 번호도 하이픈 제거 후 비교
-    
-    # 2. 모바일 기기 본인 인증 레이어 (수정 포인트: action 경로 추가)
-    if is_mobile and auth_phone != db_phone:
+    # 2. 기사 정보 매칭 확인 (이름과 전화번호 동시 만족)
+    driver = None
+    if driver_name and auth_phone:
+        # DB의 전화번호에서도 하이픈을 제거하고 비교하여 검색
+        driver = Driver.query.filter(
+            Driver.name == driver_name,
+            db_delivery.func.replace(Driver.phone, '-', '') == auth_phone
+        ).first()
+
+    # 3. 인증 실패 또는 최초 접속 시 로그인 화면 표시
+    if not driver:
         return render_template_string("""
         <script src="https://cdn.tailwindcss.com"></script>
         <body class="bg-[#0f172a] text-white flex items-center justify-center min-h-screen p-8 text-center">
             <div class="w-full max-w-sm bg-[#1e293b] p-12 rounded-[3.5rem] shadow-2xl border border-slate-700">
-                <h1 class="text-2xl font-black text-green-500 mb-8 italic uppercase tracking-widest">Driver Verify</h1>
-                <p class="text-slate-400 mb-10 font-bold leading-relaxed text-sm">등록된 본인의 전화번호<br>전체를 입력해주시기 바랍니다.</p>
-                <form action="{{ url_for('logi.logi_driver_work', token=token) }}" method="GET" class="space-y-6">
-                    <input type="tel" name="auth_phone" placeholder="010-0000-0000" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-2xl font-black text-white focus:ring-4 focus:ring-green-500/20 transition outline-none" required>
-                    <button class="w-full bg-green-600 py-6 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">본인 확인 및 접속</button>
+                <h1 class="text-2xl font-black text-green-500 mb-8 italic uppercase tracking-widest">Driver Login</h1>
+                <p class="text-slate-400 mb-10 font-bold leading-relaxed text-sm">등록된 성함과 전화번호를<br>입력하여 접속하세요.</p>
+                <form action="{{ url_for('logi.logi_driver_work') }}" method="GET" class="space-y-6">
+                    <input type="text" name="driver_name" placeholder="성함 입력" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
+                    <input type="tel" name="auth_phone" placeholder="전화번호 (01000000000)" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
+                    <button class="w-full bg-green-600 py-6 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">업무 시작하기</button>
                 </form>
             </div>
         </body>
-        """, token=token) # token 변수 전달 필수
+        """)
 
     # --- 이후 배송 목록 출력 로직은 기존과 동일함 ---
 
@@ -437,7 +443,14 @@ def logi_driver_work(token):
     query = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id)
     if view_status == 'assigned': tasks = query.filter(DeliveryTask.status.in_(['배정완료', '대기'])).all()
     elif view_status == 'pickup': tasks = query.filter_by(status='픽업').all()
-    elif view_status == 'complete': tasks = query.filter_by(status='완료').all()
+   # [수정 전]
+# elif view_status == 'complete': tasks = query.filter_by(status='완료').all()
+
+# [수정 후]
+    elif view_status == 'complete':
+      days = int(request.args.get('days', 7)) # 기본 7일
+      since = datetime.now() - timedelta(days=days)
+      tasks = query.filter(DeliveryTask.status == '완료', DeliveryTask.completed_at >= since).all()
     else: tasks = query.filter(DeliveryTask.status != '완료').all()
 
     tasks.sort(key=lambda x: (x.address or "", logi_extract_qty(x.product_details)), reverse=True)
@@ -446,125 +459,134 @@ def logi_driver_work(token):
    # [delivery_system.py 내 logi_driver_work 함수 안의 html 변수 부분 수정]
 
     html = """
-    <!DOCTYPE html>
+<!DOCTYPE html>
     <html lang="ko">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>바구니삼촌 기사용 - {{ driver_name }}</title>
+        <title>B.Uncle Logi - {{ driver_name }}</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
             body { 
-                font-family: 'Noto Sans KR', sans-serif; 
-                background-color: #0f172a; 
-                color: #f8fafc; 
-                transition: font-size 0.2s; 
-                -webkit-tap-highlight-color: transparent;
-                letter-spacing: -0.02em;
+                font-family: 'Pretendard', sans-serif; 
+                background-color: #0f172a; color: #f8fafc; 
+                letter-spacing: -0.03em; word-break: keep-all;
             }
             .tab-btn { 
-                flex: 1; text-align: center; padding: 18px 10px; font-weight: 900; 
-                color: #64748b; border-bottom: 4px solid #1e293b; font-size: 15px; 
+                flex: 1; text-align: center; padding: 15px 5px; font-weight: 800; 
+                color: #94a3b8; border-bottom: 3px solid #1e293b; font-size: 14px; 
             }
-            .tab-btn.active { color: #22c55e; border-bottom: 4px solid #22c55e; background: rgba(34, 197, 94, 0.05); }
-            .btn-float { position: fixed; bottom: 90px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 12px; }
-            .btn-s { 
-                background: #22c55e; color: white; width: 55px; height: 55px; border-radius: 50%; 
-                display: flex; items-center; justify-center; font-bold; 
-                box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.1);
-            }
+            .tab-btn.active { color: #22c55e; border-bottom: 3px solid #22c55e; background: linear-gradient(to top, rgba(34,197,94,0.1), transparent); }
             .task-card {
-                background: #1e293b;
-                border-radius: 1.5rem;
-                padding: 1.5rem;
-                border: 1px solid #334155;
-                margin-bottom: 1.25rem;
-                box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+                background: #1e293b; border-radius: 1.25rem;
+                padding: 1.25rem; border: 1px solid #334155;
+                margin-bottom: 1rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
             }
-            .address-text { line-height: 1.3; }
+            .address-highlight { color: #ffffff; font-weight: 900; line-height: 1.2; }
+            .product-badge { background: #064e3b; color: #34d399; padding: 4px 10px; border-radius: 8px; font-weight: 800; font-size: 15px; }
+            /* 하단 플로팅 조작바 */
+            .bottom-ctrl { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 90%; z-index: 1000; }
         </style>
     </head>
-    <body class="p-2 pb-32" id="driver-body">
-        <div class="btn-float">
-            <button onclick="changeFontSize(2)" class="btn-s text-2xl font-black shadow-green-500/20">A+</button>
-            <button onclick="changeFontSize(-2)" class="btn-s text-2xl font-black text-slate-300 bg-slate-800">A-</button>
-        </div>
-
-        <header class="flex justify-between items-center p-4 mb-2">
-            <h1 class="text-2xl font-black text-green-500 italic uppercase tracking-tighter">B.Uncle Logi</h1>
-            <div class="flex gap-2">
-                <button onclick="location.reload()" class="bg-slate-800 p-3 rounded-2xl shadow-lg active:scale-90 transition">
-                    <i class="fas fa-sync-alt text-lg"></i>
-                </button>
+    <body class="pb-32 px-3" id="driver-body">
+        <header class="flex justify-between items-center py-5 px-2">
+            <div>
+                <h1 class="text-xl font-black text-green-500 italic uppercase">B.Uncle Logi</h1>
+                <p class="text-[10px] text-slate-500 font-bold uppercase">{{ driver_name }} 기사님 반갑습니다.</p>
             </div>
+            <button onclick="location.reload()" class="bg-slate-800 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition">
+                <i class="fas fa-sync-alt text-green-500"></i>
+            </button>
         </header>
 
-        <div class="flex mb-6 bg-[#1e293b] rounded-3xl overflow-hidden shadow-2xl border-b border-slate-700 mx-2">
-            <a href="?auth_phone={{auth_phone}}&view=assigned" class="tab-btn {% if view_status=='assigned' %}active{% endif %}">대기/배정</a>
-            <a href="?auth_phone={{auth_phone}}&view=pickup" class="tab-btn {% if view_status=='pickup' %}active{% endif %}">배송중</a>
-            <a href="?auth_phone={{auth_phone}}&view=complete" class="tab-btn {% if view_status=='complete' %}active{% endif %}">완료</a>
+        <div class="flex mb-4 bg-[#1e293b] rounded-2xl overflow-hidden shadow-xl sticky top-2 z-40 border border-slate-700">
+            <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned" class="tab-btn {% if view_status=='assigned' %}active{% endif %}">대기/배정</a>
+            <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=pickup" class="tab-btn {% if view_status=='pickup' %}active{% endif %}">배송중</a>
+            <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=complete" class="tab-btn {% if view_status=='complete' %}active{% endif %}">배송완료</a>
         </div>
 
+        {% if view_status == 'complete' %}
+        <div class="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar">
+            {% for d in [7, 15, 30] %}
+            <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=complete&days={{d}}" 
+               class="px-4 py-2 rounded-full text-xs font-bold border {% if request.args.get('days')|int == d or (not request.args.get('days') and d==7) %}bg-green-600 border-green-600 text-white{% else %}bg-slate-800 border-slate-700 text-slate-400{% endif %} whitespace-nowrap">
+               최근 {{d}}일
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         {% if view_status != 'complete' %}
-        <div class="bg-slate-900/50 p-5 rounded-3xl mb-6 mx-2 border border-slate-800 shadow-inner">
-            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 italic">Item Summary ({{tasks|length}}건)</p>
+        <div class="bg-slate-900/80 backdrop-blur-md p-4 rounded-2xl mb-4 border border-slate-800">
+            <div class="flex justify-between items-end mb-3">
+                <span class="text-[10px] font-black text-slate-500 uppercase">품목별 합계 ({{tasks|length}}건)</span>
+            </div>
             <div class="flex flex-wrap gap-2">
                 {% for name, total in item_sum.items() %}
-                <span class="bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl text-green-400 font-black text-xs shadow-sm">{{ name }}: {{ total }}</span>
+                <span class="bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl text-green-400 font-black text-xs">{{ name }} {{ total }}</span>
                 {% endfor %}
             </div>
         </div>
         {% endif %}
 
-        <div class="space-y-4 px-2">
-            <div class="bg-slate-800/50 p-4 rounded-3xl flex gap-3 mb-6 border border-slate-700">
-                <input type="checkbox" id="check-all" onclick="toggleAll()" class="w-8 h-8 bg-slate-900 border-slate-600 rounded-lg">
-                <button onclick="bulkActionDriver('hold')" class="bg-yellow-600 text-black px-4 py-3 rounded-2xl font-black text-xs flex-1 shadow-lg active:scale-95 transition">일괄 재배정 요청</button>
-                {% if view_status == 'assigned' %}
-                <button onclick="bulkPickup()" class="bg-blue-600 text-white px-4 py-3 rounded-2xl font-black text-xs flex-1 shadow-lg active:scale-95 transition">일괄 상차 완료</button>
-                {% endif %}
-            </div>
-
+        <div class="space-y-3">
             {% for t in tasks %}
             <div class="task-card">
-                <div class="flex gap-4 mb-4">
-                    <input type="checkbox" class="task-check w-8 h-8 mt-1 rounded-lg bg-slate-900 border-slate-600" value="{{t.id}}">
-                    <div class="flex-1">
-                        <div class="font-black text-white text-[20px] address-text mb-2 tracking-tighter">{{ t.address }}</div>
-                        <div class="text-green-400 font-black text-[17px] mb-3 italic tracking-tight">{{ t.product_details }}</div>
-                        <div class="flex gap-4 items-center mb-5 font-bold text-[13px] text-slate-400">
-                            <div><i class="fas fa-user mr-1.5 text-slate-600"></i>{{ t.customer_name }}</div>
-                            <div><i class="fas fa-phone mr-1.5 text-slate-600"></i><a href="tel:{{t.phone}}" class="text-blue-400 underline underline-offset-4 font-black">{{t.phone}}</a></div>
+                <div class="flex items-start gap-3">
+                    <input type="checkbox" class="task-check w-7 h-7 mt-1 rounded-lg bg-slate-900 border-slate-700 accent-green-500" value="{{t.id}}">
+                    <div class="flex-1 min-w-0">
+                        <div class="address-highlight text-[22px] mb-2 break-all">{{ t.address }}</div>
+                        <div class="mb-3"><span class="product-badge">{{ t.product_details }}</span></div>
+                        
+                        <div class="grid grid-cols-2 gap-2 text-[13px] font-bold text-slate-400 border-t border-slate-700/50 pt-3">
+                            <div class="flex items-center gap-2"><i class="fas fa-user text-slate-600"></i>{{ t.customer_name }}</div>
+                            <a href="tel:{{t.phone}}" class="flex items-center gap-2 text-blue-400"><i class="fas fa-phone-alt"></i> 전화하기</a>
                         </div>
+                        {% if t.memo %}
+                        <div class="mt-2 text-[12px] bg-slate-900/50 p-2 rounded-lg text-orange-300 font-medium">
+                            <i class="fas fa-comment-dots mr-1"></i> {{t.memo}}
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
                 
-                <div class="flex gap-3">
+                <div class="mt-4">
                     {% if t.status in ['배정완료', '대기'] %}
-                    <button onclick="secureStatus('{{t.id}}', '픽업')" class="flex-1 bg-orange-600 text-white py-5 rounded-2xl font-black text-xl shadow-xl active:scale-95 transition">상차 완료(픽업)</button>
+                    <button onclick="secureStatus('{{t.id}}', '픽업')" class="w-full bg-orange-600 text-white py-4 rounded-xl font-black text-lg shadow-lg active:scale-95 transition">상차 완료</button>
                     {% elif t.status == '픽업' %}
-                    <button onclick="openCameraUI('{{t.id}}')" class="flex-1 bg-green-600 text-white py-5 rounded-2xl font-black text-xl shadow-xl active:scale-95 transition">배송 완료(사진촬영)</button>
-                    {% else %}
-                    <div class="w-full py-4 text-center text-slate-600 font-black italic bg-slate-900/50 rounded-2xl border border-slate-800">배송 완료</div>
+                    <button onclick="openCameraUI('{{t.id}}')" class="w-full bg-green-600 text-white py-4 rounded-xl font-black text-lg shadow-lg active:scale-95 transition">배송 완료 처리</button>
                     {% endif %}
                 </div>
             </div>
             {% endfor %}
-            {% if not tasks %}
-            <div class="py-20 text-center text-slate-500 font-bold italic">내역이 없습니다.</div>
-            {% endif %}
         </div>
 
-        <div id="camera-layer" class="fixed inset-0 bg-black/95 z-[5000] hidden flex flex-col items-center justify-center p-6 backdrop-blur-xl">
-            <video id="video" class="w-full rounded-[2.5rem] mb-8 shadow-2xl" autoplay playsinline></video>
-            <canvas id="canvas" class="hidden"></canvas>
-            <div id="preview-box" class="hidden w-full mb-8 text-center"><img id="photo-preview" class="w-full rounded-[2.5rem] border-4 border-green-600 max-h-[60vh] object-contain mx-auto shadow-2xl"></div>
-            <div class="flex gap-5 w-full max-w-md">
-                <button id="capture-btn" class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl shadow-2xl active:scale-90 transition">사진 촬영</button>
-                <button id="confirm-btn" class="hidden flex-1 bg-green-600 text-white py-6 rounded-[2rem] font-black text-xl shadow-2xl active:scale-90 transition">완료 확정</button>
-                <button id="cancel-camera" class="flex-1 bg-slate-800 text-white py-6 rounded-[2rem] font-bold text-lg active:scale-90 transition shadow-xl">닫기</button>
+        <div class="bottom-ctrl flex gap-3">
+            <div class="bg-slate-800/90 backdrop-blur-md p-2 rounded-2xl border border-slate-700 flex gap-2 w-full shadow-2xl">
+                <button onclick="toggleAll()" class="bg-slate-700 text-white px-4 py-3 rounded-xl font-black text-xs">전체선택</button>
+                <button onclick="bulkActionDriver('hold')" class="bg-slate-900 text-yellow-500 px-4 py-3 rounded-xl font-black text-xs flex-1 border border-yellow-900/30">재배정 요청</button>
+                {% if view_status == 'assigned' %}
+                <button onclick="bulkPickup()" class="bg-blue-600 text-white px-4 py-3 rounded-xl font-black text-xs flex-1 shadow-lg">일괄 상차</button>
+                {% endif %}
+                <div class="flex flex-col gap-1">
+                    <button onclick="changeFontSize(2)" class="bg-green-600 text-white w-10 h-6 rounded-lg text-[10px] font-black">A+</button>
+                    <button onclick="changeFontSize(-2)" class="bg-slate-700 text-white w-10 h-6 rounded-lg text-[10px] font-black">A-</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="camera-layer" class="fixed inset-0 bg-black z-[5000] hidden flex flex-col items-center justify-center p-4">
+            <div class="relative w-full aspect-[3/4] overflow-hidden rounded-3xl shadow-2xl bg-slate-900 mb-6">
+                <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
+                <canvas id="canvas" class="hidden"></canvas>
+                <img id="photo-preview" class="hidden w-full h-full object-cover">
+            </div>
+            <div class="flex gap-4 w-full max-w-sm">
+                <button id="capture-btn" class="flex-1 bg-white text-black py-5 rounded-2xl font-black text-xl shadow-xl">사진 촬영</button>
+                <button id="confirm-btn" class="hidden flex-1 bg-green-600 text-white py-5 rounded-2xl font-black text-xl shadow-xl">배송 확정</button>
+                <button id="cancel-camera" class="w-20 bg-slate-800 text-white py-5 rounded-2xl font-bold">닫기</button>
             </div>
         </div>
 
@@ -656,7 +678,7 @@ def logi_driver_work(token):
     </body>
     </html>
     """
-    return render_template_string(html, **locals(), driver_name=driver.name, auth_phone=auth_phone)
+    return render_template_string(html, **locals())
 
 # --------------------------------------------------------------------------------
 # 8. 핵심 비즈니스 로직 & API (모든 기능 통합 복구)
@@ -749,8 +771,12 @@ def logi_complete_action(tid):
 @logi_bp.route('/drivers')
 def logi_driver_mgmt():
     if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
-    drivers = Driver.query.all(); base_url = request.host_url.rstrip('/')
+    drivers = Driver.query.all()
+    # 공통 접속 주소 (토큰 없음)
+    work_url = request.host_url.rstrip('/') + "/logi/work"
+    
     return render_template_string("""
+                                  
     <script src="https://cdn.tailwindcss.com"></script>
     <body class="bg-slate-50 p-6">
         <div class="max-w-md mx-auto">
@@ -763,30 +789,34 @@ def logi_driver_mgmt():
             </form>
             <div class="space-y-4">
                 {% for d in drivers %}
-                <div class="bg-white p-6 rounded-[2rem] border flex justify-between items-center shadow-md border-slate-100">
-                    <div><p class="font-black text-slate-800 text-lg">{{ d.name }}</p><p class="text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p></div>
-                    <div class="flex gap-2">
-                        <button onclick="copyToken('{{base_url}}/logi/work/{{d.token}}')" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-black text-[10px] border border-blue-100">URL 복사</button>
-                        <button onclick="secureDelete({{d.id}})" class="text-red-300 hover:text-red-500 transition p-3"><i class="fas fa-trash-alt"></i></button>
-                    </div>
+<div class="bg-white p-6 rounded-[2rem] border flex justify-between items-center shadow-md border-slate-100">
+        <div>
+            <p class="font-black text-slate-800 text-lg">{{ d.name }}</p>
+            <p class="text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="copyUrl()" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-black text-[10px] border border-blue-100">접속주소 복사</button>
+            <button onclick="secureDelete({{d.id}})" class="text-red-300 hover:text-red-500 transition p-3"><i class="fas fa-trash-alt"></i></button>
+        </div>
+    </div>
+<div class="flex mb-6 bg-[#1e293b] rounded-3xl overflow-hidden shadow-2xl border-b border-slate-700 mx-2">
+        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned" class="tab-btn {% if view_status=='assigned' %}active{% endif %}">대기/배정</a>
+        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=pickup" class="tab-btn {% if view_status=='pickup' %}active{% endif %}">배송중</a>
+        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=complete" class="tab-btn {% if view_status=='complete' %}active{% endif %}">완료</a>
+    </div>
                 </div>
                 {% endfor %}
             </div>
         </div>
-        <script>
-            function copyToken(url) {
-                const t = document.createElement("input"); document.body.appendChild(t); t.value = url; t.select();
-                document.execCommand("copy"); document.body.removeChild(t); alert("보안 접속 URL이 복사되었습니다.");
-            }
-            function secureDelete(id) {
-                if(confirm("1/3 정말 해당 기사를 삭제하시겠습니까?"))
-                    if(confirm("2/3 업무 기록도 함께 사라집니다. 계속하시겠습니까?"))
-                        if(confirm("3/3 마지막입니다. 기사를 영구 삭제합니다."))
-                            location.href = '{{ url_for("logi.logi_delete_driver", did=0) }}'.replace('0', id);
-            }
-        </script>
-    </body>
-    """, drivers=drivers, base_url=base_url)
+<script>
+        function copyUrl() {
+            const t = document.createElement("input"); document.body.appendChild(t); 
+            t.value = "{{work_url}}"; t.select();
+            document.execCommand("copy"); document.body.removeChild(t); 
+            alert("기사용 접속 주소가 복사되었습니다.\\n기사님은 성함과 전화번호로 로그인하시면 됩니다.");
+        }
+    </script>
+    """, drivers=drivers, work_url=work_url)
 
 @logi_bp.route('/driver/add', methods=['POST'])
 def logi_add_driver():
