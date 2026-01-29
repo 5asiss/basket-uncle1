@@ -345,29 +345,35 @@ def logi_admin_dashboard():
 # 7. 기사용 업무 페이지 (보안 강화 및 PC 자동인증 로직 100% 복구)
 # --------------------------------------------------------------------------------
 
+# [delivery_system.py 내 logi_driver_work 함수 부분 수정]
+
 @logi_bp.route('/work/<string:token>')
 def logi_driver_work(token):
     driver = Driver.query.filter_by(token=token).first_or_404()
     
-    # [핵심] PC 접속 시 인증 생략 필터
+    # 1. 환경 및 입력값 정제
     user_agent = request.headers.get('User-Agent', '').lower()
-    is_mobile = any(m in user_agent for m in ['mobile', 'android', 'iphone', 'ipad'])
-    auth_phone = request.args.get('auth_phone', '')
+    is_mobile = any(m in user_agent for m in ['mobile', 'android', 'iphone', 'ipad', 'blackberry'])
+    auth_phone = request.args.get('auth_phone', '').strip().replace('-', '') # 하이픈 제거
+    db_phone = driver.phone.strip().replace('-', '') # DB 번호도 하이픈 제거 후 비교
     
-    if is_mobile and auth_phone.replace('-', '') != driver.phone.replace('-', ''):
+    # 2. 모바일 기기 본인 인증 레이어 (수정 포인트: action 경로 추가)
+    if is_mobile and auth_phone != db_phone:
         return render_template_string("""
         <script src="https://cdn.tailwindcss.com"></script>
         <body class="bg-[#0f172a] text-white flex items-center justify-center min-h-screen p-8 text-center">
             <div class="w-full max-w-sm bg-[#1e293b] p-12 rounded-[3.5rem] shadow-2xl border border-slate-700">
                 <h1 class="text-2xl font-black text-green-500 mb-8 italic uppercase tracking-widest">Driver Verify</h1>
                 <p class="text-slate-400 mb-10 font-bold leading-relaxed text-sm">등록된 본인의 전화번호<br>전체를 입력해주시기 바랍니다.</p>
-                <form method="GET" class="space-y-6">
+                <form action="{{ url_for('logi.logi_driver_work', token=token) }}" method="GET" class="space-y-6">
                     <input type="tel" name="auth_phone" placeholder="010-0000-0000" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-2xl font-black text-white focus:ring-4 focus:ring-green-500/20 transition outline-none" required>
                     <button class="w-full bg-green-600 py-6 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">본인 확인 및 접속</button>
                 </form>
             </div>
         </body>
-        """)
+        """, token=token) # token 변수 전달 필수
+
+    # --- 이후 배송 목록 출력 로직은 기존과 동일함 ---
 
     view_status = request.args.get('view', 'assigned') 
     query = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id)
@@ -548,7 +554,7 @@ def logi_driver_work(token):
     </body>
     </html>
     """
-    return render_template_string(html, **locals(), driver_name=driver.name, auth_phone=auth_phone)
+    return render_template_string(html, **locals())
 
 # --------------------------------------------------------------------------------
 # 8. 핵심 비즈니스 로직 & API (모든 기능 통합 복구)
