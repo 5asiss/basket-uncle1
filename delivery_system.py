@@ -147,7 +147,23 @@ def logi_admin_dashboard():
     
     tasks = query.all()
     tasks.sort(key=lambda x: (x.address or "", logi_extract_qty(x.product_details)), reverse=True)
-    
+    pending_sync_count = 0
+    try:
+        conn = sqlite3.connect(logi_get_main_db_path())
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM \"order\" WHERE status = '배송요청'")
+        pending_sync_count = cursor.fetchone()[0]
+        conn.close()
+    except: pass
+
+    unassigned_count = DeliveryTask.query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None).count()
+    assigned_count = DeliveryTask.query.filter_by(status='배정완료').count()
+    picking_count = DeliveryTask.query.filter_by(status='픽업').count()
+    complete_today = DeliveryTask.query.filter_by(status='완료').filter(DeliveryTask.completed_at >= datetime.now().replace(hour=0,minute=0,second=0)).count()
+
+    item_sum = logi_get_item_summary(tasks)
+    drivers = Driver.query.all()
+    saved_cats = sorted(list(set([t.category for t in DeliveryTask.query.all() if t.category])))
     # 현황판용 수치 계산
     unassigned_count = DeliveryTask.query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None).count()
     assigned_count = DeliveryTask.query.filter_by(status='배정완료').count()
@@ -189,13 +205,17 @@ def logi_admin_dashboard():
                 </div>
             </div>
             <div class="flex items-center gap-4">
-                <button onclick="syncNow()" class="bg-green-600 text-white px-5 py-2 rounded-xl font-black text-[11px] shadow-lg hover:bg-green-700 transition">신규 주문 가져오기</button>
+                <button onclick="syncNow()" class="bg-red-600 text-white px-5 py-2 rounded-xl font-black text-[11px] shadow-lg hover:bg-red-700 transition animate-bounce">신규 주문 가져오기</button>
                 <a href="{{ url_for('logi.logi_admin_logout') }}" class="text-slate-300 font-bold hover:text-red-500"><i class="fas fa-sign-out-alt"></i></a>
             </div>
         </nav>
 
         <main class="p-4 max-w-[1400px] mx-auto">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+                <div class="bg-white p-6 rounded-[2rem] shadow-sm border-b-8 border-red-500 text-center {% if pending_sync_count > 0 %}animate-pulse{% endif %}">
+                    <p class="text-[10px] font-black text-red-300 uppercase tracking-tighter mb-1">New Orders</p>
+                    <p class="text-3xl font-black text-red-600" id="sync-count-val">{{pending_sync_count}}</p>
+                </div>
                 <div class="bg-white p-6 rounded-[2rem] shadow-sm border-b-8 border-slate-200 text-center">
                     <p class="text-[10px] font-black text-slate-300 uppercase tracking-tighter mb-1">Unassigned</p><p class="text-3xl font-black text-slate-700">{{unassigned_count}}</p>
                 </div>
@@ -208,7 +228,8 @@ def logi_admin_dashboard():
                 <div class="bg-white p-6 rounded-[2rem] shadow-sm border-b-8 border-green-500 text-center">
                     <p class="text-[10px] font-black text-green-300 uppercase tracking-tighter mb-1">Completed</p><p class="text-3xl font-black text-green-600">{{complete_today}}</p>
                 </div>
-            </div>
+            </div> 
+
 
             <div class="bg-white p-5 rounded-[2rem] border border-blue-50 shadow-sm mb-6">
                 <h3 class="text-[11px] font-black text-blue-500 mb-3 italic flex items-center gap-2"><span class="w-1.5 h-4 bg-blue-500 rounded-full"></span> 현재 필터 기준 품목 합계</h3>
@@ -221,15 +242,16 @@ def logi_admin_dashboard():
                 </div>
             </div>
 
-            <div class="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm mb-6 flex flex-wrap justify-between items-center gap-6">
-                <div class="flex gap-6 border-b overflow-x-auto no-scrollbar whitespace-nowrap text-[12px] font-black">
-                    <a href="{{ url_for('logi.logi_admin_dashboard', status='all') }}" class="{% if current_status=='all' %}tab-active{% endif %} pb-3">전체</a>
-                    <a href="{{ url_for('logi.logi_admin_dashboard', status='미배정') }}" class="{% if current_status=='미배정' %}tab-active{% endif %} pb-3 text-slate-300">미배정</a>
-                    <a href="{{ url_for('logi.logi_admin_dashboard', status='배정완료') }}" class="{% if current_status=='배정완료' %}tab-active{% endif %} pb-3 text-blue-500">배정됨</a>
-                    <a href="{{ url_for('logi.logi_admin_dashboard', status='픽업') }}" class="{% if current_status=='픽업' %}tab-active{% endif %} pb-3 text-orange-500">배송중</a>
-                    <a href="{{ url_for('logi.logi_admin_dashboard', status='완료') }}" class="{% if current_status=='완료' %}tab-active{% endif %} pb-3 text-green-600">배송완료</a>
-                    <a href="{{ url_for('logi.logi_admin_dashboard', status='보류') }}" class="{% if current_status=='보류' %}tab-active{% endif %} pb-3 text-yellow-600">재배정요청</a>
-                </div>
+      <div class="bg-white p-2 md:p-3 rounded-xl border border-slate-100 shadow-sm mb-4 flex flex-wrap justify-between items-center gap-4">
+    <div class="flex gap-4 border-b w-full md:w-auto overflow-x-auto no-scrollbar whitespace-nowrap text-[11px] font-black tracking-tighter">
+        <a href="{{ url_for('logi.logi_admin_dashboard', status='all') }}" class="{% if current_status=='all' %}tab-active{% endif %} pb-1.5 px-1">전체</a>
+        <a href="{{ url_for('logi.logi_admin_dashboard', status='미배정') }}" class="{% if current_status=='미배정' %}tab-active{% endif %} pb-1.5 px-1 text-slate-300">미배정</a>
+        <a href="{{ url_for('logi.logi_admin_dashboard', status='배정완료') }}" class="{% if current_status=='배정완료' %}tab-active{% endif %} pb-1.5 px-1 text-blue-500">배정됨</a>
+        <a href="{{ url_for('logi.logi_admin_dashboard', status='픽업') }}" class="{% if current_status=='픽업' %}tab-active{% endif %} pb-1.5 px-1 text-orange-500">배송중</a>
+        <a href="{{ url_for('logi.logi_admin_dashboard', status='완료') }}" class="{% if current_status=='완료' %}tab-active{% endif %} pb-1.5 px-1 text-green-600">완료</a>
+        <a href="{{ url_for('logi.logi_admin_dashboard', status='보류') }}" class="{% if current_status=='보류' %}tab-active{% endif %} pb-1.5 px-1 text-yellow-600">보류</a>
+    </div>
+</div>
                 <div class="flex items-center gap-3 flex-wrap">
                     <select onchange="location.href='{{ url_for('logi.logi_admin_dashboard') }}?status={{current_status}}&category='+encodeURIComponent(this.value)" class="border border-slate-100 rounded-xl px-3 py-2 font-black text-slate-400 bg-slate-50 text-[11px] outline-none">
                         <option value="전체">카테고리 전체보기</option>
@@ -257,32 +279,49 @@ def logi_admin_dashboard():
                             <th class="p-4 w-24 text-center">Action</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        {% for t in tasks %}
-                        <tr class="{% if t.status == '결제취소' %}bg-red-50{% endif %} hover:bg-slate-50 transition">
-                            <td class="p-5 text-center"><input type="checkbox" class="task-check w-4 h-4 rounded border-slate-300" value="{{t.id}}"></td>
-                            <td class="p-5 text-center">
-                                <span class="px-3 py-1 rounded-full text-[9px] font-black shadow-sm
-                                {% if t.status == '픽업' %}bg-orange-500 text-white
-                                {% elif t.status == '완료' %}bg-green-600 text-white
-                                {% elif t.status == '배정완료' %}bg-blue-500 text-white
-                                {% else %}bg-slate-200 text-slate-500{% endif %}">{{ t.status }}</span>
-                            </td>
-                            <td class="p-5">
-                                <div class="font-black text-slate-800 text-base leading-tight mb-1">{{ t.address }}</div>
-                                <div class="text-[11px] text-slate-500 font-bold mb-2">{{ t.product_details }} | <span class="text-orange-500">{{ t.customer_name }}</span></div>
-                                <div class="flex gap-3 items-center">
-                                    <span class="text-[10px] bg-slate-100 px-3 py-0.5 rounded-full text-slate-600 font-black border border-slate-200"><i class="fas fa-truck mr-1 text-slate-400"></i>{{ t.driver_name }}</span>
-                                    <button onclick="viewTaskLog('{{t.id}}')" class="text-[10px] text-blue-600 font-black hover:underline"><i class="fas fa-history mr-1"></i>배송 이력(Log) 보기</button>
-                                </div>
-                                <div id="log-view-{{t.id}}" class="hidden mt-4 p-4 bg-slate-50 rounded-2xl text-[10px] text-slate-400 border border-dashed border-slate-200 leading-relaxed"></div>
-                            </td>
-                            <td class="p-5 text-center">
-                                <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" class="text-[11px] bg-slate-800 text-white px-4 py-2 rounded-xl font-black shadow-md hover:scale-105 transition" onclick="return confirm('배정을 해제하고 대기목록으로 보낼까요?')">재배정</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
+<tbody class="divide-y divide-slate-100 bg-white">
+    {% for t in tasks %}
+    <tr class="{% if t.status == '결제취소' %}bg-red-50{% endif %} hover:bg-slate-50 transition">
+        <td class="py-3 px-2 text-center w-8">
+            <input type="checkbox" class="task-check w-4 h-4 rounded border-slate-300 accent-green-600" value="{{t.id}}">
+        </td>
+        
+        <td class="py-3 px-1 text-center w-16">
+            <span class="inline-block px-2 py-0.5 rounded-full text-[8px] font-black shadow-sm transform scale-95
+            {% if t.status == '픽업' %}bg-orange-500 text-white
+            {% elif t.status == '완료' %}bg-green-600 text-white
+            {% elif t.status == '배정완료' %}bg-blue-500 text-white
+            {% else %}bg-slate-200 text-slate-500{% endif %}">
+                {{ t.status }}
+            </span>
+        </td>
+        
+        <td class="py-3 px-2">
+            <div class="font-black text-slate-800 text-[14px] leading-tight mb-0.5 break-keep">{{ t.address }}</div>
+            <div class="text-[10px] text-slate-400 font-bold mb-1 line-clamp-1">
+                {{ t.product_details }} | <span class="text-orange-400">{{ t.customer_name }}</span>
+            </div>
+            <div class="flex gap-2 items-center">
+                <span class="text-[9px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-black border border-slate-200">
+                    <i class="fas fa-truck mr-0.5 text-slate-300"></i>{{ t.driver_name }}
+                </span>
+                <button onclick="viewTaskLog('{{t.id}}')" class="text-[9px] text-blue-500 font-black flex items-center gap-0.5">
+                    <i class="fas fa-history"></i> Log보기
+                </button>
+            </div>
+            <div id="log-view-{{t.id}}" class="hidden mt-2 p-3 bg-slate-50 rounded-xl text-[9px] text-slate-500 border border-dashed border-slate-200 leading-normal"></div>
+        </td>
+        
+        <td class="py-3 px-2 text-right">
+            <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" 
+               class="inline-block text-[10px] bg-slate-800 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap" 
+               onclick="return confirm('배정을 해제하고 대기목록으로 보낼까요?')">
+                재배정
+            </a>
+        </td>
+    </tr>
+    {% endfor %}
+</tbody>
                 </table>
                 {% if not tasks %}
                 <div class="py-32 text-center text-slate-300 font-black text-lg italic">No Data Found.</div>
@@ -308,11 +347,30 @@ def logi_admin_dashboard():
                 }
             }
             async function syncNow() {
-                const res = await fetch('{{ url_for("logi.logi_sync") }}');
-                const data = await res.json();
-                if(data.success) { alert(data.synced_count + "건의 신규 배송건이 입고되었습니다."); location.reload(); }
-                else { alert("동기화 오류: " + data.error); }
-            }
+    if(!confirm("쇼핑몰의 신규 주문 데이터를 동기화하시겠습니까?")) return;
+    
+    // 버튼 상태 변경
+    const syncBtn = event.currentTarget;
+    syncBtn.innerText = "동기화 중...";
+    syncBtn.classList.add('opacity-50');
+
+    const res = await fetch('{{ url_for("logi.logi_sync") }}');
+    const data = await res.json();
+    
+    if(data.success) { 
+        // 동기화 성공 시 숫자 0으로 시각적 변경
+        const syncVal = document.getElementById('sync-count-val');
+        if(syncVal) syncVal.innerText = "0";
+        
+        alert(data.synced_count + "건의 신규 배송건이 입고되었습니다."); 
+        location.reload(); 
+    }
+    else { 
+        alert("동기화 오류: " + data.error); 
+        syncBtn.innerText = "신규 주문 가져오기";
+        syncBtn.classList.remove('opacity-50');
+    }
+}
             function toggleAll() {
                 const isChecked = document.getElementById('check-all').checked;
                 document.querySelectorAll('.task-check').forEach(i => i.checked = isChecked);
@@ -385,86 +443,124 @@ def logi_driver_work(token):
     tasks.sort(key=lambda x: (x.address or "", logi_extract_qty(x.product_details)), reverse=True)
     item_sum = logi_get_item_summary(tasks) if view_status != 'complete' else {}
 
+   # [delivery_system.py 내 logi_driver_work 함수 안의 html 변수 부분 수정]
+
     html = """
     <!DOCTYPE html>
     <html lang="ko">
     <head>
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>바구니삼촌 기사 - {{ driver_name }}</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>바구니삼촌 기사용 - {{ driver_name }}</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-        <style>@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
-        body { font-family: 'Noto Sans KR', sans-serif; background-color: #0f172a; color: #f8fafc; transition: font-size 0.2s; -webkit-tap-highlight-color: transparent; }
-        .tab-btn { flex: 1; text-align: center; padding: 20px 10px; font-weight: 900; color: #64748b; border-bottom: 4px solid #1e293b; font-size: 15px; }
-        .tab-btn.active { color: #22c55e; border-bottom: 4px solid #22c55e; }
-        .btn-float { position: fixed; bottom: 90px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 12px; }
-        .btn-s { background: #22c55e; color: white; width: 55px; height: 55px; border-radius: 50%; display: flex; items-center; justify-center; font-bold; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+            body { 
+                font-family: 'Noto Sans KR', sans-serif; 
+                background-color: #0f172a; 
+                color: #f8fafc; 
+                transition: font-size 0.2s; 
+                -webkit-tap-highlight-color: transparent;
+                letter-spacing: -0.02em;
+            }
+            .tab-btn { 
+                flex: 1; text-align: center; padding: 18px 10px; font-weight: 900; 
+                color: #64748b; border-bottom: 4px solid #1e293b; font-size: 15px; 
+            }
+            .tab-btn.active { color: #22c55e; border-bottom: 4px solid #22c55e; background: rgba(34, 197, 94, 0.05); }
+            .btn-float { position: fixed; bottom: 90px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 12px; }
+            .btn-s { 
+                background: #22c55e; color: white; width: 55px; height: 55px; border-radius: 50%; 
+                display: flex; items-center; justify-center; font-bold; 
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.1);
+            }
+            .task-card {
+                background: #1e293b;
+                border-radius: 1.5rem;
+                padding: 1.5rem;
+                border: 1px solid #334155;
+                margin-bottom: 1.25rem;
+                box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            }
+            .address-text { line-height: 1.3; }
         </style>
     </head>
     <body class="p-2 pb-32" id="driver-body">
         <div class="btn-float">
-            <button onclick="changeFontSize(2)" class="btn-s text-2xl">A+</button>
-            <button onclick="changeFontSize(-2)" class="btn-s text-2xl text-slate-300 bg-slate-800">A-</button>
+            <button onclick="changeFontSize(2)" class="btn-s text-2xl font-black shadow-green-500/20">A+</button>
+            <button onclick="changeFontSize(-2)" class="btn-s text-2xl font-black text-slate-300 bg-slate-800">A-</button>
         </div>
 
         <header class="flex justify-between items-center p-4 mb-2">
             <h1 class="text-2xl font-black text-green-500 italic uppercase tracking-tighter">B.Uncle Logi</h1>
-            <button onclick="location.reload()" class="bg-slate-800 p-3 rounded-2xl shadow-lg active:scale-90 transition"><i class="fas fa-sync-alt text-lg"></i></button>
+            <div class="flex gap-2">
+                <button onclick="location.reload()" class="bg-slate-800 p-3 rounded-2xl shadow-lg active:scale-90 transition">
+                    <i class="fas fa-sync-alt text-lg"></i>
+                </button>
+            </div>
         </header>
 
         <div class="flex mb-6 bg-[#1e293b] rounded-3xl overflow-hidden shadow-2xl border-b border-slate-700 mx-2">
-            <a href="?auth_phone={{auth_phone}}&view=assigned" class="tab-btn {% if view_status=='assigned' %}active{% endif %}">배정</a>
-            <a href="?auth_phone={{auth_phone}}&view=pickup" class="tab-btn {% if view_status=='pickup' %}active{% endif %}">픽업</a>
+            <a href="?auth_phone={{auth_phone}}&view=assigned" class="tab-btn {% if view_status=='assigned' %}active{% endif %}">대기/배정</a>
+            <a href="?auth_phone={{auth_phone}}&view=pickup" class="tab-btn {% if view_status=='pickup' %}active{% endif %}">배송중</a>
             <a href="?auth_phone={{auth_phone}}&view=complete" class="tab-btn {% if view_status=='complete' %}active{% endif %}">완료</a>
         </div>
 
         {% if view_status != 'complete' %}
-        <div class="bg-slate-800 p-4 rounded-3xl border border-slate-700 mb-6 shadow-inner mx-2">
-            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Item Summary ({{tasks|length}}건)</p>
+        <div class="bg-slate-900/50 p-5 rounded-3xl mb-6 mx-2 border border-slate-800 shadow-inner">
+            <p class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 italic">Item Summary ({{tasks|length}}건)</p>
             <div class="flex flex-wrap gap-2">
                 {% for name, total in item_sum.items() %}
-                <span class="bg-slate-900 border border-slate-600 px-4 py-1.5 rounded-xl text-green-400 font-black text-sm shadow-sm">{{ name }}: {{ total }}</span>
+                <span class="bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl text-green-400 font-black text-xs shadow-sm">{{ name }}: {{ total }}</span>
                 {% endfor %}
             </div>
         </div>
         {% endif %}
 
         <div class="space-y-4 px-2">
-            <div class="bg-slate-800 p-4 rounded-3xl flex gap-3 mb-6 border border-slate-700 shadow-2xl">
+            <div class="bg-slate-800/50 p-4 rounded-3xl flex gap-3 mb-6 border border-slate-700">
                 <input type="checkbox" id="check-all" onclick="toggleAll()" class="w-8 h-8 bg-slate-900 border-slate-600 rounded-lg">
                 <button onclick="bulkActionDriver('hold')" class="bg-yellow-600 text-black px-4 py-3 rounded-2xl font-black text-xs flex-1 shadow-lg active:scale-95 transition">일괄 재배정 요청</button>
                 {% if view_status == 'assigned' %}
-                <button onclick="bulkPickup()" class="bg-blue-600 text-white px-4 py-3 rounded-2xl font-black text-xs flex-1 shadow-lg active:scale-95 transition">일괄 픽업 완료</button>
+                <button onclick="bulkPickup()" class="bg-blue-600 text-white px-4 py-3 rounded-2xl font-black text-xs flex-1 shadow-lg active:scale-95 transition">일괄 상차 완료</button>
                 {% endif %}
             </div>
 
             {% for t in tasks %}
-            <div class="bg-[#1e293b] p-6 rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-slate-800 relative overflow-hidden">
-                <div class="flex gap-5 mb-5">
+            <div class="task-card">
+                <div class="flex gap-4 mb-4">
                     <input type="checkbox" class="task-check w-8 h-8 mt-1 rounded-lg bg-slate-900 border-slate-600" value="{{t.id}}">
                     <div class="flex-1">
-                        <div class="font-black text-white text-[20px] leading-tight mb-3 tracking-tighter">{{ t.address }}</div>
-                        <div class="text-green-400 font-black text-[17px] mb-2 italic">{{ t.product_details }}</div>
-                        <div class="text-[14px] text-slate-400 font-bold uppercase">{{ t.customer_name }} | <a href="tel:{{t.phone}}" class="text-blue-400 font-black underline underline-offset-4">{{t.phone}}</a></div>
+                        <div class="font-black text-white text-[20px] address-text mb-2 tracking-tighter">{{ t.address }}</div>
+                        <div class="text-green-400 font-black text-[17px] mb-3 italic tracking-tight">{{ t.product_details }}</div>
+                        <div class="flex gap-4 items-center mb-5 font-bold text-[13px] text-slate-400">
+                            <div><i class="fas fa-user mr-1.5 text-slate-600"></i>{{ t.customer_name }}</div>
+                            <div><i class="fas fa-phone mr-1.5 text-slate-600"></i><a href="tel:{{t.phone}}" class="text-blue-400 underline underline-offset-4 font-black">{{t.phone}}</a></div>
+                        </div>
                     </div>
                 </div>
+                
                 <div class="flex gap-3">
                     {% if t.status in ['배정완료', '대기'] %}
-                    <button onclick="secureStatus('{{t.id}}', '픽업')" class="flex-1 bg-orange-600 text-white py-6 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition">상차 완료(픽업)</button>
+                    <button onclick="secureStatus('{{t.id}}', '픽업')" class="flex-1 bg-orange-600 text-white py-5 rounded-2xl font-black text-xl shadow-xl active:scale-95 transition">상차 완료(픽업)</button>
                     {% elif t.status == '픽업' %}
-                    <button onclick="openCameraUI('{{t.id}}')" class="flex-1 bg-green-600 text-white py-6 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition">배송 완료(사진촬영)</button>
+                    <button onclick="openCameraUI('{{t.id}}')" class="flex-1 bg-green-600 text-white py-5 rounded-2xl font-black text-xl shadow-xl active:scale-95 transition">배송 완료(사진촬영)</button>
                     {% else %}
-                    <div class="w-full py-4 text-center text-slate-600 font-black italic bg-slate-900/50 rounded-2xl border border-slate-800">배송 완료 - 수정 불가</div>
+                    <div class="w-full py-4 text-center text-slate-600 font-black italic bg-slate-900/50 rounded-2xl border border-slate-800">배송 완료</div>
                     {% endif %}
                 </div>
             </div>
             {% endfor %}
+            {% if not tasks %}
+            <div class="py-20 text-center text-slate-500 font-bold italic">내역이 없습니다.</div>
+            {% endif %}
         </div>
 
         <div id="camera-layer" class="fixed inset-0 bg-black/95 z-[5000] hidden flex flex-col items-center justify-center p-6 backdrop-blur-xl">
-            <video id="video" class="w-full rounded-[2rem] mb-8 shadow-[0_0_100px_rgba(34,197,94,0.2)]" autoplay playsinline></video>
+            <video id="video" class="w-full rounded-[2.5rem] mb-8 shadow-2xl" autoplay playsinline></video>
             <canvas id="canvas" class="hidden"></canvas>
-            <div id="preview-box" class="hidden w-full mb-8 text-center"><img id="photo-preview" class="w-full rounded-[2rem] border-8 border-green-600/30 max-h-[65vh] object-contain mx-auto shadow-2xl"></div>
+            <div id="preview-box" class="hidden w-full mb-8 text-center"><img id="photo-preview" class="w-full rounded-[2.5rem] border-4 border-green-600 max-h-[60vh] object-contain mx-auto shadow-2xl"></div>
             <div class="flex gap-5 w-full max-w-md">
                 <button id="capture-btn" class="flex-1 bg-white text-black py-6 rounded-[2rem] font-black text-xl shadow-2xl active:scale-90 transition">사진 촬영</button>
                 <button id="confirm-btn" class="hidden flex-1 bg-green-600 text-white py-6 rounded-[2rem] font-black text-xl shadow-2xl active:scale-90 transition">완료 확정</button>
@@ -473,16 +569,22 @@ def logi_driver_work(token):
         </div>
 
         <script>
-            let currentSize = 14;
-            function changeFontSize(d) { currentSize += d; if(currentSize < 12) currentSize = 12; if(currentSize > 24) currentSize = 24; document.getElementById('driver-body').style.fontSize = currentSize+'px'; }
+            let currentSize = 15;
+            function changeFontSize(d) { 
+                currentSize += d; 
+                if(currentSize < 12) currentSize = 12; if(currentSize > 35) currentSize = 35; 
+                document.getElementById('driver-body').style.fontSize = currentSize+'px';
+                // 주소 텍스트는 본문보다 약간 더 크게 비례 조절
+                document.querySelectorAll('.address-text').forEach(el => {
+                    el.style.fontSize = (currentSize + 5) + 'px';
+                });
+            }
             function toggleAll() { const isChecked = document.getElementById('check-all').checked; document.querySelectorAll('.task-check').forEach(i => i.checked = isChecked); }
             
             async function secureStatus(tid, status) {
                 if(confirm("["+status+"] 처리를 진행할까요?")) {
-                    if(confirm("배송 중 오작동 방지: 최종적으로 확인합니다.")) {
-                        await fetch('{{ url_for("logi.logi_update_task_status", tid=0, new_status="X") }}'.replace('0', tid).replace('X', status));
-                        location.reload();
-                    }
+                    await fetch('{{ url_for("logi.logi_update_task_status", tid=0, new_status="X") }}'.replace('0', tid).replace('X', status));
+                    location.reload();
                 }
             }
 
@@ -534,11 +636,11 @@ def logi_driver_work(token):
                 });
                 const data = await res.json();
                 if(data.success) {
-                    const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문하신 상품이 현관 앞에 배송 완료되었습니다. 🧺`;
+                    const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문하신 상품이 문 앞에 배송 완료되었습니다. 🧺`;
                     const smsUrl = `sms:${data.phone}${navigator.userAgent.match(/iPhone/i) ? '&' : '?'}body=${encodeURIComponent(msg)}`;
                     location.href = smsUrl;
                     if(stream) stream.getTracks().forEach(t => t.stop());
-                    setTimeout(() => location.reload(), 1500);
+                    setTimeout(() => location.reload(), 1200);
                 }
             };
 
@@ -554,7 +656,7 @@ def logi_driver_work(token):
     </body>
     </html>
     """
-    return render_template_string(html, **locals())
+    return render_template_string(html, **locals(), driver_name=driver.name, auth_phone=auth_phone)
 
 # --------------------------------------------------------------------------------
 # 8. 핵심 비즈니스 로직 & API (모든 기능 통합 복구)
