@@ -1638,7 +1638,21 @@ def payment_success():
 # --------------------------------------------------------------------------------
 # 6. 관리자 전용 기능 (Dashboard / Bulk Upload / Excel)
 # --------------------------------------------------------------------------------
-
+# --- [신규 추가] 카테고리 관리자의 배송 요청 기능 ---
+@app.route('/admin/order/request_delivery/<string:order_id>', methods=['POST'])
+@login_required
+def admin_request_delivery(order_id):
+    # 권한 체크 (어드민이거나 해당 카테고리 매니저인지)
+    if not (current_user.is_admin or Category.query.filter_by(manager_email=current_user.email).first()):
+        return redirect('/')
+    
+    order = Order.query.filter_by(order_id=order_id).first()
+    if order and order.status == '결제완료':
+        order.status = '배송요청'  # 상태를 '배송요청'으로 변경
+        db.session.commit()
+        flash(f"주문 {order_id} 건이 배송 시스템으로 요청되었습니다.")
+    
+    return redirect('/admin?tab=orders')
 @app.route('/admin')
 @login_required
 def admin_dashboard():
@@ -1857,13 +1871,24 @@ def admin_dashboard():
                                 <span class="text-orange-500 font-black italic block text-left">📝 {{ o.request_memo or '메모 없음' }}</span>
                             </td>
                             <td class="p-6 text-gray-600 leading-relaxed font-bold text-left text-xs md:text-sm">{{ o.product_details }}</td>
-                            <td class="p-6 text-right font-black text-green-600 text-sm md:text-lg text-right">{{ "{:,}".format(o.total_price) }}원</td>
+                           <td class="p-6 text-right font-black text-green-600 text-sm md:text-lg text-right">
+    {{ "{:,}".format(o.total_price) }}원<br>
+    {% if o.status == '결제완료' %}
+    <form action="/admin/order/request_delivery/{{ o.order_id }}" method="POST" class="mt-2">
+        <button class="bg-blue-600 text-white px-3 py-1 rounded-lg text-[10px] font-black hover:bg-blue-700 transition">배송요청</button>
+    </form>
+    {% endif %}
+</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            
+            {% if o.status == '결제완료' %}
+<form action="/admin/order/request_delivery/{{ o.order_id }}" method="POST" style="display:inline;">
+    <button class="bg-blue-600 text-white px-3 py-1 rounded-lg text-[10px] font-black">배송요청</button>
+</form>
+{% endif %}
 <div class="flex justify-end mt-12 text-right">
                 <a href="/admin/orders/excel" class="bg-gray-800 text-white px-10 py-5 rounded-2xl font-black text-xs md:text-sm shadow-2xl hover:scale-105 transition text-center">Excel Download (전체 내역)</a>
             </div>
@@ -1890,7 +1915,7 @@ def admin_dashboard():
 # --------------------------------------------------------------------------------
 # 7. 엑셀 대량 업로드 (사용자 커스텀 양식 대응)
 # --------------------------------------------------------------------------------
-
+# 관리자 주문 탭에서 개별 건에 대해 배송요청 상태로 변경하는 라우트
 @app.route('/admin/product/bulk_upload', methods=['POST'])
 @login_required
 def admin_product_bulk_upload():
@@ -2082,5 +2107,23 @@ def init_db():
             db.session.add(Category(name="프리미엄 공동구매", tax_type="과세", order=1, description="유통 단계를 파격적으로 줄인 송도 전용 공구 상품입니다."));
         db.session.commit()
 
+# [수정 위치: app.py 파일 가장 마지막 부분]
+
+import subprocess
+
 if __name__ == "__main__":
-    init_db(); app.run(host="0.0.0.0", port=5000, debug=True)
+    init_db()
+    
+    # 윈도우 환경에서 디버그 모드 사용 시 자식 프로세스가 중복 실행되는 것을 방지합니다.
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        try:
+            delivery_script = os.path.join(os.path.dirname(__file__), 'delivery_system.py')
+            if os.path.exists(delivery_script):
+                print("--- [INFO] 배송 관리 시스템 서버 준비 중... ---")
+                # 환경 변수를 분리하여 독립적인 환경에서 실행되도록 유도합니다.
+                subprocess.Popen(["python", delivery_script])
+        except Exception as e:
+            print(f"--- [ERROR] 배송 서버 가동 실패: {e} ---")
+
+    # 메인 쇼핑몰 서버 실행
+    app.run(host="0.0.0.0", port=5000, debug=True)
