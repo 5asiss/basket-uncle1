@@ -1695,20 +1695,29 @@ def payment_success():
 # 6. 관리자 전용 기능 (Dashboard / Bulk Upload / Excel)
 # --------------------------------------------------------------------------------
 # --- [신규 추가] 카테고리 관리자의 배송 요청 기능 ---
-@app.route('/admin/order/request_delivery/<string:order_id>', methods=['POST'])
+@app.route('/admin/order/bulk_request_delivery', methods=['POST'])
 @login_required
-def admin_request_delivery(order_id):
-    # 권한 체크 (어드민이거나 해당 카테고리 매니저인지)
+def admin_bulk_request_delivery():
+    """여러 주문을 한꺼번에 배송 요청 상태로 변경 (새로고침 없음)"""
     if not (current_user.is_admin or Category.query.filter_by(manager_email=current_user.email).first()):
-        return redirect('/')
+        return jsonify({"success": False, "message": "권한이 없습니다."}), 403
     
-    order = Order.query.filter_by(order_id=order_id).first()
-    if order and order.status == '결제완료':
-        order.status = '배송요청'  # 상태를 '배송요청'으로 변경
-        db.session.commit()
-        flash(f"주문 {order_id} 건이 배송 시스템으로 요청되었습니다.")
+    data = request.get_json()
+    order_ids = data.get('order_ids', [])
     
-    return redirect('/admin?tab=orders')
+    if not order_ids:
+        return jsonify({"success": False, "message": "선택된 주문이 없습니다."})
+
+    # '결제완료' 상태인 주문들만 찾아서 '배송요청'으로 일괄 변경
+    orders = Order.query.filter(Order.order_id.in_(order_ids), Order.status == '결제완료').all()
+    
+    count = 0
+    for o in orders:
+        o.status = '배송요청'
+        count += 1
+    
+    db.session.commit()
+    return jsonify({"success": True, "message": f"{count}건의 배송 요청이 완료되었습니다."})
 @app.route('/admin')
 @login_required
 def admin_dashboard():
@@ -1745,20 +1754,41 @@ def admin_dashboard():
             start_dt = datetime.now().replace(hour=0, minute=0)
             end_dt = datetime.now().replace(hour=23, minute=59)
 
-        all_orders = Order.query.filter(Order.created_at >= start_dt, Order.created_at <= end_dt).order_by(Order.created_at.desc()).all()
+        # 상태가 '결제취소'가 아닌 주문만 집계에 포함
+        all_orders = Order.query.filter(
+            Order.created_at >= start_dt, 
+            Order.created_at <= end_dt,
+            Order.status != '결제취소'
+        ).order_by(Order.created_at.desc()).all()
+        
+        summary = {}
+        filtered_orders = []
+
         for o in all_orders:
-            show = False
-            for p_info in o.product_details.split(' | '):
-                match = re.match(r'\[(.*?)\] (.*)', p_info)
+            order_show_flag = False
+            # 주문 상세 내용 파싱: [카테고리] 상품명(수량)
+            parts = o.product_details.split(' | ')
+            for part in parts:
+                match = re.search(r'\[(.*?)\] (.*)', part)
                 if match:
-                    cat_n, items_str = match.groups()
+                    cat_n = match.group(1).strip()
+                    items_str = match.group(2).strip()
+                    
+                    # 권한 및 카테고리 필터 체크
                     if (is_master or cat_n in my_categories) and (sel_order_cat == '전체' or cat_n == sel_order_cat):
-                        show = True
+                        order_show_flag = True
                         if cat_n not in summary: summary[cat_n] = {}
+                        
+                        # 각 상품별 수량 합산
                         for item in items_str.split(', '):
-                            it_match = re.match(r'(.*?)\((\d+)\)', item)
-                            if it_match: pn, qt = it_match.groups(); summary[cat_n][pn] = summary[cat_n].get(pn, 0) + int(qt)
-            if show: filtered_orders.append(o)
+                            it_match = re.search(r'(.*?)\((\d+)\)', item)
+                            if it_match:
+                                pn = it_match.group(1).strip()
+                                qt = int(it_match.group(2))
+                                summary[cat_n][pn] = summary[cat_n].get(pn, 0) + qt
+            
+            if order_show_flag:
+                filtered_orders.append(o)
             
     elif tab == 'reviews':
         reviews = Review.query.order_by(Review.created_at.desc()).all()
@@ -1890,13 +1920,11 @@ def admin_dashboard():
             <div class="bg-white rounded-[2rem] border border-gray-50 overflow-hidden mb-10 shadow-sm">
              <div class="bg-gray-50 px-8 py-5 border-b border-gray-100 font-black text-green-700 flex justify-between items-center">
     <div class="flex items-center gap-3">
-        <input type="checkbox" class="task-check w-4 h-4 rounded border-slate-300 accent-green-600" 
-       value="{{t.id}}" data-category="{{ t.category }}">
-        <span>{{ cat_n }}</span>
+        <input type="checkbox" onclick="toggleCategoryAll(this, '{{ cat_n }}')" class="w-4 h-4 rounded border-slate-300 accent-green-600">
+        <span class="ml-2">{{ cat_n }} 집계 결과</span>
     </div>
-    <span class="text-gray-400 font-bold">총계: {{ items.values()|sum }}개</span>
+    <span class="text-gray-400 font-bold text-right">카테고리 총 수량: {{ items.values()|sum }}개</span>
 </div>
-
 <script>
 function toggleCategoryAll(master, catName) {
     // 1. 해당 카테고리 섹션 내의 체크박스들만 찾습니다.
@@ -1917,30 +1945,113 @@ function toggleCategoryAll(master, catName) {
 
             <div class="bg-white rounded-[2.5rem] shadow-xl border border-gray-50 overflow-x-auto">
                 <table class="w-full text-[10px] md:text-xs font-black min-w-[1200px]">
-                    <thead class="bg-gray-800 text-white">
-                        <tr><th class="p-6">Info</th><th class="p-6">Customer</th><th class="p-6">Address</th><th class="p-6">Details</th><th class="p-6 text-right">Action</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for o in filtered_orders %}
-                        <tr class="border-b border-gray-100 hover:bg-green-50/30 transition">
-                            <td class="p-6 text-gray-400">
-                                {{ o.created_at.strftime('%m/%d %H:%M') }}<br>
-                                <span class="{% if o.status == '결제취소' %}text-red-500{% else %}text-green-600{% endif %}">[{{ o.status }}]</span>
-                            </td>
-                            <td class="p-6"><b>{{ o.customer_name }}</b><br>{{ o.customer_phone }}</td>
-                            <td class="p-6">{{ o.delivery_address }}<br><span class="text-orange-500 italic">📝 {{ o.request_memo or '' }}</span></td>
-                            <td class="p-6 text-gray-600 leading-relaxed">{{ o.product_details }}</td>
-                            <td class="p-6 text-right font-black text-green-600 text-sm md:text-lg">
-                                {{ "{:,}".format(o.total_price) }}원<br>
-                                {% if o.status == '결제완료' %}
-                                <form action="/admin/order/request_delivery/{{ o.order_id }}" method="POST" class="mt-2">
-                                    <button class="bg-blue-600 text-white px-3 py-1 rounded-lg text-[10px] font-black hover:bg-blue-700 transition">배송요청</button>
-                                </form>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
+                <div class="flex justify-between items-center mb-4 px-4">
+    <div class="flex items-center gap-4">
+        <label class="flex items-center gap-2 cursor-pointer bg-gray-100 px-4 py-2 rounded-xl">
+            <input type="checkbox" id="selectAllOrders" class="w-4 h-4 accent-blue-600">
+            <span class="text-xs font-black">전체 선택</span>
+        </label>
+        <button onclick="requestBulkDelivery()" class="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-black text-xs shadow-lg hover:bg-blue-700 transition">
+            선택 항목 일괄 배송요청
+        </button>
+    </div>
+</div>
+
+<div class="bg-white rounded-[2.5rem] shadow-xl border border-gray-50 overflow-x-auto">
+    <table class="w-full text-[10px] md:text-xs font-black min-w-[1200px]">
+        <thead class="bg-gray-800 text-white">
+            <tr>
+                <th class="p-6 text-center">선택</th>
+                <th class="p-6">Info</th>
+                <th class="p-6">Customer</th>
+                <th class="p-6">Address</th>
+                <th class="p-6">Details</th>
+                <th class="p-6 text-right">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for o in filtered_orders %}
+            <tr id="row-{{ o.order_id }}" class="border-b border-gray-100 hover:bg-green-50/30 transition">
+                <td class="p-6 text-center">
+                    {% if o.status == '결제완료' %}
+                    <input type="checkbox" class="order-checkbox w-4 h-4 accent-blue-600" value="{{ o.order_id }}">
+                    {% endif %}
+                </td>
+                <td class="p-6 text-gray-400">
+                    {{ o.created_at.strftime('%m/%d %H:%M') }}<br>
+                    <span id="status-{{ o.order_id }}" class="{% if o.status == '결제취소' %}text-red-500{% else %}text-green-600{% endif %}">[{{ o.status }}]</span>
+                </td>
+                <td class="p-6"><b>{{ o.customer_name }}</b><br>{{ o.customer_phone }}</td>
+                <td class="p-6">{{ o.delivery_address }}</td>
+                <td class="p-6 text-gray-600">{{ o.product_details }}</td>
+                <td class="p-6 text-right">
+                    {% if o.status == '결제완료' %}
+                    <button onclick="requestSingleDelivery('{{ o.order_id }}')" class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-[10px] hover:bg-blue-700 transition">요청</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+// 1. 전체 선택/해제 로직
+document.getElementById('selectAllOrders').addEventListener('change', function() {
+    const isChecked = this.checked;
+    document.querySelectorAll('.order-checkbox').forEach(cb => {
+        cb.checked = isChecked;
+    });
+});
+
+// 2. 단일 건 비동기 처리
+async function requestSingleDelivery(orderId) {
+    if(!confirm("배송 요청을 보내시겠습니까?")) return;
+    sendRequest([orderId]);
+}
+
+// 3. 일괄 건 비동기 처리
+async function requestBulkDelivery() {
+    const selected = Array.from(document.querySelectorAll('.order-checkbox:checked')).map(cb => cb.value);
+    if(selected.length === 0) {
+        alert("선택된 주문이 없습니다.");
+        return;
+    }
+    if(!confirm(`${selected.length}건을 일괄 배송 요청하시겠습니까?`)) return;
+    sendRequest(selected);
+}
+
+// 4. 공통 전송 함수 (새로고침 방지 핵심)
+async function sendRequest(orderIds) {
+    try {
+        const response = await fetch('/admin/order/bulk_request_delivery', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order_ids: orderIds })
+        });
+        const result = await response.json();
+        
+        if(result.success) {
+            alert(result.message);
+            // 페이지 새로고침 대신 상태 텍스트만 변경하고 체크박스 숨김
+            orderIds.forEach(id => {
+                const statusSpan = document.getElementById(`status-${id}`);
+                if(statusSpan) statusSpan.innerText = '[배송요청]';
+                
+                const row = document.getElementById(`row-${id}`);
+                const cb = row.querySelector('.order-checkbox');
+                if(cb) cb.remove(); // 처리된 건은 체크박스 제거
+                const btn = row.querySelector('button');
+                if(btn) btn.remove(); // 버튼 제거
+            });
+        } else {
+            alert(result.message);
+        }
+    } catch (e) {
+        alert("오류가 발생했습니다.");
+    }
+}
+</script>
                 </table>
             </div>
             <div class="flex justify-end mt-12"><a href="/admin/orders/excel" class="bg-gray-800 text-white px-10 py-5 rounded-2xl font-black text-xs md:text-sm shadow-2xl transition text-center">Excel Download</a></div>
