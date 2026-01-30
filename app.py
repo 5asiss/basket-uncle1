@@ -301,40 +301,21 @@ HEADER_HTML = """
             </div>
             <button onclick="toggleSidebar()" class="text-gray-300 text-2xl hover:text-red-500 transition"><i class="fas fa-times"></i></button>
         </div>
-        
         <nav class="space-y-7 text-base flex-1">
             <a href="/" class="group flex items-center gap-3 text-gray-800 hover:text-green-600 transition font-black">
                 <i class="fas fa-th-large opacity-20 group-hover:opacity-100 transition"></i> 전체 상품 리스트
             </a>
             <div class="h-px bg-gray-100 w-full my-4"></div>
-            
             {% for c in nav_categories %}
             <a href="/category/{{ c.name }}" class="flex items-center justify-between text-gray-500 hover:text-green-600 transition">
                 <span>{{ c.name }}</span>
                 <i class="fas fa-chevron-right text-[10px] opacity-30"></i>
             </a>
             {% endfor %}
-            
             <div class="h-px bg-gray-100 w-full my-4"></div>
             <a href="/about" class="block font-bold text-blue-500 hover:underline">바구니삼촌이란?</a>
-            
-            {% if current_user.is_authenticated and (current_user.is_admin or current_user.email in managers) %}
-            <div class="pt-6">
-                <a href="/admin" class="block p-5 bg-orange-50 text-orange-600 rounded-3xl text-center text-xs border border-orange-100 font-black shadow-sm hover:bg-orange-100 transition">
-                    <i class="fas fa-user-shield mr-2"></i> 관리자 대시보드
-                </a>
-            </div>
-            {% endif %}
         </nav>
-        
-        <div class="mt-auto pt-10 border-t border-gray-100">
-            <p class="text-[10px] text-gray-300 uppercase tracking-[0.2em] font-black mb-2">Service Center</p>
-            <p class="text-lg font-black text-gray-400">1666-8320</p>
-            <p class="text-[9px] text-gray-300 mt-1 font-bold">인천 연수구 송도동 전용</p>
-        </div>
-    </div>
-
-    <nav class="bg-white/95 backdrop-blur-md shadow-sm sticky top-0 z-50">
+    </div> <nav class="bg-white/95 backdrop-blur-md shadow-sm sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-3 md:px-6">
             <div class="flex justify-between h-16 md:h-20 items-center">
                 <div class="flex items-center gap-2 md:gap-6">
@@ -348,12 +329,18 @@ HEADER_HTML = """
                 </div>
 
                 <div class="flex items-center gap-2 md:gap-5 flex-1 justify-end">
-                    <form action="/" method="GET" class="relative hidden md:block max-w-xs flex-1">
-                        <input name="q" placeholder="상품검색" class="w-full bg-gray-100 py-2.5 px-6 rounded-full text-xs font-black outline-none focus:ring-4 focus:ring-green-50 transition border border-transparent focus:border-green-100">
-                        <button class="absolute right-4 top-2.5 text-gray-400 hover:text-green-600 transition"><i class="fas fa-search"></i></button>
+                    <form action="/search" method="GET" class="relative hidden md:block max-w-xs flex-1">
+                        <input name="q" placeholder="상품명을 입력하세요" 
+                               class="w-full bg-gray-100 py-3 px-6 rounded-full text-sm font-bold outline-none focus:ring-4 focus:ring-green-50 transition border border-transparent focus:border-green-100 appearance-none"
+                               style="line-height: normal; font-family: 'Noto Sans KR', sans-serif;">
+                        <button type="submit" class="absolute right-4 top-3 text-gray-400 hover:text-green-600 transition">
+                            <i class="fas fa-search"></i>
+                        </button>
                     </form>
                     
-                    <button onclick="document.getElementById('mobile-search-nav').classList.toggle('hidden')" class="md:hidden text-gray-400 p-2 text-lg"><i class="fas fa-search"></i></button>
+                    <button onclick="document.getElementById('mobile-search-nav').classList.toggle('hidden')" class="md:hidden text-gray-400 p-2 text-lg">
+                        <i class="fas fa-search"></i>
+                    </button>
 
                     {% if current_user.is_authenticated %}
                         <a href="/cart" class="text-gray-400 relative p-1.5 hover:text-green-600 transition">
@@ -368,9 +355,13 @@ HEADER_HTML = """
             </div>
             
             <div id="mobile-search-nav" class="hidden md:hidden pb-4">
-                <form action="/" method="GET" class="relative">
-                    <input name="q" placeholder="상품 검색..." class="w-full bg-gray-100 py-3.5 px-7 rounded-full text-sm font-bold outline-none border-2 border-green-50 focus:border-green-200 transition">
-                    <button class="absolute right-6 top-4 text-green-600"><i class="fas fa-search"></i></button>
+                <form action="/search" method="GET" class="relative">
+                    <input name="q" placeholder="어떤 상품을 찾으시나요?" 
+                           class="w-full bg-white py-4 px-7 rounded-full text-base font-bold outline-none border-2 border-green-50 focus:border-green-200 transition shadow-sm appearance-none"
+                           style="line-height: normal; font-family: 'Noto Sans KR', sans-serif;">
+                    <button type="submit" class="absolute right-6 top-4 text-green-600">
+                        <i class="fas fa-search"></i>
+                    </button>
                 </form>
             </div>
         </div>
@@ -684,6 +675,10 @@ function closeUncleModal() {
 # 5. 비즈니스 로직 및 라우팅
 # --------------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------------
+# 5. 비즈니스 로직 및 라우팅 (보완 완료 버전)
+# --------------------------------------------------------------------------------
+
 @app.context_processor
 def inject_globals():
     """전역 템플릿 변수 주입"""
@@ -695,8 +690,181 @@ def inject_globals():
     managers = [c.manager_email for c in categories if c.manager_email]
     return dict(cart_count=cart_count, now=datetime.now(), managers=managers, nav_categories=categories)
 
+@app.route('/search')
+def search_view():
+    """검색 결과 전용 페이지 (요구사항: 카테고리별 표시 + 메인 이동 + 추천상품)"""
+    query = request.args.get('q', '').strip()
+    if not query:
+        return redirect(url_for('index'))
+
+    # 1. 검색 결과 및 카테고리 그룹화
+    search_products = Product.query.filter(Product.is_active == True, Product.name.contains(query)).all()
+    grouped_search = {}
+    for p in search_products:
+        if p.category not in grouped_search: grouped_search[p.category] = []
+        grouped_search[p.category].append(p)
+
+    # 2. 하단 노출용: 최신 상품 10개 & 추천 카테고리 3개
+    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(10).all()
+    recommend_cats = Category.query.order_by(Category.order.asc()).limit(3).all()
+    cat_previews = {cat: Product.query.filter_by(category=cat.name, is_active=True).limit(4).all() for cat in recommend_cats}
+
+    content = """
+    <div class="max-w-7xl mx-auto px-4 md:px-6 py-12 md:py-20 text-left">
+        <h2 class="text-2xl md:text-4xl font-black text-gray-800 mb-8">
+            <span class="text-green-600">"{{ query }}"</span> 검색 결과 ({{ search_products|length }}건)
+        </h2>
+
+        {% if grouped_search %}
+            {% for cat_name, products in grouped_search.items() %}
+            <section class="mb-16">
+                <h3 class="text-xl md:text-2xl font-black text-gray-700 mb-6 flex items-center gap-2">
+                    <span class="w-1 h-6 bg-green-500 rounded-full"></span> {{ cat_name }} 카테고리
+                </h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                    {% for p in products %}
+                    <div class="product-card bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                        <a href="/product/{{p.id}}" class="aspect-square block p-4"><img src="{{ p.image_url }}" class="w-full h-full object-contain"></a>
+                        <div class="p-4 pt-0">
+                            <h4 class="font-black text-sm truncate">{{ p.name }}</h4>
+                            <p class="text-green-600 font-black text-lg mt-2">{{ "{:,}".format(p.price) }}원</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endfor %}
+        {% else %}
+            <div class="py-20 text-center bg-white rounded-[3rem] border-2 border-dashed border-gray-100 mb-16">
+                <p class="text-gray-400 font-black text-xl">검색 결과가 없습니다.</p>
+            </div>
+        {% endif %}
+
+        <div class="flex justify-center mb-24">
+            <a href="/" class="bg-gray-800 text-white px-12 py-5 rounded-full font-black shadow-xl hover:bg-black transition">메인화면으로 이동하기</a>
+        </div>
+
+        <section class="mb-20">
+            <h2 class="text-2xl md:text-3xl font-black text-gray-800 mb-8 pb-4 border-b">✨ 지금 막 들어온 신선 상품</h2>
+            <div class="horizontal-scroll no-scrollbar">
+                {% for p in latest_all %}
+                <div class="w-40 md:w-56 flex-shrink-0">
+                    <a href="/product/{{p.id}}" class="bg-white rounded-[2rem] border border-gray-100 p-4 block shadow-sm">
+                        <img src="{{ p.image_url }}" class="w-full aspect-square object-contain mb-3">
+                        <p class="text-xs font-black truncate">{{ p.name }}</p>
+                        <p class="text-green-600 font-black">{{ "{:,}".format(p.price) }}원</p>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+            {% for cat, prods in cat_previews.items() %}
+            <div class="bg-gray-50 p-8 rounded-[3rem] border border-gray-100 shadow-inner">
+                <h3 class="text-xl font-black mb-6">{{ cat.name }} <a href="/category/{{ cat.name }}" class="text-xs text-gray-400 ml-2">더보기 ></a></h3>
+                <div class="grid grid-cols-2 gap-4">
+                    {% for cp in prods %}<a href="/product/{{ cp.id }}" class="bg-white p-3 rounded-2xl shadow-sm"><img src="{{ cp.image_url }}" class="w-full aspect-square object-contain"></a>{% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, **locals())
+
 @app.route('/')
 def index():
+    """메인 페이지 (디자인 유지)"""
+    categories = Category.query.order_by(Category.order.asc()).all()
+    grouped_products = {}
+    order_logic = (Product.stock <= 0) | (Product.deadline < datetime.now())
+    
+    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(20).all()
+    random_latest = random.sample(latest_all, min(len(latest_all), 30)) if latest_all else []
+    
+    today_end = datetime.now().replace(hour=23, minute=59, second=59)
+    closing_today = Product.query.filter(Product.is_active == True, Product.deadline > datetime.now(), Product.deadline <= today_end).order_by(Product.deadline.asc()).all()
+    latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
+
+    for cat in categories:
+        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(order_logic, Product.id.desc()).all()
+        if prods: grouped_products[cat] = prods
+    
+    content = """
+   <div class="bg-gray-900 text-white py-20 md:py-32 px-4 shadow-inner relative overflow-hidden text-center">
+    <div class="max-w-7xl mx-auto relative z-10 font-black text-center">
+        <span class="text-green-400 text-[10px] md:text-sm font-black mb-6 inline-block uppercase tracking-[0.3em]">Direct Delivery Service</span>
+        <h1 class="hero-title text-3xl md:text-7xl font-black mb-8 leading-tight tracking-tighter">우리는 상품을 판매하지 않습니다.<br><span class="text-green-500 uppercase">Premium Service</span></h1>
+        <div class="w-12 h-1 bg-white/20 mx-auto mb-8"></div>
+        <p class="hero-desc text-gray-400 text-sm md:text-2xl font-bold max-w-2xl mx-auto mb-12">판매가 아닌, <span class="text-white underline decoration-green-500 decoration-4 underline-offset-8">배송 서비스</span> 입니다.</p>
+        <div class="flex flex-col md:flex-row justify-center items-center gap-6">
+            <a href="#products" class="bg-green-600 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95">쇼핑하러 가기</a>
+            <a href="/about" class="text-white/60 hover:text-white font-bold border-b border-white/20 pb-1 transition text-xs md:text-base">바구니삼촌이란? <i class="fas fa-arrow-right ml-2"></i></a>
+        </div>
+    </div>
+    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] opacity-30"></div>
+</div>
+
+<div id="products" class="max-w-7xl mx-auto px-4 py-16 text-left">
+    {% if latest_reviews %}
+    <section class="mb-12 text-left">
+        <div class="mb-6 flex justify-between items-end border-b border-gray-100 pb-4 text-left">
+            <h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter"><span class="w-1.5 h-8 bg-orange-400 rounded-full"></span> 📸 생생한 구매 후기</h2>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-left">
+            {% for r in latest_reviews %}
+            <div class="bg-white rounded-[2rem] p-4 shadow-sm border border-gray-50 flex flex-col gap-3 transition hover:shadow-xl hover:-translate-y-1">
+                <img src="{{ r.image_url }}" class="w-full aspect-square object-cover rounded-2xl bg-gray-50">
+                <div>
+                    <p class="text-[10px] text-gray-400 font-bold mb-1">{{ r.user_name[:1] }}**님 | {{ r.product_name }}</p>
+                    <p class="text-[11px] font-bold text-gray-700 line-clamp-2 leading-relaxed">{{ r.content }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% for cat, products in grouped_products.items() %}
+    <section class="mb-12 text-left">
+        <div class="mb-6 flex justify-between items-end border-b border-gray-100 pb-4 text-left">
+            <div class="text-left">
+                <h2 class="text-xl md:text-3xl font-black text-gray-800 flex items-center gap-3 tracking-tighter text-left"><span class="w-1.5 h-8 bg-green-500 rounded-full"></span> {{ cat.name }} 리스트</h2>
+            </div>
+            <a href="/category/{{ cat.name }}" class="text-[10px] md:text-sm font-bold text-gray-400 hover:text-green-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
+        </div>
+        <div class="horizontal-scroll no-scrollbar text-left">
+            {% for p in products %}
+            <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %} text-left">
+                <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden text-left">
+                    <img src="{{ p.image_url }}" class="w-full h-full object-contain p-2 md:p-6 text-left">
+                </a>
+                <div class="p-3 md:p-8 flex flex-col flex-1 text-left">
+                    <h3 class="font-black text-gray-800 text-[11px] md:text-base truncate mb-0.5 text-left">{{ p.name }}</h3>
+                    <p class="text-[9px] md:text-[11px] text-green-600 mb-2 font-medium truncate text-left">{{ p.description or '' }}</p>
+                    <div class="mt-auto flex justify-between items-end text-left">
+                        <span class="text-[13px] md:text-2xl font-black text-green-600 text-left">{{ "{:,}".format(p.price) }}원</span>
+                        <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-8 h-8 md:w-14 md:h-14 rounded-xl md:rounded-[1.5rem] text-white shadow-xl hover:bg-green-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endfor %}
+</div>
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, 
+                                 grouped_products=grouped_products, 
+                                 random_latest=random_latest, 
+                                 closing_today=closing_today, 
+                                 latest_reviews=latest_reviews)
+
+# --- 상단 HEADER_HTML 내의 검색창 부분도 아래와 같이 반드시 수정되어야 합니다 ---
+# (HEADER_HTML 변수를 찾아서 해당 부분의 action="/"을 action="/search"로 바꾸세요)
+# 1. <form action="/search" method="GET" class="relative hidden md:block max-w-xs flex-1">
+# 2. <form action="/search" method="GET" class="relative">
     """메인 페이지"""
     query = request.args.get('q', '').strip()
     categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
@@ -1269,10 +1437,17 @@ def product_detail(pid):
             <div class="bg-gray-100 p-10 md:p-16 rounded-[3.5rem] md:rounded-[5rem] text-left text-left">
                 <div class="max-w-2xl mx-auto text-center text-left">
                     <p class="text-xs md:text-sm font-black text-gray-400 mb-6 uppercase tracking-[0.3em] text-center text-left">Looking for something else?</p>
-                    <form action="/" method="GET" class="relative text-left text-left">
-                        <input name="q" placeholder="찾으시는 다른 상품명을 입력해보세요" class="w-full bg-white py-5 px-10 rounded-full text-sm md:text-lg font-black outline-none shadow-xl focus:ring-4 focus:ring-green-100 transition text-left text-left">
-                        <button class="absolute right-8 top-5 text-green-600 text-right"><i class="fas fa-search text-xl md:text-2xl"></i></button>
-                    </form>
+                    <form action="/search" method="GET" class="relative hidden md:block max-w-xs flex-1">
+    <input name="q" placeholder="상품검색" class="...">
+    <button class="..."><i class="fas fa-search"></i></button>
+</form>
+
+<div id="mobile-search-nav" class="hidden md:hidden pb-4">
+    <form action="/search" method="GET" class="relative">
+        <input name="q" placeholder="상품 검색..." class="...">
+        <button class="..."><i class="fas fa-search"></i></button>
+    </form>
+</div>
                 </div>
             </div>
         </div>
