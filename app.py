@@ -1679,28 +1679,40 @@ def admin_request_delivery(order_id):
 @app.route('/admin')
 @login_required
 def admin_dashboard():
-    """관리자 대시보드"""
-    if not (current_user.is_admin or Category.query.filter_by(manager_email=current_user.email).first()):
+    """관리자 대시보드 - 카테고리 관리 기능 및 주문 탭 오류 수정 완료본"""
+    # 1. 권한 체크 (마스터 관리자이거나 등록된 매니저인 경우 접근 허용)
+    categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
+    managers = [c.manager_email for c in categories if c.manager_email]
+    
+    if not (current_user.is_admin or current_user.email in managers):
+        flash("관리자 권한이 없습니다.")
         return redirect('/')
     
     is_master = current_user.is_admin
     tab = request.args.get('tab', 'products')
-    categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
     my_categories = [c.name for c in categories if c.manager_email == current_user.email]
     
+    # [안정성] 모든 탭에서 공용으로 사용하는 변수 초기화
+    sel_cat = request.args.get('category', '전체')
+    sel_order_cat = request.args.get('order_cat', '전체')
+    start_date_str = request.args.get('start_date', datetime.now().strftime('%Y-%m-%dT00:00'))
+    end_date_str = request.args.get('end_date', datetime.now().strftime('%Y-%m-%dT23:59'))
+    products, filtered_orders, summary, reviews = [], [], {}, []
+
     if tab == 'products':
-        sel_cat = request.args.get('category', '전체')
         q = Product.query
         if sel_cat != '전체': q = q.filter_by(category=sel_cat)
         products = [p for p in q.order_by(Product.id.desc()).all() if is_master or p.category in my_categories]
+    
     elif tab == 'orders':
-        start_date_str = request.args.get('start_date', datetime.now().strftime('%Y-%m-%dT00:00'))
-        end_date_str = request.args.get('end_date', datetime.now().strftime('%Y-%m-%dT23:59'))
-        sel_order_cat = request.args.get('order_cat', '전체')
-        start_dt = datetime.strptime(start_date_str, '%Y-%m-%dT%H:%M')
-        end_dt = datetime.strptime(end_date_str, '%Y-%m-%dT%H:%M')
+        try:
+            start_dt = datetime.strptime(start_date_str, '%Y-%m-%dT%H:%M')
+            end_dt = datetime.strptime(end_date_str, '%Y-%m-%dT%H:%M')
+        except:
+            start_dt = datetime.now().replace(hour=0, minute=0)
+            end_dt = datetime.now().replace(hour=23, minute=59)
+
         all_orders = Order.query.filter(Order.created_at >= start_dt, Order.created_at <= end_dt).order_by(Order.created_at.desc()).all()
-        filtered_orders, summary = [], {}
         for o in all_orders:
             show = False
             for p_info in o.product_details.split(' | '):
@@ -1714,10 +1726,12 @@ def admin_dashboard():
                             it_match = re.match(r'(.*?)\((\d+)\)', item)
                             if it_match: pn, qt = it_match.groups(); summary[cat_n][pn] = summary[cat_n].get(pn, 0) + int(qt)
             if show: filtered_orders.append(o)
+            
     elif tab == 'reviews':
         reviews = Review.query.order_by(Review.created_at.desc()).all()
+
+    # 렌더링 시 **locals()를 통해 모든 변수 안전하게 전달
     return render_template_string(HEADER_HTML + """
-            
     <div class="max-w-7xl mx-auto py-12 px-4 md:px-6 font-black text-xs md:text-sm text-left">
         <div class="flex justify-between items-center mb-10 text-left">
             <h2 class="text-2xl md:text-3xl font-black text-orange-700 italic text-left">Admin Panel</h2>
@@ -1726,11 +1740,11 @@ def admin_dashboard():
         
         <div class="flex border-b border-gray-100 mb-12 bg-white rounded-t-3xl overflow-x-auto text-left">
             <a href="/admin?tab=products" class="px-8 py-5 {% if tab == 'products' %}border-b-4 border-orange-500 text-orange-600{% endif %}">상품 관리</a>
-            {% if current_user.is_admin %}<a href="/admin?tab=categories" class="px-8 py-5 {% if tab == 'categories' %}border-b-4 border-orange-500 text-orange-600{% endif %}">카테고리/판매자 설정</a>{% endif %}
+            {% if is_master %}<a href="/admin?tab=categories" class="px-8 py-5 {% if tab == 'categories' %}border-b-4 border-orange-500 text-orange-600{% endif %}">카테고리/판매자 설정</a>{% endif %}
             <a href="/admin?tab=orders" class="px-8 py-5 {% if tab == 'orders' %}border-b-4 border-orange-500 text-orange-600{% endif %}">주문 및 배송 집계</a>
             <a href="/admin?tab=reviews" class="px-8 py-5 {% if tab == 'reviews' %}border-b-4 border-orange-500 text-orange-600{% endif %}">리뷰 관리</a>
-             </div>
-        
+        </div>
+
         {% if tab == 'products' %}
             <div class="flex flex-col sm:flex-row justify-between items-center mb-8 gap-6 text-left">
                 <form action="/admin" class="flex gap-3 text-left">
@@ -1744,17 +1758,6 @@ def admin_dashboard():
                     <button onclick="document.getElementById('excel_upload_form').classList.toggle('hidden')" class="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black text-xs shadow-lg hover:bg-blue-700 transition">📦 엑셀 대량 등록</button>
                     <a href="/admin/add" class="bg-green-600 text-white px-6 py-3 rounded-2xl font-black text-xs shadow-lg hover:bg-green-700 transition">+ 개별 상품 등록</a>
                 </div>
-            </div>
-            
-            <div id="excel_upload_form" class="hidden bg-blue-50 p-8 rounded-[2rem] mb-12 border border-blue-100 text-left">
-                <h3 class="text-blue-700 font-black mb-4 text-sm md:text-base text-left">엑셀 상품 대량 등록 (규격 준수 필수)</h3>
-                <p class="text-[10px] text-blue-400 mb-6 font-bold text-left">필수 헤더: 카테고리, 상품명, 규격, 가격, 이미지파일명</p>
-                <form action="/admin/product/bulk_upload" method="POST" enctype="multipart/form-data" class="flex flex-col md:flex-row gap-4 items-end text-left">
-                    <div class="flex-1 w-full text-left">
-                        <input type="file" name="excel_file" class="w-full p-4 bg-white rounded-2xl text-[10px] md:text-xs" required>
-                    </div>
-                    <button class="w-full md:w-auto bg-blue-600 text-white px-10 py-4 rounded-2xl font-black text-xs md:text-sm text-center">데이터 업로드 시작</button>
-                </form>
             </div>
             
             <div class="bg-white rounded-[2rem] shadow-sm border border-gray-50 overflow-hidden text-left">
@@ -1787,7 +1790,7 @@ def admin_dashboard():
                     <h3 class="text-[11px] md:text-sm text-gray-400 uppercase tracking-widest mb-10 font-black text-left">판매 카테고리 및 사업자 추가</h3>
                     <form action="/admin/category/add" method="POST" class="space-y-5 text-left">
                         <input name="cat_name" placeholder="카테고리명 (예: 산지직송 농산물)" class="border border-gray-100 p-5 rounded-2xl w-full font-black text-sm text-left" required>
-                        <textarea name="description" placeholder="배송기한 예)+1일배송 ,마감후 " class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black text-sm text-left"></textarea>
+                        <textarea name="description" placeholder="배송기한 정보 등 설명" class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black text-sm text-left"></textarea>
                         <input name="manager_email" placeholder="관리 매니저 이메일 (ID)" class="border border-gray-100 p-5 rounded-2xl w-full font-black text-sm text-left">
                         <select name="tax_type" class="border border-gray-100 p-5 rounded-2xl w-full font-black text-sm text-left bg-white"><option value="과세">일반 과세 상품</option><option value="면세">면세 농축산물</option></select>
                         <div class="border-t border-gray-100 pt-8 space-y-4 text-left">
@@ -1818,7 +1821,7 @@ def admin_dashboard():
                                 <td class="p-6 text-left"><b class="text-gray-800">{{ c.name }}</b><br><span class="text-gray-400 text-[10px]">매니저: {{ c.manager_email or '미지정' }}</span></td>
                                 <td class="p-6 text-center space-x-3 text-[10px] text-center">
                                     <a href="/admin/category/edit/{{c.id}}" class="text-blue-500 hover:underline">수정</a>
-                                    <a href="/admin/category/delete/{{c.id}}" class="text-red-200 hover:text-red-500 transition">삭제</a>
+                                    <a href="/admin/category/delete/{{c.id}}" class="text-red-200 hover:text-red-500 transition" onclick="return confirm('삭제하시겠습니까?')">삭제</a>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -1846,75 +1849,53 @@ def admin_dashboard():
                             {% for c in nav_categories %}<option value="{{c.name}}" {% if sel_order_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}
                         </select>
                     </div>
-                    <div class="flex items-end text-left"><button class="w-full bg-orange-600 text-white py-4 rounded-2xl font-black shadow-lg text-xs md:text-sm text-center">집계 및 리스트 업데이트</button></div>
+                    <div class="flex items-end text-left"><button class="w-full bg-orange-600 text-white py-4 rounded-2xl font-black shadow-lg text-xs md:text-sm text-center">집계 업데이트</button></div>
                 </form>
             </div>
-            
-            <h3 class="text-xl md:text-2xl font-black mb-8 italic text-left underline underline-offset-8 decoration-green-300">📊 품목별 배송 수량 합계</h3>
+
             {% for cat_n, items in summary.items() %}
-            <div class="bg-white rounded-[2rem] border border-gray-50 overflow-hidden mb-10 shadow-sm text-left">
-                <div class="bg-gray-50 px-8 py-5 border-b border-gray-100 font-black text-green-700 flex justify-between text-left">
-                    <span>{{ cat_n }}</span><span class="text-gray-400 font-bold text-right">총계: {{ items.values()|sum }}건</span>
+            <div class="bg-white rounded-[2rem] border border-gray-50 overflow-hidden mb-10 shadow-sm">
+                <div class="bg-gray-50 px-8 py-5 border-b border-gray-100 font-black text-green-700 flex justify-between">
+                    <span>{{ cat_n }}</span><span class="text-gray-400 font-bold">총계: {{ items.values()|sum }}개</span>
                 </div>
-                <table class="w-full text-left">
-                    <tbody class="text-left">
-                        {% for pn, qt in items.items() %}
-                        <tr class="border-b border-gray-50 hover:bg-gray-50/50 transition text-left">
-                            <td class="p-5 font-bold text-gray-700 text-left text-sm md:text-base">{{ pn }}</td>
-                            <td class="p-5 text-right font-black text-blue-600 text-sm md:text-base text-right">{{ qt }}개</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
+                <table class="w-full">
+                    {% for pn, qt in items.items() %}
+                    <tr class="border-b border-gray-50"><td class="p-5 font-bold text-gray-700">{{ pn }}</td><td class="p-5 text-right font-black text-blue-600">{{ qt }}개</td></tr>
+                    {% endfor %}
                 </table>
             </div>
             {% endfor %}
-            
-            <h3 class="text-xl md:text-2xl font-black mt-24 mb-8 italic text-left underline underline-offset-8 decoration-orange-300 text-left">📑 상세 배송 명단</h3>
-            <div class="bg-white rounded-[2.5rem] shadow-xl border border-gray-50 overflow-x-auto text-left">
-                <table class="w-full text-[10px] md:text-xs font-black min-w-[1200px] text-left">
-                    <thead class="bg-gray-800 text-white text-left">
-                        <tr>
-                            <th class="p-6 uppercase tracking-widest text-left">Info</th>
-                            <th class="p-6 uppercase tracking-widest text-left">Customer</th>
-                            <th class="p-6 uppercase tracking-widest text-left">Address & Access</th>
-                            <th class="p-6 uppercase tracking-widest text-left">Order Details</th>
-                            <th class="p-6 text-right uppercase tracking-widest text-right">Amount</th>
-                        </tr>
+
+            <div class="bg-white rounded-[2.5rem] shadow-xl border border-gray-50 overflow-x-auto">
+                <table class="w-full text-[10px] md:text-xs font-black min-w-[1200px]">
+                    <thead class="bg-gray-800 text-white">
+                        <tr><th class="p-6">Info</th><th class="p-6">Customer</th><th class="p-6">Address</th><th class="p-6">Details</th><th class="p-6 text-right">Action</th></tr>
                     </thead>
-                    <tbody class="text-left">
+                    <tbody>
                         {% for o in filtered_orders %}
-                        <tr class="border-b border-gray-100 hover:bg-green-50/30 transition text-left">
-                            <td class="p-6 text-gray-400 font-bold text-left">
-                                {{ o.created_at.strftime('%m/%d %H:%M') }}<br><span class="text-[8px] opacity-40 text-left">{{ o.order_id }}</span><br>
+                        <tr class="border-b border-gray-100 hover:bg-green-50/30 transition">
+                            <td class="p-6 text-gray-400">
+                                {{ o.created_at.strftime('%m/%d %H:%M') }}<br>
                                 <span class="{% if o.status == '결제취소' %}text-red-500{% else %}text-green-600{% endif %}">[{{ o.status }}]</span>
                             </td>
-                            <td class="p-6 text-left"><b class="text-gray-900 text-sm md:text-base text-left">{{ o.customer_name }}</b><br><span class="text-blue-600 text-left">{{ o.customer_phone }}</span></td>
-                            <td class="p-6 text-left">
-                                <span class="font-bold text-gray-700 block mb-2 text-left leading-relaxed">{{ o.delivery_address }}</span>
-                                <span class="text-orange-500 font-black italic block text-left">📝 {{ o.request_memo or '메모 없음' }}</span>
+                            <td class="p-6"><b>{{ o.customer_name }}</b><br>{{ o.customer_phone }}</td>
+                            <td class="p-6">{{ o.delivery_address }}<br><span class="text-orange-500 italic">📝 {{ o.request_memo or '' }}</span></td>
+                            <td class="p-6 text-gray-600 leading-relaxed">{{ o.product_details }}</td>
+                            <td class="p-6 text-right font-black text-green-600 text-sm md:text-lg">
+                                {{ "{:,}".format(o.total_price) }}원<br>
+                                {% if o.status == '결제완료' %}
+                                <form action="/admin/order/request_delivery/{{ o.order_id }}" method="POST" class="mt-2">
+                                    <button class="bg-blue-600 text-white px-3 py-1 rounded-lg text-[10px] font-black hover:bg-blue-700 transition">배송요청</button>
+                                </form>
+                                {% endif %}
                             </td>
-                            <td class="p-6 text-gray-600 leading-relaxed font-bold text-left text-xs md:text-sm">{{ o.product_details }}</td>
-                           <td class="p-6 text-right font-black text-green-600 text-sm md:text-lg text-right">
-    {{ "{:,}".format(o.total_price) }}원<br>
-    {% if o.status == '결제완료' %}
-    <form action="/admin/order/request_delivery/{{ o.order_id }}" method="POST" class="mt-2">
-        <button class="bg-blue-600 text-white px-3 py-1 rounded-lg text-[10px] font-black hover:bg-blue-700 transition">배송요청</button>
-    </form>
-    {% endif %}
-</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            {% if o.status == '결제완료' %}
-<form action="/admin/order/request_delivery/{{ o.order_id }}" method="POST" style="display:inline;">
-    <button class="bg-blue-600 text-white px-3 py-1 rounded-lg text-[10px] font-black">배송요청</button>
-</form>
-{% endif %}
-<div class="flex justify-end mt-12 text-right">
-                <a href="/admin/orders/excel" class="bg-gray-800 text-white px-10 py-5 rounded-2xl font-black text-xs md:text-sm shadow-2xl hover:scale-105 transition text-center">Excel Download (전체 내역)</a>
-            </div>
+            <div class="flex justify-end mt-12"><a href="/admin/orders/excel" class="bg-gray-800 text-white px-10 py-5 rounded-2xl font-black text-xs md:text-sm shadow-2xl transition text-center">Excel Download</a></div>
+
         {% elif tab == 'reviews' %}
             <div class="bg-white rounded-[2.5rem] shadow-xl border border-gray-50 overflow-hidden">
                 <table class="w-full text-[10px] md:text-xs font-black text-left">
