@@ -7,6 +7,7 @@ import hmac
 import hashlib
 import re
 import uuid
+import base64
 from datetime import datetime, timedelta
 from flask import Blueprint, render_template_string, request, redirect, jsonify, flash, url_for, session
 from flask_sqlalchemy import SQLAlchemy
@@ -16,7 +17,10 @@ from sqlalchemy import text, UniqueConstraint
 # 이 설정으로 인해 이제 모든 주소는 basam.co.kr/logi/... 가 됩니다.
 logi_bp = Blueprint('logi', __name__, url_prefix='/logi')
 db_delivery = SQLAlchemy()
-
+# 파일 저장 경로 설정 (없으면 생성)
+PROOF_FOLDER = os.path.join('static', 'proof_photos')
+if not os.path.exists(PROOF_FOLDER):
+    os.makedirs(PROOF_FOLDER, exist_ok=True)
 # --------------------------------------------------------------------------------
 # 3. 데이터베이스 모델 (기존 기능 100% 보존)
 # --------------------------------------------------------------------------------
@@ -571,23 +575,65 @@ def logi_driver_work():
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
-        body { 
-            font-family: 'Pretendard', sans-serif; 
-            background-color: #0f172a; color: #f8fafc; 
-            letter-spacing: -0.03em; word-break: keep-all;
-        }
-        /* 기사님 가독성을 위한 큼직한 카드 스타일 */
-        .task-card {
-            background: #1e293b; border-radius: 1.5rem;
-            padding: 1.5rem; border: 1px solid #334155;
-            margin-bottom: 1.25rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
-        }
-        .address-highlight { color: #ffffff; font-weight: 900; line-height: 1.2; font-size: 24px; }
-        .product-badge { background: #064e3b; color: #34d399; padding: 6px 12px; border-radius: 10px; font-weight: 800; font-size: 16px; border: 1px solid #065f46; }
-        .bottom-ctrl { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; z-index: 1000; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-    </style>
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
+    
+    body { 
+        font-family: 'Pretendard', sans-serif; 
+        background-color: #0f172a; color: #f8fafc; 
+        letter-spacing: -0.03em; word-break: keep-all;
+    }
+
+    /* 기사님 가독성을 위한 큼직한 카드 스타일 */
+    .task-card {
+        background: #1e293b; border-radius: 1.5rem;
+        padding: 1.5rem; border: 1px solid #334155;
+        margin-bottom: 1.25rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+    }
+
+    /* 주소: 가독성을 위해 크기 유지 및 줄간격 확보 */
+    .address-highlight { 
+        color: #ffffff; 
+        font-weight: 900; 
+        line-height: 1.3; 
+        font-size: 24px; 
+        margin-bottom: 8px;
+    }
+
+    /* [수정 핵심] 품목 배지: 두 줄이 되어도 글자가 겹치지 않도록 line-height와 padding 조정 */
+.product-badge { 
+    /* 1. 줄바꿈 시 배경 겹침 방지의 핵심 */
+    display: inline-block;      
+    line-height: 1.6;           /* 줄 간격을 글자 크기의 1.6배로 벌림 */
+    
+    /* 2. 디자인 및 색상 */
+    background: #064e3b; 
+    color: #34d399; 
+    border: 1px solid #065f46;
+    border-radius: 8px; 
+    
+    /* 3. 여백 조절 (글자가 배경 끝에 붙지 않게 함) */
+    padding: 2px 10px;          /* 위아래(2px), 좌우(10px) */
+    margin-top: 4px;            /* 배지 위쪽 간격 */
+    margin-bottom: 4px;         /* 배지 아래쪽 간격 */
+    
+    /* 4. 가독성 */
+    font-weight: 800; 
+    font-size: 15px; 
+    word-break: keep-all;       /* 단어 중간에서 끊기지 않게 함 */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+
+    /* 하단 조작바 */
+    .bottom-ctrl { 
+        position: fixed; 
+        bottom: 20px; 
+        left: 50%; 
+        transform: translateX(-50%); 
+        width: 92%; 
+        z-index: 1000; 
+    }
+
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+</style>
 </head>
 <body class="pb-32 px-3">
     <div class="grid grid-cols-3 bg-slate-900 text-white rounded-b-[2.5rem] shadow-2xl mb-6 border-b border-slate-800 py-6 sticky top-0 z-50 backdrop-blur-md bg-opacity-95">
@@ -749,11 +795,28 @@ def logi_driver_work():
         let currentTaskId = null; 
         let stream = null;
 
-        function changeFontSize(d) { 
-            currentSize += d; 
-            if(currentSize < 12) currentSize = 12; if(currentSize > 35) currentSize = 35; 
-            document.getElementById('driver-body').style.fontSize = currentSize+'px';
-        }
+       let currentBaseSize = 15; 
+
+function changeFontSize(delta) {
+    const body = document.getElementById('driver-body');
+    if (!body) return;
+
+    // 1. 크기 계산 (최소 12px ~ 최대 35px 제한)
+    currentBaseSize += delta;
+    if (currentBaseSize < 12) currentBaseSize = 12;
+    if (currentBaseSize > 35) currentBaseSize = 35;
+
+    // 2. 전체 본문 크기 변경
+    body.style.fontSize = currentBaseSize + 'px';
+
+    // 3. [추가] 주소나 품목 텍스트처럼 중요한 부분은 비례해서 더 커지도록 처리
+    document.querySelectorAll('.address-highlight').forEach(el => {
+        el.style.fontSize = (currentBaseSize + 7) + 'px';
+    });
+    document.querySelectorAll('.product-badge').forEach(el => {
+        el.style.fontSize = (currentBaseSize + 1) + 'px';
+    });
+}
 
         function toggleDriverAll(master) {
             document.querySelectorAll('.task-check').forEach(cb => cb.checked = master.checked);
@@ -788,20 +851,41 @@ def logi_driver_work():
             } catch (e) { alert("카메라 권한 오류: " + e); }
         }
 
-        document.getElementById('capture-btn').onclick = () => {
-            const video = document.getElementById('video');
-            const canvas = document.getElementById('canvas');
-            const previewImg = document.getElementById('photo-preview');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            previewImg.src = dataUrl;
-            video.style.display = 'none'; 
-            previewImg.classList.remove('hidden');
-            document.getElementById('capture-btn').classList.add('hidden');
-            document.getElementById('confirm-btn').classList.remove('hidden');
-        };
+document.getElementById('capture-btn').onclick = () => {
+    const v = document.getElementById('video');
+    const c = document.getElementById('canvas');
+    const p = document.getElementById('photo-preview');
+
+    // 1. 캔버스에 그리기 (가로 800px 최적화)
+    c.width = 800;
+    c.height = v.videoHeight * (800 / v.videoWidth);
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    p.src = c.toDataURL('image/jpeg', 0.6);
+
+    // 2. [핵심] 카메라 스트림 즉시 종료 (폰 부하 급감)
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        v.srcObject = null;
+    }
+
+    v.classList.add('hidden');
+    p.classList.remove('hidden');
+    document.getElementById('capture-btn').classList.add('hidden');
+    document.getElementById('confirm-btn').classList.remove('hidden');
+    document.getElementById('confirm-btn').onclick = async () => {
+    const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({ photo: document.getElementById('photo-preview').src }) 
+    });
+    const data = await res.json();
+    if(data.success) {
+        alert("배송 완료!");
+        // 바로 새로고침하지 않고 0.3초 여유를 주어 메모리 정리를 돕습니다.
+        setTimeout(() => { location.reload(); }, 300);
+    }
+};
+};
 
         document.getElementById('confirm-btn').onclick = async () => {
             const photo = document.getElementById('photo-preview').src;
@@ -928,12 +1012,32 @@ def logi_update_task_status(tid, new_status):
 
 @logi_bp.route('/complete_action/<int:tid>', methods=['POST'])
 def logi_complete_action(tid):
-    t = DeliveryTask.query.get(tid); d = request.json
-    if t:
-        t.status, t.completed_at, t.photo_data = '완료', datetime.now(), d.get('photo')
-        logi_add_log(t.id, t.order_id, '완료', '기사 배송 완료 및 안내 전송')
-        db_delivery.session.commit()
-        return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone})
+    t = DeliveryTask.query.get(tid)
+    d = request.json
+    photo_b64 = d.get('photo') # Base64 데이터
+
+    if t and photo_b64:
+        try:
+            # 1. Base64 텍스트에서 실제 이미지 데이터 추출
+            header, encoded = photo_b64.split(",", 1)
+            data = base64.b64decode(encoded)
+
+            # 2. 파일명 생성 (주문번호_시간.jpg)
+            filename = f"proof_{t.order_id}_{datetime.now().strftime('%H%M%S')}.jpg"
+            filepath = os.path.join(PROOF_FOLDER, filename)
+
+            # 3. 파일로 물리적 저장
+            with open(filepath, "wb") as f:
+                f.write(data)
+
+            # 4. DB에는 파일의 '경로(URL)'만 저장 (용량 대폭 감소)
+            t.photo_data = f"/static/proof_photos/{filename}"
+            t.status, t.completed_at = '완료', datetime.now()
+            
+            db_delivery.session.commit()
+            return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
     return jsonify({"success": False})
 
 # --------------------------------------------------------------------------------
@@ -944,62 +1048,61 @@ def logi_complete_action(tid):
 def logi_driver_mgmt():
     if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
     drivers = Driver.query.all()
-    # 공통 접속 주소 (토큰 없음)
+    # 공통 접속 주소
     work_url = request.host_url.rstrip('/') + "/logi/work"
     
     return render_template_string("""
-                                  
     <script src="https://cdn.tailwindcss.com"></script>
-    <body class="bg-slate-50 p-6">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <body class="bg-slate-50 p-6 font-bold">
         <div class="max-w-md mx-auto">
-            <nav class="mb-8"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i>돌아가기</a></nav>
-            <h2 class="font-black mb-8 text-2xl text-slate-800 italic uppercase">Driver Management</h2>
-            <form action="{{ url_for('logi.logi_add_driver') }}" method="POST" class="bg-white p-8 rounded-[2.5rem] shadow-xl border mb-10 space-y-5">
-                <input name="name" placeholder="기사님 성함" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm" required>
-                <input name="phone" placeholder="전화번호 (인증용)" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm" required>
-                <button class="w-full bg-green-600 text-white py-5 rounded-2xl font-black text-lg shadow-lg hover:bg-green-700 transition active:scale-95">신규 기사 생성</button>
+            <nav class="mb-8 flex justify-between items-center">
+                <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i>관제로 돌아가기</a>
+            </nav>
+
+            <h2 class="font-black mb-8 text-2xl text-slate-800 italic uppercase tracking-tighter">Driver Management</h2>
+            
+            <form action="{{ url_for('logi.logi_add_driver') }}" method="POST" class="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 mb-10 space-y-5">
+                <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest px-1">기사 신규 등록</p>
+                <input name="name" placeholder="기사님 성함" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm outline-none focus:ring-2 focus:ring-green-500" required>
+                <input name="phone" placeholder="전화번호 (010-0000-0000)" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm outline-none focus:ring-2 focus:ring-green-500" required>
+                <button class="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-lg hover:bg-black transition active:scale-95">기사님 등록하기</button>
             </form>
+
+            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest px-2 mb-4">등록된 기사 목록 ({{ drivers|length }}명)</p>
+            
             <div class="space-y-4">
                 {% for d in drivers %}
-<div class="bg-white p-6 rounded-[2rem] border flex justify-between items-center shadow-md border-slate-100">
-        <div>
-            <p class="font-black text-slate-800 text-lg">{{ d.name }}</p>
-            <p class="text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
-        </div>
-        <div class="flex gap-2">
-            <button onclick="copyUrl()" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-black text-[10px] border border-blue-100">접속주소 복사</button>
-            <button onclick="secureDelete({{d.id}})" class="text-red-300 hover:text-red-500 transition p-3"><i class="fas fa-trash-alt"></i></button>
-        </div>
-    </div>
-<div class="flex justify-around py-6 bg-slate-900 text-white rounded-b-[2rem] shadow-lg mb-4">
-    <div class="text-center">
-        <div class="text-[10px] text-slate-400 mb-1">배정 중</div>
-        <div class="text-xl font-black text-blue-400">{{ assigned_count }}<span class="text-xs ml-0.5">건</span></div>
-        <div class="text-sm font-bold">배정</div>
-    </div>
-    <div class="text-center border-x border-slate-800 px-8">
-        <div class="text-[10px] text-slate-400 mb-1">픽업 대기</div>
-        <div class="text-xl font-black text-yellow-400">{{ picking_count }}<span class="text-xs ml-0.5">건</span></div>
-        <div class="text-sm font-bold">픽업</div>
-    </div>
-    <div class="text-center">
-        <div class="text-[10px] text-slate-400 mb-1">오늘 성공</div>
-        <div class="text-xl font-black text-green-400">{{ complete_today }}<span class="text-xs ml-0.5">건</span></div>
-        <div class="text-sm font-bold">완료</div>
-    </div>
-</div>
+                <div class="bg-white p-6 rounded-[2rem] border border-slate-100 flex justify-between items-center shadow-md">
+                    <div>
+                        <p class="font-black text-slate-800 text-lg">{{ d.name }}</p>
+                        <p class="text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="copyDriverUrl()" class="bg-green-50 text-green-600 px-4 py-2 rounded-xl font-black text-[10px] border border-green-100 active:scale-90 transition">주소복사</button>
+                        <a href="{{ url_for('logi.logi_delete_driver', did=d.id) }}" onclick="return confirm('정말 삭제할까요?')" class="text-slate-300 hover:text-red-500 transition p-2 text-sm"><i class="fas fa-trash-alt"></i></a>
+                    </div>
                 </div>
                 {% endfor %}
             </div>
+            
+            {% if not drivers %}
+            <div class="py-20 text-center text-slate-300 font-bold italic text-sm">등록된 기사님이 없습니다.</div>
+            {% endif %}
         </div>
-<script>
-        function copyUrl() {
-            const t = document.createElement("input"); document.body.appendChild(t); 
-            t.value = "{{work_url}}"; t.select();
-            document.execCommand("copy"); document.body.removeChild(t); 
-            alert("기사용 접속 주소가 복사되었습니다.\\n기사님은 성함과 전화번호로 로그인하시면 됩니다.");
-        }
-    </script>
+
+        <script>
+            function copyDriverUrl() {
+                const t = document.createElement("input");
+                document.body.appendChild(t);
+                t.value = "{{ work_url }}";
+                t.select();
+                document.execCommand("copy");
+                document.body.removeChild(t);
+                alert("기사용 접속 주소가 복사되었습니다.\\n기사님께 이 주소를 보내주시면 성함과 번호로 로그인이 가능합니다.");
+            }
+        </script>
+    </body>
     """, drivers=drivers, work_url=work_url)
 
 @logi_bp.route('/driver/add', methods=['POST'])

@@ -209,59 +209,85 @@ HEADER_HTML = """
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
-        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f8f9fa; color: #333; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
-        
-        /* 유틸리티 스타일 */
-        .sold-out { filter: grayscale(100%); opacity: 0.6; }
-        .sold-out-badge { 
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; 
-            border-radius: 12px; font-weight: 800; z-index: 10; border: 2px solid white;
-        }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        
-        /* 가로 스크롤 레이아웃 */
-        .horizontal-scroll {
-            display: flex; overflow-x: auto; scroll-snap-type: x mandatory; 
-            gap: 12px; padding-bottom: 20px; -webkit-overflow-scrolling: touch;
-        }
-        .horizontal-scroll > div { scroll-snap-align: start; flex-shrink: 0; }
-        
-        /* 사이드바 메뉴 */
-        #sidebar {
-            position: fixed; top: 0; left: -300px; width: 300px; height: 100%;
-            background: white; z-index: 1000; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 15px 0 40px rgba(0,0,0,0.15); overflow-y: auto;
-        }
-        #sidebar.open { left: 0; }
-        #sidebar-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5); z-index: 999; display: none; backdrop-filter: blur(2px);
-        }
-        #sidebar-overlay.show { display: block; }
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+    
+    body { 
+        font-family: 'Noto Sans KR', sans-serif; 
+        background-color: #f8fafc; /* 약간 더 밝고 세련된 slate-50 톤 */
+        color: #1e293b; 
+        -webkit-tap-highlight-color: transparent; 
+        overflow-x: hidden; 
+        line-height: 1.6;
+    }
+    
+    /* 1. 품목 및 배지 겹침 방지 스타일 (기사앱 로직 적용) */
+    .item-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 0.75rem;
+        line-height: 1.4; /* 줄간격 확보 */
+        margin-bottom: 4px;
+        white-space: nowrap; /* 텍스트가 강제로 쪼개지지 않게 함 */
+    }
 
-        /* 알림 토스트 */
-        #toast {
-            visibility: hidden; min-width: 280px; background-color: #1a1a1a; color: #fff; text-align: center;
-            border-radius: 50px; padding: 18px; position: fixed; z-index: 5000; left: 50%; bottom: 30px;
-            transform: translateX(-50%); font-size: 14px; font-weight: bold; transition: 0.5s; opacity: 0;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }
-        #toast.show { visibility: visible; opacity: 1; bottom: 60px; }
+    /* 2. 유틸리티 스타일 강화 */
+    .sold-out { filter: grayscale(100%) blur(1px); opacity: 0.5; transition: 0.3s; }
+    .sold-out-badge { 
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(15, 23, 42, 0.9); /* slate-900 톤 */
+        color: white; padding: 12px 24px; 
+        border-radius: 16px; font-weight: 900; z-index: 10; 
+        border: 1.5px solid rgba(255,255,255,0.3);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        letter-spacing: -0.05em;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    
+    /* 3. 가로 스크롤 레이아웃 (상품 리스트 터치감 최적화) */
+    .horizontal-scroll {
+        display: flex; overflow-x: auto; scroll-snap-type: x mandatory; 
+        gap: 16px; padding: 10px 20px 25px 20px; 
+        -webkit-overflow-scrolling: touch;
+    }
+    .horizontal-scroll > div { scroll-snap-align: start; flex-shrink: 0; }
+    
+    /* 4. 사이드바 메뉴 (더 부드러운 애니메이션) */
+    #sidebar {
+        position: fixed; top: 0; left: -300px; width: 280px; height: 100%;
+        background: white; z-index: 5001; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 20px 0 50px rgba(0,0,0,0.1); overflow-y: auto;
+    }
+    #sidebar.open { left: 0; }
+    #sidebar-overlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(15, 23, 42, 0.6); z-index: 5000; display: none; backdrop-filter: blur(4px);
+    }
+    #sidebar-overlay.show { display: block; }
 
-        /* 모달 공통 */
-        #term-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:4000; align-items:center; justify-content:center; padding:20px; }
-        #term-modal-content { background:white; width:100%; max-width:600px; max-height:85vh; border-radius:2.5rem; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 30px 60px rgba(0,0,0,0.4); }
-        #term-modal-body { overflow-y:auto; padding:2.5rem; font-size:0.95rem; line-height:1.8; color:#444; }
+    /* 5. 알림 토스트 (모바일 조작 영역 고려) */
+    #toast {
+        visibility: hidden; min-width: 80%; background-color: #0f172a; color: #fff; text-align: center;
+        border-radius: 20px; padding: 16px; position: fixed; z-index: 9999; left: 50%; bottom: 40px;
+        transform: translateX(-50%) translateY(20px); font-size: 14px; font-weight: 700; transition: 0.4s; opacity: 0;
+        box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+    }
+    #toast.show { visibility: visible; opacity: 1; transform: translateX(-50%) translateY(0); }
 
-        /* 반응형 타이틀 및 텍스트 최적화 */
-        @media (max-width: 640px) {
-            .hero-title { font-size: 1.75rem !important; line-height: 1.3 !important; }
-            .hero-desc { font-size: 0.875rem !important; }
-        }
-    </style>
+    /* 6. 모달 스타일 (가독성 및 버튼 접근성) */
+    #term-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15, 23, 42, 0.8); z-index:6000; align-items:center; justify-content:center; padding:16px; }
+    #term-modal-content { background:white; width:100%; max-width:500px; max-height:80vh; border-radius:2.5rem; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 40px 80px rgba(0,0,0,0.5); }
+    #term-modal-body { overflow-y:auto; padding:2rem; font-size:0.95rem; line-height:1.7; color:#334155; }
+
+    /* 7. 반응형 디자인 최적화 */
+    @media (max-width: 640px) {
+        .hero-title { font-size: 2rem !important; line-height: 1.2 !important; font-weight: 900; }
+        .hero-desc { font-size: 0.95rem !important; opacity: 0.8; }
+        .card-padding { padding: 1rem !important; }
+    }
+</style>
 </head>
 <body class="text-left font-black">
     <div id="toast">메시지가 표시됩니다. 🧺</div>
