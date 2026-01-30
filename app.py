@@ -309,35 +309,34 @@ HEADER_HTML = """
     </div>
 
     <nav class="bg-white/95 backdrop-blur-md shadow-sm sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 md:px-6">
+        <div class="max-w-7xl mx-auto px-3 md:px-6">
             <div class="flex justify-between h-16 md:h-20 items-center">
-                <div class="flex items-center gap-3 md:gap-6">
-                    <button onclick="toggleSidebar()" class="text-gray-400 text-xl md:text-2xl hover:text-green-600 transition p-2">
+                <div class="flex items-center gap-2 md:gap-6">
+                    <button onclick="toggleSidebar()" class="text-gray-400 text-xl md:text-2xl hover:text-green-600 transition p-1">
                         <i class="fas fa-bars"></i>
                     </button>
-                    <a href="/" class="flex items-center gap-2.5">
-                        <img src="/static/logo/side1.jpg" alt="바구니삼촌" class="h-8 md:h-10 w-auto rounded-lg" onerror="this.src='https://placehold.co/100x40?text=Uncle'">
-                        <span class="italic tracking-tighter uppercase font-black text-green-600 text-lg md:text-xl hidden sm:block">바구니삼촌</span>
+                    <a href="/" class="flex items-center gap-1.5">
+                        <img src="/static/logo/side1.jpg" alt="바구니삼촌" class="h-7 md:h-10 w-auto rounded-lg" onerror="this.style.display='none'">
+                        <span class="italic tracking-tighter uppercase font-black text-green-600 text-base md:text-xl">바구니삼촌</span>
                     </a>
                 </div>
 
-                <div class="flex items-center gap-3 md:gap-5 flex-1 justify-end">
+                <div class="flex items-center gap-2 md:gap-5 flex-1 justify-end">
                     <form action="/" method="GET" class="relative hidden md:block max-w-xs flex-1">
                         <input name="q" placeholder="상품검색" class="w-full bg-gray-100 py-2.5 px-6 rounded-full text-xs font-black outline-none focus:ring-4 focus:ring-green-50 transition border border-transparent focus:border-green-100">
                         <button class="absolute right-4 top-2.5 text-gray-400 hover:text-green-600 transition"><i class="fas fa-search"></i></button>
                     </form>
                     
-                    <button onclick="document.getElementById('mobile-search-nav').classList.toggle('hidden')" class="md:hidden text-gray-400 p-2 text-xl"><i class="fas fa-search"></i></button>
+                    <button onclick="document.getElementById('mobile-search-nav').classList.toggle('hidden')" class="md:hidden text-gray-400 p-2 text-lg"><i class="fas fa-search"></i></button>
 
                     {% if current_user.is_authenticated %}
-                        <a href="/cart" class="text-gray-400 relative p-2 hover:text-green-600 transition">
-                            <i class="fas fa-shopping-cart text-2xl md:text-3xl"></i>
-                            <span id="cart-count-badge" class="absolute top-0 right-0 bg-red-500 text-white text-[9px] md:text-[10px] rounded-full px-1.5 py-0.5 font-black border-2 border-white shadow-sm">{{ cart_count }}</span>
+                        <a href="/cart" class="text-gray-400 relative p-1.5 hover:text-green-600 transition">
+                            <i class="fas fa-shopping-cart text-xl md:text-3xl"></i>
+                            <span id="cart-count-badge" class="absolute top-0 right-0 bg-red-500 text-white text-[8px] md:text-[10px] rounded-full px-1 py-0.5 font-black border border-white shadow-sm">{{ cart_count }}</span>
                         </a>
-                        <a href="/mypage" class="text-gray-600 font-black bg-gray-100 px-4 py-2 rounded-full text-[10px] md:text-xs hover:bg-gray-200 transition">MY</a>
+                        <a href="/mypage" class="text-gray-600 font-black bg-gray-100 px-3 py-1.5 rounded-full text-[9px] md:text-xs hover:bg-gray-200 transition">MY</a>
                     {% else %}
-                        <a href="/login" class="text-gray-400 font-black text-xs md:text-sm hover:text-green-600 transition">로그인</a>
-                        <a href="/register" class="bg-green-600 text-white px-5 py-2.5 rounded-full text-xs font-black shadow-lg hover:bg-green-700 transition hidden sm:block">회원가입</a>
+                        <a href="/login" class="text-gray-400 font-black text-[10px] md:text-sm hover:text-green-600 transition">로그인</a>
                     {% endif %}
                 </div>
             </div>
@@ -356,42 +355,50 @@ HEADER_HTML = """
 FOOTER_HTML = """
     </main>
 
-    <footer class="bg-gray-900 text-gray-400 py-16 md:py-24 border-t border-white/5 mt-20 text-left">
-        <div class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-16 md:gap-20 text-left">
-            <div class="text-left">
-                <p class="text-green-500 font-black text-3xl italic tracking-tighter mb-6 uppercase text-left">바구니삼촌</p>
-                <div class="text-xs md:text-sm space-y-2 opacity-70 leading-loose font-black text-left">
-                    <p>상호: 바구니삼촌 | 성명: 금창권</p>
-                    <p>사업장소재지: 인천광역시 연수구 하모니로158, d동3층317호 (송도동, 송도 타임스페이스)</p>
-                    <p>사업자등록번호: 472-93-02262 | 통신판매업신고: 제 2025-인천연수-3388호</p>
-                    <p>전화번호: 1666-8320 | 이메일: basamsongdo@gmail.com</p>
-                    <div class="pt-8 flex flex-wrap gap-6 opacity-60 underline text-left">
-                        <a href="javascript:void(0)" onclick="openUncleModal('terms')" class="hover:text-white transition">이용약관</a>
-                        <a href="javascript:void(0)" onclick="openUncleModal('privacy')" class="hover:text-white transition">개인정보처리방침</a>
-                        <a href="javascript:void(0)" onclick="openUncleModal('agency')" class="hover:text-white transition">이용 안내</a>
-                        <a href="javascript:void(0)" onclick="openUncleModal('e_commerce')" class="hover:text-white transition">전자상거래 유의사항</a>
+    <footer class="bg-gray-900 text-gray-400 py-12 md:py-20 border-t border-white/5 mt-20">
+        <div class="max-w-7xl mx-auto px-6">
+            
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/5 pb-10 mb-10 gap-8">
+                <div class="text-left">
+                    <p class="text-green-500 font-black text-2xl italic tracking-tighter mb-2 uppercase">바구니삼촌</p>
+                    <p class="text-xs text-orange-500 font-bold italic">인천 연수구 송도동 전용 구매대행 및 배송 서비스</p>
+                </div>
+                
+                <div class="flex flex-col md:items-end gap-3 w-full md:w-auto">
+                    <p class="font-bold text-gray-200 text-sm md:text-base font-black">Customer Center</p>
+                    <div class="flex flex-wrap md:justify-end gap-3 items-center">
+                        <a href="http://pf.kakao.com/_AIuxkn" target="_blank" class="bg-[#FEE500] text-gray-900 px-5 py-2.5 rounded-xl font-black text-[11px] flex items-center gap-2 shadow-lg transition hover:brightness-105">
+                            <i class="fas fa-comment"></i> 카카오톡 문의
+                        </a>
+                        <p class="text-lg font-black text-white ml-2">1666-8320</p>
                     </div>
+                    <p class="text-[10px] font-bold text-gray-500">평일 09:00 ~ 18:00 (점심 12:00 ~ 13:00)</p>
                 </div>
             </div>
-            
-            <div class="md:text-right text-left flex flex-col md:items-end justify-between">
-                <div class="text-left md:text-right space-y-4">
-                    <p class="font-bold text-gray-200 text-lg mb-4 font-black">Customer Center</p>
-                    <div class="flex flex-col md:items-end gap-3 text-left md:text-right">
-                    
-                        <a href="http://pf.kakao.com/_AIuxkn" target="_blank" class="bg-[#FEE500] text-gray-900 px-6 py-3 rounded-2xl font-black text-xs flex items-center gap-2 w-fit shadow-lg transition hover:brightness-105">
-                            <i class="fas fa-comment"></i> 카카오톡 문의하기
-                        </a>
-                        <p class="text-sm font-black text-gray-300">평일 09:00 ~ 18:00 (점심 12~13시)</p>
-                        <p class="text-xs text-orange-500 font-bold italic text-left md:text-right">인천 연수구 송도동 전용 서비스</p>
-                    </div>
+
+            <div class="flex flex-wrap gap-x-6 gap-y-3 mb-8 text-[11px] font-bold opacity-60 underline">
+                <a href="javascript:void(0)" onclick="openUncleModal('terms')" class="hover:text-white transition">이용약관</a>
+                <a href="javascript:void(0)" onclick="openUncleModal('privacy')" class="hover:text-white transition">개인정보처리방침</a>
+                <a href="javascript:void(0)" onclick="openUncleModal('agency')" class="hover:text-white transition">이용 안내</a>
+                <a href="javascript:void(0)" onclick="openUncleModal('e_commerce')" class="hover:text-white transition">전자상거래 유의사항</a>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-end">
+                <div class="text-[10px] md:text-[11px] space-y-1.5 opacity-40 leading-relaxed font-medium text-left">
+                    <p>상호: 바구니삼촌 | 대표: 금창권 | 개인정보관리책임자: 금창권</p>
+                    <p>주소: 인천광역시 연수구 하모니로158, D동 317호 (송도동, 송도 타임스페이스)</p>
+                    <p>사업자등록번호: 472-93-02262 | 통신판매업신고: 제 2025-인천연수-3388호</p>
+                    <p>이메일: basamsongdo@gmail.com</p>
+                    <p class="pt-4 opacity-100 font-bold uppercase tracking-[0.2em]">© 2026 BASAM. All Rights Reserved.</p>
                 </div>
-                <p class="text-[11px] opacity-30 mt-16 font-bold uppercase tracking-[0.4em] text-left md:text-right">© 2026바구니삼촌. All Rights Reserved.</p>
+                
+                <div class="hidden md:block text-right opacity-20">
+                    <i class="fas fa-truck-fast text-5xl"></i>
+                </div>
             </div>
         </div>
     </footer>
-<!-- 푸터 끝 -->
-</footer>
+
 
 <!-- ✅ 여기부터 붙여넣기 -->
 <div id="uncleModal" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center z-50">
@@ -1855,9 +1862,25 @@ def admin_dashboard():
 
             {% for cat_n, items in summary.items() %}
             <div class="bg-white rounded-[2rem] border border-gray-50 overflow-hidden mb-10 shadow-sm">
-                <div class="bg-gray-50 px-8 py-5 border-b border-gray-100 font-black text-green-700 flex justify-between">
-                    <span>{{ cat_n }}</span><span class="text-gray-400 font-bold">총계: {{ items.values()|sum }}개</span>
-                </div>
+             <div class="bg-gray-50 px-8 py-5 border-b border-gray-100 font-black text-green-700 flex justify-between items-center">
+    <div class="flex items-center gap-3">
+        <input type="checkbox" class="task-check w-4 h-4 rounded border-slate-300 accent-green-600" 
+       value="{{t.id}}" data-category="{{ t.category }}">
+        <span>{{ cat_n }}</span>
+    </div>
+    <span class="text-gray-400 font-bold">총계: {{ items.values()|sum }}개</span>
+</div>
+
+<script>
+function toggleCategoryAll(master, catName) {
+    // 1. 해당 카테고리 섹션 내의 체크박스들만 찾습니다.
+    // 데이터 속성을 활용하여 특정 카테고리의 오더만 타겟팅합니다.
+    const checkboxes = document.querySelectorAll(`.task-check[data-category="${catName}"]`);
+    checkboxes.forEach(cb => {
+        cb.checked = master.checked;
+    });
+}
+</script>
                 <table class="w-full">
                     {% for pn, qt in items.items() %}
                     <tr class="border-b border-gray-50"><td class="p-5 font-bold text-gray-700">{{ pn }}</td><td class="p-5 text-right font-black text-blue-600">{{ qt }}개</td></tr>
