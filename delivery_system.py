@@ -309,15 +309,47 @@ def logi_admin_dashboard():
                                 </div>
                                 <div id="log-view-{{t.id}}" class="hidden mt-2 p-3 bg-slate-50 rounded-xl text-[9px] text-slate-500 border border-dashed border-slate-200 leading-normal"></div>
                             </td>
-                            <td class="py-3 px-2 text-right">
-                                <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" class="inline-block text-[10px] bg-slate-800 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap" onclick="return confirm('배정을 해제할까요?')">재배정</a>
-                            </td>
+                         <td class="py-3 px-2 text-right">
+    {% if t.status == '완료' %}
+        {% if t.photo_data %}
+        <button onclick="viewAdminPhoto('{{ t.photo_data }}')" class="inline-block text-[10px] bg-green-600 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap">
+            <i class="fas fa-image mr-1"></i>사진확인
+        </button>
+        {% else %}
+        <span class="text-[10px] text-slate-300 italic">사진없음</span>
+        {% endif %}
+    {% else %}
+        <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" 
+           class="inline-block text-[10px] bg-slate-800 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap" 
+           onclick="return confirm('배정을 해제하고 대기목록으로 보낼까요?')">
+            재배정
+        </a>
+    {% endif %}
+</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </main>
+        <div id="admin-photo-modal" class="fixed inset-0 bg-black/80 z-[9999] hidden flex flex-col items-center justify-center p-4" onclick="this.classList.add('hidden')">
+    <div class="bg-white p-2 rounded-[2rem] max-w-lg w-full relative overflow-hidden shadow-2xl" onclick="event.stopPropagation()">
+        <img id="admin-modal-img" src="" class="w-full h-auto rounded-2xl">
+        <button onclick="document.getElementById('admin-photo-modal').classList.add('hidden')" class="absolute top-4 right-4 bg-black/50 text-white w-10 h-10 rounded-full flex items-center justify-center">✕</button>
+        <div class="p-6 text-center">
+            <p class="text-slate-800 font-black text-lg">배송 완료 증빙 사진</p>
+            <p class="text-slate-400 text-xs mt-1">기사님이 직접 촬영하여 등록한 사진입니다.</p>
+        </div>
+    </div>
+</div>
+
+<script>
+function viewAdminPhoto(data) {
+    const modal = document.getElementById('admin-photo-modal');
+    document.getElementById('admin-modal-img').src = data;
+    modal.classList.remove('hidden');
+}
+</script>
 
         <script>
             let currentSize = 12;
