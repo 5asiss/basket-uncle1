@@ -30,7 +30,7 @@ from delivery_system import logi_bp, db_delivery  # 배송 시스템 파일에�
 
 app = Flask(__name__)
 app.secret_key = "basket_uncle_direct_trade_key_999_secure"
-
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 # 1. 모든 DB 경로를 설정에 먼저 등록합니다.
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///direct_trade_mall.db' # 쇼핑몰 DB
 app.config['SQLALCHEMY_BINDS'] = {
@@ -173,12 +173,31 @@ def load_user(user_id):
 # 3. 공통 유틸리티 함수
 # --------------------------------------------------------------------------------
 
+from PIL import Image # 이미지 처리를 위해 상단에 추가
+
+from PIL import Image, ImageOps # 상단 import문에 추가하세요
+
 def save_uploaded_file(file):
-    """파일 업로드 저장 및 경로 반환"""
+    """핸드폰 사진 공백 제거(중앙 크롭) 및 WebP 변환"""
     if file and file.filename != '':
-        ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else 'jpg'
-        new_filename = f"uncle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.{ext}"
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], new_filename))
+        # 파일명 설정 (.webp로 통일하여 용량 절감)
+        new_filename = f"uncle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+
+        # 1. 이미지 열기
+        img = Image.open(file)
+
+        # 2. 핸드폰 사진 회전 방지 (EXIF 정보 바탕으로 방향 바로잡기)
+        img = ImageOps.exif_transpose(img)
+
+        # 3. 정사각형으로 중앙 크롭 (가로세로 800px)
+        # ImageOps.fit은 이미지의 중심을 기준으로 비율에 맞춰 꽉 채워 자릅니다.
+        size = (800, 800)
+        img = ImageOps.fit(img, size, Image.Resampling.LANCZOS)
+
+        # 4. WebP로 저장 (용량 최적화)
+        img.save(save_path, "WEBP", quality=85)
+        
         return f"/static/uploads/{new_filename}"
     return None
 
@@ -292,6 +311,22 @@ HEADER_HTML = """
 </head>
 <body class="text-left font-black">
     <div id="toast">메시지가 표시됩니다. 🧺</div>
+
+    <div id="logout-warning-modal" class="fixed inset-0 bg-black/60 z-[9999] hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-sm rounded-[2.5rem] p-10 shadow-2xl text-center">
+            <div class="w-16 h-16 bg-orange-100 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-6 text-2xl">
+                <i class="fas fa-clock animate-pulse"></i>
+            </div>
+            <h3 class="text-xl font-black text-gray-800 mb-2">자동 로그아웃 안내</h3>
+            <p class="text-gray-500 font-bold text-sm mb-8 leading-relaxed">
+                장시간 활동이 없어 <span id="logout-timer" class="text-orange-600 font-black">60</span>초 후<br>로그아웃 됩니다. 로그인 상태를 유지할까요?
+            </p>
+            <div class="flex gap-3">
+                <button onclick="location.href='/logout'" class="flex-1 py-4 bg-gray-100 text-gray-400 rounded-2xl font-black text-sm">로그아웃</button>
+                <button onclick="extendSession()" class="flex-1 py-4 bg-green-600 text-white rounded-2xl font-black text-sm shadow-lg shadow-green-100">로그인 유지</button>
+            </div>
+        </div>
+    </div>
     
     <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
     <div id="sidebar" class="p-10 flex flex-col h-full">
@@ -368,6 +403,59 @@ HEADER_HTML = """
         </div>
     </nav>
     <main class="min-h-screen">
+    <script>
+    // Flask에서 설정한 세션 타임아웃 시간 (초 단위, 예: 30분 = 1800초)
+    const SESSION_TIMEOUT = 30 * 60; 
+    const WARNING_TIME = 60; // 로그아웃 60초 전에 경고창 표시
+    
+    let warningTimer;
+    let countdownInterval;
+
+    function startLogoutTimer() {
+        // 1. 기존 타이머가 있다면 제거
+        clearTimeout(warningTimer);
+        
+        // 2. 경고창을 띄울 시간 계산 (전체 시간 - 60초)
+        warningTimer = setTimeout(() => {
+            showLogoutWarning();
+        }, (SESSION_TIMEOUT - WARNING_TIME) * 1000);
+    }
+
+    function showLogoutWarning() {
+        const modal = document.getElementById('logout-warning-modal');
+        const timerDisplay = document.getElementById('logout-timer');
+        let timeLeft = WARNING_TIME;
+
+        modal.classList.remove('hidden');
+        
+        // 1초마다 숫자를 깎는 카운트다운 시작
+        countdownInterval = setInterval(() => {
+            timeLeft -= 1;
+            timerDisplay.innerText = timeLeft;
+            
+            if (timeLeft <= 0) {
+                clearInterval(countdownInterval);
+                location.href = '/logout'; // 0초가 되면 로그아웃 실행
+            }
+        }, 1000);
+    }
+
+    function extendSession() {
+        // 서버에 가벼운 요청을 보내 세션을 연장시킵니다 (가장 간단한 방법)
+        fetch('/').then(() => {
+            // 경고창 숨기기 및 타이머 리셋
+            document.getElementById('logout-warning-modal').classList.add('hidden');
+            clearInterval(countdownInterval);
+            startLogoutTimer(); 
+            showToast("로그인 시간이 연장되었습니다. 😊");
+        });
+    }
+
+    // 사용자가 로그인한 상태일 때만 타이머 작동
+    {% if current_user.is_authenticated %}
+    startLogoutTimer();
+    {% endif %}
+</script>
 """
 
 FOOTER_HTML = """
@@ -725,7 +813,7 @@ def search_view():
                 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {% for p in products %}
                     <div class="product-card bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
-                        <a href="/product/{{p.id}}" class="aspect-square block p-4"><img src="{{ p.image_url }}" class="w-full h-full object-contain"></a>
+                        <a href="/product/{{p.id}}" class="aspect-square block p-4"><img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover"></a>
                         <div class="p-4 pt-0">
                             <h4 class="font-black text-sm truncate">{{ p.name }}</h4>
                             <p class="text-green-600 font-black text-lg mt-2">{{ "{:,}".format(p.price) }}원</p>
@@ -751,7 +839,7 @@ def search_view():
                 {% for p in latest_all %}
                 <div class="w-40 md:w-56 flex-shrink-0">
                     <a href="/product/{{p.id}}" class="bg-white rounded-[2rem] border border-gray-100 p-4 block shadow-sm">
-                        <img src="{{ p.image_url }}" class="w-full aspect-square object-contain mb-3">
+                        <img src="{{ p.image_url }}"loading="lazy" class="w-full aspect-square object-contain mb-3">
                         <p class="text-xs font-black truncate">{{ p.name }}</p>
                         <p class="text-green-600 font-black">{{ "{:,}".format(p.price) }}원</p>
                     </a>
@@ -839,7 +927,7 @@ def index():
             {% for p in products %}
             <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %} text-left">
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden text-left">
-                    <img src="{{ p.image_url }}" class="w-full h-full object-contain p-2 md:p-6 text-left">
+                    <img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover p-2 md:p-6 text-left">
                 </a>
                 <div class="p-3 md:p-8 flex flex-col flex-1 text-left">
                     <h3 class="font-black text-gray-800 text-[11px] md:text-base truncate mb-0.5 text-left">{{ p.name }}</h3>
@@ -976,7 +1064,7 @@ def index():
                 {% for p in random_latest %}
                 <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] transition-all hover:shadow-2xl">
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-1.5 md:p-5" onerror="this.src='https://placehold.co/400x400?text={{ p.name }}'">
+                        <img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover p-1.5 md:p-5" onerror="this.src='https://placehold.co/400x400?text={{ p.name }}'">
                         <div class="absolute top-2 left-2 md:top-4 md:left-4"><span class="bg-blue-500 text-white text-[7px] md:text-[10px] px-1.5 py-0.5 md:px-3 md:py-1 rounded md:rounded-lg uppercase font-black">NEW</span></div>
                     </a>
                     <div class="p-3 md:p-7 flex flex-col flex-1 text-left">
@@ -1007,7 +1095,7 @@ def index():
                 {% for p in closing_today %}
                 <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-red-50 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] transition-all hover:shadow-2xl">
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-1.5 md:p-5">
+                        <img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover p-1.5 md:p-5">
                         <div class="absolute bottom-2 left-2 md:bottom-5 md:left-5"><span class="bg-red-600 text-white text-[7px] md:text-[10px] px-1.5 py-0.5 md:px-3 md:py-1 rounded md:rounded-lg font-black animate-pulse uppercase">CLOSING</span></div>
                     </a>
                     <div class="p-3 md:p-7 flex flex-col flex-1 text-left">
@@ -1044,7 +1132,7 @@ def index():
                 <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] transition-all hover:shadow-2xl {% if is_expired or p.stock <= 0 %}sold-out{% endif %} text-left">
                     {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-[9px] md:text-xs text-center">판매마감</div>{% endif %}
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden text-left">
-                        <img src="{{ p.image_url }}" class="w-full h-full object-contain p-2 md:p-6 text-left">
+                        <img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover p-2 md:p-6 text-left">
                         <div class="absolute bottom-2 left-2 md:bottom-5 md:left-5 text-left">
                             <span class="bg-black/70 text-white text-[7px] md:text-[11px] px-2 py-1 rounded-md font-black backdrop-blur-sm">잔여: {{ p.stock }}</span>
                         </div>
@@ -1183,7 +1271,7 @@ def about_page():
 @app.route('/api/category_products/<string:cat_name>')
 def api_category_products(cat_name):
     page = int(request.args.get('page', 1))
-    per_page = 30
+    per_page = 20
     offset = (page - 1) * per_page
     
     query = Product.query.filter_by(is_active=True)
@@ -1245,7 +1333,7 @@ def category_view(cat_name):
             {% for p in products %}
             <div class="product-card bg-white rounded-[2rem] md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %}">
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                    <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4 md:p-8">
+                    <img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover p-4 md:p-8">
                 </a>
                 <div class="p-5 md:p-10 flex flex-col flex-1">
                     <h3 class="font-black text-gray-800 text-sm md:text-lg truncate mb-2">{{ p.name }}</h3>
@@ -1340,7 +1428,7 @@ def product_detail(pid):
     <div class="max-w-4xl mx-auto px-4 md:px-6 py-16 md:py-24 font-black text-left">
         <div class="grid md:grid-cols-2 gap-10 md:gap-16 mb-24 text-left">
             <div class="relative text-left">
-                <img src="{{ p.image_url }}" class="w-full aspect-square object-contain border border-gray-100 rounded-[3rem] bg-white p-8 md:p-12 shadow-sm text-left">
+                <img src="{{ p.image_url }}"loading="lazy" class="w-full aspect-square object-contain border border-gray-100 rounded-[3rem] bg-white p-8 md:p-12 shadow-sm text-left">
                 {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-lg">판매마감</div>{% endif %}
             </div>
             
@@ -1379,7 +1467,7 @@ def product_detail(pid):
                 {% if detail_images %}
                     {% for img in detail_images %}<img src="{{ img.strip() }}" class="w-full rounded-2xl md:rounded-[3rem] shadow-sm text-left" onerror="this.style.display='none'">{% endfor %}
                 {% else %}
-                    <img src="{{ p.image_url }}" class="w-full rounded-2xl md:rounded-[3rem] text-left">
+                    <img src="{{ p.image_url }}"loading="lazy" class="w-full rounded-2xl md:rounded-[3rem] text-left">
                 {% endif %}
                 <div class="text-lg text-gray-600 leading-loose p-6 font-bold text-left">
                     {{ p.description or '상세 설명이 준비 중입니다.' }}
@@ -1570,6 +1658,9 @@ def login():
     if request.method == 'POST':
         user = User.query.filter_by(email=request.form.get('email')).first()
         if user and check_password_hash(user.password, request.form.get('password')):
+            # --- 세션 고정 활성화 추가 ---
+            session.permanent = True # 앱 설정에서 정한 30분 타이머가 작동하기 시작합니다.
+            # ---------------------------
             login_user(user); return redirect('/')
         flash("로그인 정보를 다시 한 번 확인해주세요.")
     return render_template_string(HEADER_HTML + """
@@ -1662,8 +1753,7 @@ def mypage():
                     <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-widest mb-4 font-black text-left">Gate Access</p><p class="text-red-500 font-black text-xl md:text-2xl text-left">🔑 {{ current_user.entrance_pw }}</p></div>
                 </div>
             </div>
-            <a href="/logout" class="absolute top-10 right-10 text-[10px] bg-gray-100 px-5 py-2 rounded-full text-gray-400 font-black hover:bg-gray-200 transition text-center">LOGOUT</a>
-        </div>
+            <a href="/logout" class="absolute top-6 right-6 z-[9999] text-[12px] md:text-[10px] bg-gray-100 px-6 py-3 md:px-5 md:py-2 rounded-full text-gray-500 font-black hover:bg-red-50 hover:text-red-500 transition-all shadow-md border border-gray-200 text-center">LOGOUT</a>
         
         <h3 class="text-2xl md:text-3xl font-black mb-12 flex items-center gap-4 italic text-left text-left"><i class="fas fa-truck text-green-600 text-left"></i> History</h3>
         <div class="space-y-8 text-left">
@@ -2023,7 +2113,7 @@ def admin_dashboard():
     <div class="max-w-7xl mx-auto py-12 px-4 md:px-6 font-black text-xs md:text-sm text-left">
         <div class="flex justify-between items-center mb-10 text-left">
             <h2 class="text-2xl md:text-3xl font-black text-orange-700 italic text-left">Admin Panel</h2>
-            <div class="flex gap-4 text-left"><a href="/logout" class="text-xs text-gray-400 hover:text-red-500 text-left">로그아웃</a></div>
+            <div class="flex gap-4 text-left"><a href="/logout" class="absolute top-6 right-6 z-[9999] text-[12px] md:text-[10px] bg-gray-100 px-6 py-3 md:px-5 md:py-2 rounded-full text-gray-500 font-black hover:bg-red-50 hover:text-red-500 transition-all shadow-md border border-gray-200 text-center">LOGOUT</a></div>
         </div>
         
         <div class="flex border-b border-gray-100 mb-12 bg-white rounded-t-3xl overflow-x-auto text-left">

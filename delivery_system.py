@@ -13,14 +13,14 @@ from flask import Blueprint, render_template_string, request, redirect, jsonify,
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, UniqueConstraint
 
-# [핵심] Blueprint 정의 (이름: logi, 주소 접두어: /logi)
-# 이 설정으로 인해 이제 모든 주소는 basam.co.kr/logi/... 가 됩니다.
+# [핵심] Blueprint 정의
 logi_bp = Blueprint('logi', __name__, url_prefix='/logi')
 db_delivery = SQLAlchemy()
-# 파일 저장 경로 설정 (없으면 생성)
+
 PROOF_FOLDER = os.path.join('static', 'proof_photos')
 if not os.path.exists(PROOF_FOLDER):
     os.makedirs(PROOF_FOLDER, exist_ok=True)
+
 # --------------------------------------------------------------------------------
 # 3. 데이터베이스 모델 (기존 기능 100% 보존)
 # --------------------------------------------------------------------------------
@@ -54,20 +54,24 @@ class DeliveryTask(db_delivery.Model):
     completed_at = db_delivery.Column(db_delivery.DateTime, nullable=True)
     __table_args__ = (UniqueConstraint('order_id', 'category', name='_order_cat_v12_uc_bp'),)
 
-class DeliveryLog(db_delivery.Model):
+# 통합 로그 및 메시지 이력 테이블
+# 통합 로그 및 메시지 이력 테이블 (기존 DeliveryLog 역할을 대신함)
+class MessageLog(db_delivery.Model):
     id = db_delivery.Column(db_delivery.Integer, primary_key=True)
-    task_id = db_delivery.Column(db_delivery.Integer)
-    order_id = db_delivery.Column(db_delivery.String(100))
+    task_id = db_delivery.Column(db_delivery.Integer, nullable=True)
+    order_id = db_delivery.Column(db_delivery.String(100), nullable=True)
+    message_type = db_delivery.Column(db_delivery.String(50)) # 가입, 픽업, 완료, 로그
+    phone = db_delivery.Column(db_delivery.String(20), nullable=True)
     status = db_delivery.Column(db_delivery.String(50))
     message = db_delivery.Column(db_delivery.String(500))
     created_at = db_delivery.Column(db_delivery.DateTime, default=datetime.now)
-
 # --------------------------------------------------------------------------------
 # 4. 유틸리티 함수 (함수명 겹침 방지 접두어 사용)
 # --------------------------------------------------------------------------------
 
 def logi_add_log(task_id, order_id, status, message):
-    log = DeliveryLog(task_id=task_id, order_id=order_id, status=status, message=message)
+    # 정의되지 않은 DeliveryLog 대신 MessageLog를 사용하여 기록
+    log = MessageLog(task_id=task_id, order_id=order_id, status=status, message=message, message_type='시스템로그')
     db_delivery.session.add(log)
     db_delivery.session.commit()
 
@@ -843,13 +847,76 @@ function changeFontSize(delta) {
         }
 
         async function openCameraUI(tid){
-            currentTaskId = tid; 
-            document.getElementById('camera-layer').classList.remove('hidden');
-            try { 
-                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); 
-                document.getElementById('video').srcObject = stream; 
-            } catch (e) { alert("카메라 권한 오류: " + e); }
+    currentTaskId = tid; 
+    
+    try { 
+        // 권한 요청 시도
+        stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: { exact: "environment" } } // 후면 카메라 우선 사용
+        }).catch(err => {
+            // 구형 기종 대응용 일반 요청
+            return navigator.mediaDevices.getUserMedia({ video: true });
+        });
+
+        document.getElementById('camera-layer').classList.remove('hidden');
+        document.getElementById('video').srcObject = stream; 
+        async function openCameraUI(tid) {
+    currentTaskId = tid;
+    
+    try {
+        // 1. 카메라 스트림 시도
+        stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: { ideal: "environment" } } 
+        });
+        
+        document.getElementById('video').srcObject = stream;
+        document.getElementById('camera-layer').classList.remove('hidden');
+        
+    } catch (e) {
+        console.error("카메라 권한 없음:", e);
+        
+        // 2. 카메라 실패 시 비상용 갤러리/파일 선택창 실행
+        if (confirm("카메라 권한이 거부되었거나 지원하지 않는 브라우저입니다.\n갤러리에서 직접 사진을 선택하시겠습니까?")) {
+            const fileInput = document.getElementById('emergency-file-input');
+            fileInput.click(); // 파일 선택창 강제 실행
+
+            // 파일 선택 시 바로 배송 완료 처리로 연결
+            fileInput.onchange = async (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const base64Photo = e.target.result;
+                        // 선택한 사진으로 바로 완료 API 호출
+                        await uploadPhotoDirectly(currentTaskId, base64Photo);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
         }
+    }
+}
+
+// 갤러리 사진 선택 시 바로 서버로 쏘는 함수
+async function uploadPhotoDirectly(tid, photoData) {
+    const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', tid), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo: photoData })
+    });
+    const data = await res.json();
+    if (data.success) {
+        alert("갤러리 사진으로 배송 완료 처리되었습니다.");
+        location.reload();
+    } else {
+        alert("업로드 실패: " + data.error);
+    }
+}
+    } catch (e) { 
+        console.error("카메라 에러:", e);
+        alert("카메라 권한이 거부되었습니다.\n\n[해결방법]\n1. 브라우저 주소창 왼쪽/오른쪽의 설정 아이콘 클릭\n2. 카메라 권한을 '허용'으로 변경\n3. 페이지 새로고침 후 다시 시도해주세요.");
+    }
+}
 
 document.getElementById('capture-btn').onclick = () => {
     const v = document.getElementById('video');
@@ -919,10 +986,48 @@ document.getElementById('capture-btn').onclick = () => {
 # --------------------------------------------------------------------------------
 # 8. 핵심 비즈니스 로직 & API (모든 기능 통합 복구)
 # --------------------------------------------------------------------------------
+# 솔라피 설정 (관리자 페이지에서 환경변수화 권장)
+SOLAPI_API_KEY = 'NCSFMENLMWQDMAVG'
+SOLAPI_API_SECRET = 'WFCUQXKPU8YUTHWE4QKKXLWMBVZMK8ON'
+SOLAPI_SENDER = '01066681661' # 하이픈 제거
+
+def get_solapi_header():
+    date = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+    salt = str(uuid.uuid4().hex)
+    combined = date + salt
+    signature = hmac.new(SOLAPI_API_SECRET.encode('utf-8'), combined.encode('utf-8'), hashlib.sha256).hexdigest()
+    return {
+        'Authorization': f'HMAC-SHA256 apiKey={SOLAPI_API_KEY}, date={date}, salt={salt}, signature={signature}',
+        'Content-Type': 'application/json; charset=utf-8'
+    }
+
+def send_solapi_message(to_phone, text, order_id=None, msg_type="알림"):
+    url = "https://api.solapi.com/messages/v4/send"
+    payload = {
+        "message": {
+            "to": to_phone.replace('-', ''),
+            "from": SOLAPI_SENDER,
+            "text": text
+        }
+    }
+    try:
+        res = requests.post(url, json=payload, headers=get_solapi_header())
+        # 발송 이력 기록 (MessageLog 활용)
+        new_msg = MessageLog(order_id=order_id, message_type=msg_type, phone=to_phone, message=text, status="발송완료")
+        db_delivery.session.add(new_msg)
+        db_delivery.session.commit()
+        return res.json()
+    except Exception as e:
+        print(f"SMS 발송 에러: {e}")
+        return None
+
+
+
 
 @logi_bp.route('/api/logs/<int:tid>')
 def logi_get_task_logs(tid):
-    logs = DeliveryLog.query.filter_by(task_id=tid).order_by(DeliveryLog.created_at.desc()).all()
+    # MessageLog를 사용하여 통합 로그(시스템로그 + 메시지로그) 반환
+    logs = MessageLog.query.filter_by(task_id=tid).order_by(MessageLog.created_at.desc()).all()
     return jsonify([{"time": l.created_at.strftime('%m-%d %H:%M'), "msg": l.message} for l in logs])
 
 @logi_bp.route('/sync')
@@ -1002,43 +1107,56 @@ def logi_bulk_pickup():
 @logi_bp.route('/update_status/<int:tid>/<string:new_status>')
 def logi_update_task_status(tid, new_status):
     t = DeliveryTask.query.get(tid)
-    if t:
-        if t.status == '완료': return "수정불가", 403
-        old = t.status; t.status = new_status
-        if new_status == '픽업': t.pickup_at = datetime.now()
-        logi_add_log(t.id, t.order_id, new_status, f'{old} -> {new_status} 상태 변경')
-        db_delivery.session.commit()
+    if not t: return redirect(url_for('logi.logi_admin_dashboard'))
+    
+    if t.status == '완료': return "수정불가", 403
+    old_status = t.status
+    t.status = new_status
+    
+    if new_status == '픽업':
+        t.pickup_at = datetime.now()
+        # [솔라피 추가] 배송 시작 알림
+        pickup_msg = f"[바구니삼촌] {t.customer_name}님, 기사가 배송을 시작했습니다. 순차적으로 배송됩니다."
+        send_solapi_message(t.phone, pickup_msg, t.order_id, "기사픽업")
+            
+    logi_add_log(t.id, t.order_id, new_status, f'{old_status} -> {new_status} 상태 변경')
+    db_delivery.session.commit()
     return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
 
 @logi_bp.route('/complete_action/<int:tid>', methods=['POST'])
 def logi_complete_action(tid):
     t = DeliveryTask.query.get(tid)
     d = request.json
-    photo_b64 = d.get('photo') # Base64 데이터
+    photo_b64 = d.get('photo') 
 
     if t and photo_b64:
         try:
-            # 1. Base64 텍스트에서 실제 이미지 데이터 추출
+            # 1. 이미지 저장
             header, encoded = photo_b64.split(",", 1)
-            data = base64.b64decode(encoded)
-
-            # 2. 파일명 생성 (주문번호_시간.jpg)
+            img_data = base64.b64decode(encoded)
             filename = f"proof_{t.order_id}_{datetime.now().strftime('%H%M%S')}.jpg"
             filepath = os.path.join(PROOF_FOLDER, filename)
-
-            # 3. 파일로 물리적 저장
             with open(filepath, "wb") as f:
-                f.write(data)
+                f.write(img_data)
 
-            # 4. DB에는 파일의 '경로(URL)'만 저장 (용량 대폭 감소)
+            # 2. 데이터 업데이트
             t.photo_data = f"/static/proof_photos/{filename}"
-            t.status, t.completed_at = '완료', datetime.now()
-            
+            t.status = '완료'
+            t.completed_at = datetime.now()
+
+            # 3. [솔라피 추가] 배송 완료 문자 (사진 링크 포함)
+            full_photo_url = f"https://basam.co.kr{t.photo_data}" 
+            complete_msg = (f"[바구니삼촌] 배송이 완료되었습니다. 지정된 장소를 확인해주세요!\n"
+                            f"아래 링크에서 배송사진을 확인하세요.\n{full_photo_url}")
+            send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
+
             db_delivery.session.commit()
             return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone})
         except Exception as e:
+            db_delivery.session.rollback()
             return jsonify({"success": False, "error": str(e)})
-    return jsonify({"success": False})
+            
+    return jsonify({"success": False, "error": "데이터가 유효하지 않습니다."})
 
 # --------------------------------------------------------------------------------
 # 9. 기사/사용자 설정 및 지도 (복구 완료)
