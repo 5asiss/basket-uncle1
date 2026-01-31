@@ -12,14 +12,19 @@ from datetime import datetime, timedelta
 from flask import Blueprint, render_template_string, request, redirect, jsonify, flash, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, UniqueConstraint
+# 파일 상단 import 아래에 배치
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+# Render와 로컬 모두에서 작동하는 절대 경로 설정
+INSTANCE_PATH = os.path.join(BASE_DIR, 'instance')
+PROOF_FOLDER = os.path.join(BASE_DIR, 'static', 'proof_photos')
 
+# 배포 환경에서 폴더가 없을 경우를 대비해 자동 생성
+os.makedirs(INSTANCE_PATH, exist_ok=True)
+os.makedirs(PROOF_FOLDER, exist_ok=True)
 # [핵심] Blueprint 정의
 logi_bp = Blueprint('logi', __name__, url_prefix='/logi')
 db_delivery = SQLAlchemy()
 
-PROOF_FOLDER = os.path.join('static', 'proof_photos')
-if not os.path.exists(PROOF_FOLDER):
-    os.makedirs(PROOF_FOLDER, exist_ok=True)
 
 # --------------------------------------------------------------------------------
 # 3. 데이터베이스 모델 (기존 기능 100% 보존)
@@ -70,11 +75,31 @@ class MessageLog(db_delivery.Model):
 # --------------------------------------------------------------------------------
 
 def logi_add_log(task_id, order_id, status, message):
-    # 정의되지 않은 DeliveryLog 대신 MessageLog를 사용하여 기록
-    log = MessageLog(task_id=task_id, order_id=order_id, status=status, message=message, message_type='시스템로그')
-    db_delivery.session.add(log)
-    db_delivery.session.commit()
-
+    try:
+        # 새 세션 상태에서 시작하기 위해 명시적으로 롤백 후 시도
+        db_delivery.session.rollback() 
+        log = MessageLog(
+            task_id=task_id, 
+            order_id=order_id, 
+            status=status, 
+            message=message, 
+            message_type='시스템로그'
+        )
+        db_delivery.session.add(log)
+        db_delivery.session.commit()
+    except Exception as e:
+        print(f"⚠️ 로그 기록 실패 (무시됨): {e}")
+        db_delivery.session.rollback() # 중요: 에러 발생 시 세션을 깨끗하게 비움
+# 수정 전: 없음
+# 수정 후: MessageLog 테이블 구조 보정 로직 (init_db 등 적절한 곳에 추가)
+def logi_patch_db():
+    try:
+        # message_log 테이블에 task_id 컬럼이 있는지 확인하고 없으면 추가
+        db_delivery.session.execute(text('ALTER TABLE message_log ADD COLUMN task_id INTEGER'))
+        db_delivery.session.commit()
+        print("✅ message_log 테이블에 task_id 컬럼이 추가되었습니다.")
+    except:
+        db_delivery.session.rollback() # 이미 있으면 에러가 나므로 롤백
 def logi_extract_qty(text_data):
     match = re.search(r'\((\d+)\)', text_data)
     return int(match.group(1)) if match else 0
@@ -90,8 +115,8 @@ def logi_get_item_summary(tasks):
     return summary
 
 def logi_get_main_db_path():
-    # app.py와 같은 레벨의 instance 폴더 내 DB 경로를 정확히 반환
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'direct_trade_mall.db')
+    # 상단에서 정의한 INSTANCE_PATH를 사용하여 경로 충돌 방지
+    return os.path.join(INSTANCE_PATH, 'direct_trade_mall.db')
 
 # --------------------------------------------------------------------------------
 # 5. 관리자 보안 라우트 (로그인/로그아웃)
@@ -808,7 +833,7 @@ def logi_driver_work():
     let stream = null;
     let currentBaseSize = 15; 
 
-    // 1. 폰트 크기 조절 기능
+    // 1. 폰트 크기 조절
     function changeFontSize(delta) {
         const body = document.getElementById('driver-body');
         if (!body) return;
@@ -820,13 +845,11 @@ def logi_driver_work():
         document.querySelectorAll('.product-badge').forEach(el => el.style.fontSize = (currentBaseSize + 1) + 'px');
     }
 
-    // 2. 카메라 UI 열기 (배송 완료 버튼 클릭 시)
+    // 2. 카메라 UI 열기
     async function openCameraUI(tid) {
         currentTaskId = tid;
         const video = document.getElementById('video');
         const layer = document.getElementById('camera-layer');
-        const preview = document.getElementById('photo-preview');
-
         try {
             stream = await navigator.mediaDevices.getUserMedia({ 
                 video: { facingMode: { ideal: "environment" } } 
@@ -834,63 +857,31 @@ def logi_driver_work():
             video.srcObject = stream;
             layer.classList.remove('hidden');
             video.classList.remove('hidden');
-            video.style.display = 'block';
-            preview.classList.add('hidden');
+            document.getElementById('photo-preview').classList.add('hidden');
             document.getElementById('capture-btn').classList.remove('hidden');
             document.getElementById('confirm-btn').classList.add('hidden');
-            document.body.style.overflow = 'hidden'; // 스크롤 방지
+            document.body.style.overflow = 'hidden';
         } catch (e) {
-            console.error("카메라 권한 에러:", e);
-            if (confirm("카메라를 켤 수 없습니다. 갤러리에서 사진을 선택하시겠습니까?")) {
-                document.getElementById('emergency-file-input').click();
-            }
+            alert("카메라를 켤 수 없습니다. 권한 설정을 확인하세요.");
         }
     }
 
-    // 3. 비상용 갤러리 업로드 로직
-    document.getElementById('emergency-file-input').onchange = async (event) => {
-        const file = event.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                await uploadPhotoDirectly(currentTaskId, e.target.result);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    async function uploadPhotoDirectly(tid, photoData) {
-        const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', tid), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ photo: photoData })
-        });
-        const data = await res.json();
-        if (data.success) {
-            alert("배송 완료 처리되었습니다.");
-            location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
-        }
-    }
-
-    // 4. 사진 촬영 버튼
+    // 3. 사진 촬영
     document.getElementById('capture-btn').onclick = () => {
         const v = document.getElementById('video');
         const c = document.getElementById('canvas');
         const p = document.getElementById('photo-preview');
-
         c.width = 800;
         c.height = v.videoHeight * (800 / v.videoWidth);
         c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
         p.src = c.toDataURL('image/jpeg', 0.8);
-
         v.classList.add('hidden');
-        v.style.display = 'none';
         p.classList.remove('hidden');
         document.getElementById('capture-btn').classList.add('hidden');
         document.getElementById('confirm-btn').classList.remove('hidden');
     };
 
-    // 5. 배송 완료 확정 (최종 서버 전송 및 문자 연동)
+    // 4. 배송 완료 확정 (에러 수정된 핵심 로직)
     document.getElementById('confirm-btn').onclick = async () => {
         const btn = document.getElementById('confirm-btn');
         if(btn.disabled) return;
@@ -898,9 +889,10 @@ def logi_driver_work():
         btn.innerText = "서버 저장 중...";
 
         const photoData = document.getElementById('photo-preview').src;
+        const targetUrl = '{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId);
         
         try {
-            const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
+            const res = await fetch(targetUrl, { 
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify({ photo: photoData }) 
@@ -908,32 +900,31 @@ def logi_driver_work():
             const data = await res.json();
 
             if(data.success) {
-                // 카메라 종료 및 레이어 닫기
-                if(stream) stream.getTracks().forEach(t => t.stop());
+                // 레이어 닫기 및 초기화
                 document.getElementById('camera-layer').classList.add('hidden');
                 document.body.style.overflow = 'auto';
+                if(stream) stream.getTracks().forEach(t => t.stop());
 
-                // 문자 메시지 앱 호출
-                const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문 상품 배송 완료되었습니다. 🧺\n사진확인: https://basam.co.kr${data.photo_url}`;
+                // 문자 전송 앱 호출
+                const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 배송 완료되었습니다. 🧺\n사진확인: https://basam.co.kr${data.photo_url}`;
                 const isIphone = navigator.userAgent.match(/iPhone/i);
-                const smsUrl = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
-                location.href = smsUrl;
+                location.href = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
 
-                // 배정 리스트로 이동
+                // 배정창으로 복귀
                 setTimeout(() => { 
                     location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
-                }, 1200); 
+                }, 1000);
             } else {
                 alert("오류: " + data.error);
                 btn.disabled = false;
             }
         } catch (e) {
-            alert("서버 연결 실패");
+            alert("서버 통신 실패");
             btn.disabled = false;
         }
     };
 
-    // 6. 취소 버튼
+    // 5. 취소 버튼
     document.getElementById('cancel-camera').onclick = () => { 
         if(stream) stream.getTracks().forEach(t => t.stop());
         document.getElementById('camera-layer').classList.add('hidden'); 
@@ -946,8 +937,7 @@ def logi_driver_work():
     
     async function secureStatus(tid, status) {
         if(confirm("["+status+"] 처리를 진행할까요?")) {
-            await fetch('{{ url_for("logi.logi_update_task_status", tid=0, new_status="X") }}'.replace('0', tid).replace('X', status));
-            location.reload();
+            location.href = `/logi/update_status/${tid}/${status}`;
         }
     }
 </script>
@@ -1076,74 +1066,108 @@ def logi_bulk_pickup():
             t.status, t.pickup_at = '픽업', datetime.now()
             logi_add_log(t.id, t.order_id, '픽업', '일괄 상차 완료 처리')
     db_delivery.session.commit(); return jsonify({"success": True})
-
+# 상태 업데이트 API (BuildError 해결 버전)
 @logi_bp.route('/update_status/<int:tid>/<string:new_status>')
 def logi_update_task_status(tid, new_status):
+    """배송 건의 상태(픽업 등)를 업데이트하고 이전 페이지로 복귀"""
     t = DeliveryTask.query.get(tid)
-    if not t: return redirect(url_for('logi.logi_admin_dashboard'))
+    if not t:
+        return "Task not found", 404
     
-    if t.status == '완료': return "수정불가", 403
+    if t.status == '완료':
+        return "수정불가", 403
+
     old_status = t.status
     t.status = new_status
     
+    # 상차(픽업) 시 시간 기록 및 알림톡 발송
     if new_status == '픽업':
         t.pickup_at = datetime.now()
-        # [솔라피 추가] 배송 시작 알림
         pickup_msg = f"[바구니삼촌] {t.customer_name}님, 기사가 배송을 시작했습니다. 순차적으로 배송됩니다."
-        send_solapi_message(t.phone, pickup_msg, t.order_id, "기사픽업")
+        try:
+            send_solapi_message(t.phone, pickup_msg, t.order_id, "기사픽업")
+        except:
+            pass
             
-    logi_add_log(t.id, t.order_id, new_status, f'{old_status} -> {new_status} 상태 변경')
-    db_delivery.session.commit()
-    return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
+    # 로그 기록
+    try:
+        logi_add_log(t.id, t.order_id, new_status, f'{old_status} -> {new_status} 상태 변경')
+    except:
+        pass
 
+    db_delivery.session.commit()
+    
+    # 호출한 페이지(referrer)로 돌아가거나, 없으면 대시보드로 이동
+    target_url = request.referrer if request.referrer else url_for('logi.logi_admin_dashboard')
+    return redirect(target_url)
 @logi_bp.route('/complete_action/<int:tid>', methods=['POST'])
 def logi_complete_action(tid):
+    """
+    배송 완료 처리: 이미지 저장 + DB 업데이트 + 알림 발송
+    Render 클라우드 배포 환경 최적화 버전
+    """
     t = DeliveryTask.query.get(tid)
     d = request.json
     photo_b64 = d.get('photo')
 
-    if t and photo_b64:
+    if not t or not photo_b64:
+        return jsonify({"success": False, "error": "데이터가 유효하지 않거나 태스크를 찾을 수 없습니다."})
+
+    try:
+        # 1. 이미지 데이터 처리 (Base64 디코딩)
         try:
-            # 이미지 파일 저장 로직
-            header, encoded = photo_b64.split(",", 1)
-            img_data = base64.b64decode(encoded)
+           # 1. 이미지 데이터 안전하게 디코딩
+            try:
+                header, encoded = photo_b64.split(",", 1)
+                img_data = base64.b64decode(encoded)
+            except Exception as e:
+                return jsonify({"success": False, "error": f"이미지 데이터 처리 실패: {str(e)}"})
+
+            # 2. 파일명 및 절대 경로 생성
             filename = f"proof_{t.order_id}_{datetime.now().strftime('%H%M%S')}.jpg"
             filepath = os.path.join(PROOF_FOLDER, filename)
+
+            # 3. 파일 쓰기 (절대 경로 보장)
             with open(filepath, "wb") as f:
                 f.write(img_data)
-
-            # [DB 반영 핵심] 상태값과 완료 시간을 정확히 기록
-            t.photo_data = f"/static/proof_photos/{filename}"
-            t.status = '완료'
-            t.completed_at = datetime.now()
-            
-            # 2. 로그는 별도로 기록하여 메인 업데이트에 지장을 주지 않게 합니다.
-            try:
-                logi_add_log(t.id, t.order_id, '완료', '기사가 사진 촬영 후 배송 완료 처리함')
-            except:
-                pass # 로그 기록 실패가 배송 완료 처리를 막지 않도록 예외 처리
-
-            db_delivery.session.commit() # 최종 확정
-            
-            # [추가] 솔라피 문자 발송은 DB 저장이 완벽히 끝난 후 호출 (순서 변경)
-            try:
-                full_photo_url = f"https://basam.co.kr{t.photo_data}"
-                complete_msg = f"[바구니삼촌] 배송완료! 장소를 확인해주세요.\n사진: {full_photo_url}"
-                send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
-            except:
-                pass
-
-            db_delivery.session.commit() # 반드시 커밋!
-            
-            return jsonify({
-                "success": True, 
-                "customer": t.customer_name, 
-                "phone": t.phone, 
-                "photo_url": t.photo_data
-            })
         except Exception as e:
-            db_delivery.session.rollback()
-            return jsonify({"success": False, "error": str(e)})
+            print(f"❌ 파일 저장 시스템 에러: {str(e)}")
+            return jsonify({"success": False, "error": f"서버 파일 시스템 오류: {str(e)}"})
+
+        # 4. 데이터베이스 업데이트
+        # 웹 브라우저에서 접근 가능한 상대 경로를 저장합니다.
+        t.photo_data = f"/static/proof_photos/{filename}"
+        t.status = '완료'
+        t.completed_at = datetime.now()
+        
+        # 5. 시스템 로그 기록 (메인 업데이트와 독립적으로 실행)
+        try:
+            logi_add_log(t.id, t.order_id, '완료', '기사가 사진 촬영 후 배송 완료 처리함')
+        except:
+            pass # 로그 기록 실패가 배송 처리를 막지 않음
+
+        # 6. DB 커밋 (최종 확정)
+        db_delivery.session.commit()
+        
+        # 7. 솔라피 알림 발송 (커밋 후 실행하여 발송 실패 시에도 DB는 유지)
+        try:
+            full_photo_url = f"https://basam.co.kr{t.photo_data}"
+            complete_msg = f"[바구니삼촌] 배송이 완료되었습니다. 지정된 장소를 확인해주세요!\n사진확인: {full_photo_url}"
+            send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
+        except Exception as e:
+            print(f"⚠️ 솔라피 발송 지연 혹은 실패 (무시됨): {str(e)}")
+
+        return jsonify({
+            "success": True, 
+            "customer": t.customer_name, 
+            "phone": t.phone, 
+            "photo_url": t.photo_data
+        })
+
+    except Exception as e:
+        print(f"❌ 예상치 못한 서버 오류: {str(e)}")
+        db_delivery.session.rollback()
+        return jsonify({"success": False, "error": f"서버 처리 오류: {str(e)}"})
             
     return jsonify({"success": False, "error": "유효하지 않은 데이터"})
 
