@@ -1024,26 +1024,29 @@ document.getElementById('confirm-btn').onclick = async () => {
         });
         const data = await res.json();
 
-        if(data.success) {
-            const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 상품 배송이 완료되었습니다.\n사진확인: https://basam.co.kr${data.photo_url}`;
-            const isIphone = navigator.userAgent.match(/iPhone/i);
-            const smsUrl = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
-            
-            // 카메라 종료
+       if(data.success) {
+            // 1. 카메라 레이어를 즉시 숨김 (가장 먼저 실행)
+            document.getElementById('camera-layer').classList.add('hidden');
+            document.body.style.overflow = 'auto'; // 스크롤 복구
+
+            // 2. 카메라 스트림 종료
             if(stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
             }
 
-            alert("배송 완료! 다음 업무를 위해 배정 리스트로 이동합니다.");
+            // 3. 문자 전송용 정보 구성
+            const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 상품 배송이 완료되었습니다.\n사진확인: https://basam.co.kr${data.photo_url}`;
+            const isIphone = navigator.userAgent.match(/iPhone/i);
+            const smsUrl = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
             
-            // 1. 문자 발송 화면으로 이동
+            // 4. 문자 앱 실행 및 배정 리스트(assigned)로 강제 이동
             location.href = smsUrl;
-
-            // 2. 1.5초 후 '배정대기(view=assigned)' 탭으로 이동 (쿼리 파라미터 유지)
+            
             setTimeout(() => { 
                 location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
-            }, 500);
+            }, 1000);
+        }, 300); 
         } else {
             alert("오류: " + data.error);
             confirmBtn.disabled = false;
@@ -1062,39 +1065,51 @@ document.getElementById('confirm-btn').onclick = async () => {
     if(confirmBtn.disabled) return;
     
     confirmBtn.disabled = true;
-    confirmBtn.innerText = "전송 및 저장 중...";
+    confirmBtn.innerText = "서버 저장 중...";
 
-    const photoData = document.getElementById('photo-preview').src; // 촬영된 이미지 데이터
+    const photoData = document.getElementById('photo-preview').src;
     
     try {
+        // [중요] fetch 앞에 await를 두어 서버 응답이 올 때까지 기다립니다.
         const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
+            document.getElementById('camera-layer').classList.add('hidden');
             method: 'POST', 
             headers: {'Content-Type': 'application/json'}, 
             body: JSON.stringify({ photo: photoData }) 
         });
+        
+        if (!res.ok) throw new Error('서버 응답 실패');
         const data = await res.json();
 
         if(data.success) {
-            // 서버 저장 성공 시 문자 메시지 발송 연동
-            const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문하신 상품이 문 앞에 배송 완료되었습니다. 🧺\n배송사진 확인: https://basam.co.kr${data.photo_url}`;
+            // 서버에 데이터가 안전하게 저장된 후 문자를 보냅니다.
+            const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문 상품 배송 완료되었습니다.\n사진: https://basam.co.kr${data.photo_url}`;
             const isIphone = navigator.userAgent.match(/iPhone/i);
             const smsUrl = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
             
-            alert("배송 데이터가 안전하게 저장되었습니다.\n확인을 누르면 문자 발송 화면으로 이동합니다.");
-            
-            // 카메라 스트림 완전히 종료
-            if(stream) stream.getTracks().forEach(track => track.stop());
-            
+            // 카메라 자원 해제
+            if(stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+
+            // 1. 문자 앱 실행
             location.href = smsUrl;
-            setTimeout(() => { location.reload(); }, 1500); // 전송 후 리로드
+
+            // 2. 문자 앱으로 넘어간 뒤, 잠시 후 배정 리스트(assigned)로 이동
+            setTimeout(() => { 
+                location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
+            }, 800); 
         } else {
-            alert("오류: " + data.error);
+            alert("서버 저장 실패: " + data.error);
             confirmBtn.disabled = false;
             confirmBtn.innerText = "다시 시도";
         }
     } catch (e) {
-        alert("네트워크 연결을 확인해주세요.");
+        console.error(e);
+        alert("네트워크 오류: 배송 완료 처리가 되지 않았습니다.");
         confirmBtn.disabled = false;
+        confirmBtn.innerText = "배송 완료 확정";
     }
 };
                 const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문하신 상품이 문 앞에 배송 완료되었습니다. 🧺`;
@@ -1106,12 +1121,23 @@ document.getElementById('confirm-btn').onclick = async () => {
         };
 
         document.getElementById('cancel-camera').onclick = () => { 
-            if(stream) stream.getTracks().forEach(t => t.stop()); 
-            document.getElementById('camera-layer').classList.add('hidden'); 
-            document.getElementById('video').style.display = 'block';
+            if(stream) {
+                stream.getTracks().forEach(t => t.stop());
+                stream = null;
+            }
+            // 레이어 숨기고 비디오 상태 초기화
+            const layer = document.getElementById('camera-layer');
+            layer.classList.add('hidden'); 
+            
+            const v = document.getElementById('video');
+            v.style.display = 'block';
+            v.classList.remove('hidden');
+            
             document.getElementById('photo-preview').classList.add('hidden');
             document.getElementById('capture-btn').classList.remove('hidden');
             document.getElementById('confirm-btn').classList.add('hidden');
+            
+            document.body.style.overflow = 'auto'; // 스크롤 차단 해제
         };
     </script>
 </body>
@@ -1263,11 +1289,11 @@ def logi_update_task_status(tid, new_status):
 def logi_complete_action(tid):
     t = DeliveryTask.query.get(tid)
     d = request.json
-    photo_b64 = d.get('photo') 
+    photo_b64 = d.get('photo')
 
     if t and photo_b64:
         try:
-            # 1. 이미지 저장
+            # 이미지 파일 저장 로직
             header, encoded = photo_b64.split(",", 1)
             img_data = base64.b64decode(encoded)
             filename = f"proof_{t.order_id}_{datetime.now().strftime('%H%M%S')}.jpg"
@@ -1275,29 +1301,40 @@ def logi_complete_action(tid):
             with open(filepath, "wb") as f:
                 f.write(img_data)
 
-            # 2. 데이터 업데이트
+            # [DB 반영 핵심] 상태값과 완료 시간을 정확히 기록
             t.photo_data = f"/static/proof_photos/{filename}"
             t.status = '완료'
             t.completed_at = datetime.now()
+            
+            # 2. 로그는 별도로 기록하여 메인 업데이트에 지장을 주지 않게 합니다.
+            try:
+                logi_add_log(t.id, t.order_id, '완료', '기사가 사진 촬영 후 배송 완료 처리함')
+            except:
+                pass # 로그 기록 실패가 배송 완료 처리를 막지 않도록 예외 처리
 
-            # 3. [솔라피 추가] 배송 완료 문자 (사진 링크 포함)
-            full_photo_url = f"https://basam.co.kr{t.photo_data}" 
-            complete_msg = (f"[바구니삼촌] 배송이 완료되었습니다. 지정된 장소를 확인해주세요!\n"
-                            f"아래 링크에서 배송사진을 확인하세요.\n{full_photo_url}")
-            send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
+            db_delivery.session.commit() # 최종 확정
+            
+            # [추가] 솔라피 문자 발송은 DB 저장이 완벽히 끝난 후 호출 (순서 변경)
+            try:
+                full_photo_url = f"https://basam.co.kr{t.photo_data}"
+                complete_msg = f"[바구니삼촌] 배송완료! 장소를 확인해주세요.\n사진: {full_photo_url}"
+                send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
+            except:
+                pass
 
-            db_delivery.session.commit()
+            db_delivery.session.commit() # 반드시 커밋!
+            
             return jsonify({
-        "success": True, 
-        "customer": t.customer_name, 
-        "phone": t.phone, 
-        "photo_url": t.photo_data
-    })
+                "success": True, 
+                "customer": t.customer_name, 
+                "phone": t.phone, 
+                "photo_url": t.photo_data
+            })
         except Exception as e:
             db_delivery.session.rollback()
             return jsonify({"success": False, "error": str(e)})
             
-    return jsonify({"success": False, "error": "데이터가 유효하지 않습니다."})
+    return jsonify({"success": False, "error": "유효하지 않은 데이터"})
 
 # --------------------------------------------------------------------------------
 # 9. 기사/사용자 설정 및 지도 (복구 완료)
