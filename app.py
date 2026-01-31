@@ -15,6 +15,7 @@ from werkzeug.utils import secure_filename
 from sqlalchemy import text
 from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint 가져오기
 
+
 # --------------------------------------------------------------------------------
 # 1. 초기 설정 및 Flask 인스턴스 생성
 # --------------------------------------------------------------------------------
@@ -1211,7 +1212,7 @@ def api_category_products(cat_name):
     return jsonify(res_data)
 @app.route('/category/<string:cat_name>')
 def category_view(cat_name):
-    """카테고리별 상품 목록 뷰"""
+    """카테고리별 상품 목록 뷰 (하단에 최신상품/카테고리 추천 추가)"""
     order_logic = (Product.stock <= 0) | (Product.deadline < datetime.now())
     cat = None
     if cat_name == '최신상품':
@@ -1226,6 +1227,13 @@ def category_view(cat_name):
         products = Product.query.filter_by(category=cat_name, is_active=True).order_by(order_logic, Product.id.desc(), Product.deadline.asc()).all()
         display_name = f"{cat_name} 상품 리스트"
 
+    # --- 하단 노출용 추가 데이터 로직 ---
+    # 1. 최신 상품 10개 (현재 카테고리 상품 제외)
+    latest_all = Product.query.filter(Product.is_active == True, Product.category != cat_name).order_by(Product.id.desc()).limit(10).all()
+    # 2. 다른 추천 카테고리 3개
+    recommend_cats = Category.query.filter(Category.name != cat_name).order_by(Category.order.asc()).limit(3).all()
+    cat_previews = {c: Product.query.filter_by(category=c.name, is_active=True).limit(4).all() for c in recommend_cats}
+
     content = """
     <div class="max-w-7xl mx-auto px-4 md:px-6 py-20 text-left">
         <div class="mb-16 text-left">
@@ -1233,35 +1241,77 @@ def category_view(cat_name):
             {% if cat and cat.description %}<p class="text-gray-400 font-bold mt-4 text-base md:text-xl text-left">{{ cat.description }}</p>{% endif %}
         </div>
         
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-10 text-left">
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-10 text-left mb-24">
             {% for p in products %}
-            {% set is_expired = (p.deadline and p.deadline < now) %}
-            <div class="product-card bg-white rounded-[2rem] md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col transition-all hover:shadow-2xl hover:-translate-y-2 {% if is_expired or p.stock <= 0 %}sold-out{% endif %} text-left">
-                {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-[10px] md:text-sm text-center">판매마감</div>{% endif %}
-                <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden text-left">
-                    <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4 md:p-8 text-left">
-                    <div class="absolute bottom-4 left-4 text-left">
-                        <span class="bg-black/70 text-white text-[8px] md:text-[11px] px-2.5 py-1.5 rounded-lg font-black backdrop-blur-sm text-left">잔여: {{ p.stock }}</span>
-                    </div>
+            <div class="product-card bg-white rounded-[2rem] md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden flex flex-col transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %}">
+                <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
+                    <img src="{{ p.image_url }}" class="w-full h-full object-contain p-4 md:p-8">
                 </a>
-                <div class="p-5 md:p-10 flex flex-col flex-1 text-left">
-                    <p class="countdown-timer text-[8px] md:text-[11px] font-bold text-red-500 mb-2 text-left" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
-                    <h3 class="font-black text-gray-800 text-sm md:text-lg truncate mb-1 md:mb-2 leading-tight text-left">{{ p.name }}</h3>
-                    <p class="text-[10px] md:text-sm text-green-600 mb-3 md:mb-5 font-medium truncate text-left">{{ p.description or '' }}</p>
-                    <div class="mt-auto flex justify-between items-center text-left">
-                        <span class="text-base md:text-2xl font-black text-green-600 text-left">{{ "{:,}".format(p.price) }}원</span>
-                        {% if not is_expired and p.stock > 0 %}
-                        <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-8 h-8 md:w-12 md:h-12 rounded-full text-white shadow-lg active:scale-90 transition-transform text-center flex items-center justify-center">
+                <div class="p-5 md:p-10 flex flex-col flex-1">
+                    <h3 class="font-black text-gray-800 text-sm md:text-lg truncate mb-2">{{ p.name }}</h3>
+                    <p class="text-[10px] md:text-sm text-green-600 mb-3 font-medium truncate">{{ p.description or '' }}</p>
+                    <div class="mt-auto flex justify-between items-center">
+                        <span class="text-base md:text-2xl font-black text-green-600">{{ "{:,}".format(p.price) }}원</span>
+                        <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-8 h-8 md:w-12 md:h-12 rounded-full text-white shadow-lg flex items-center justify-center transition active:scale-90">
                             <i class="fas fa-plus text-[10px] md:text-base"></i>
                         </button>
-                        {% endif %}
                     </div>
                 </div>
             </div>
             {% endfor %}
         </div>
-    </div>"""
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, products=products, display_name=display_name, cat=cat)
+
+        <hr class="border-gray-100 mb-24">
+
+        <section class="mb-24">
+            <div class="flex justify-between items-end mb-8">
+                <h2 class="text-2xl md:text-3xl font-black text-gray-800">✨ 다른 카테고리 최신 상품</h2>
+            </div>
+            <div class="horizontal-scroll no-scrollbar">
+                {% for lp in latest_all %}
+                <div class="w-40 md:w-56 flex-shrink-0">
+                    <a href="/product/{{lp.id}}" class="bg-white rounded-[2rem] border border-gray-100 p-4 block shadow-sm hover:shadow-md transition">
+                        <img src="{{ lp.image_url }}" class="w-full aspect-square object-contain mb-3">
+                        <p class="text-xs font-black text-gray-800 truncate">{{ lp.name }}</p>
+                        <p class="text-green-600 font-black mt-1">{{ "{:,}".format(lp.price) }}원</p>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+            {% for c_info, c_prods in cat_previews.items() %}
+            <div class="bg-gray-50 p-8 rounded-[3rem] border border-gray-100 shadow-inner">
+                <h3 class="text-xl font-black mb-6 flex justify-between items-center">
+                    {{ c_info.name }}
+                    <a href="/category/{{ c_info.name }}" class="text-xs text-gray-400 font-bold hover:text-green-600">전체보기 ></a>
+                </h3>
+                <div class="grid grid-cols-2 gap-4">
+                    {% for cp in c_prods %}
+                    <a href="/product/{{ cp.id }}" class="bg-white p-3 rounded-2xl shadow-sm">
+                        <img src="{{ cp.image_url }}" class="w-full aspect-square object-contain rounded-xl">
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="flex justify-center mt-24">
+            <a href="/" class="bg-gray-800 text-white px-12 py-5 rounded-full font-black shadow-xl hover:bg-black transition active:scale-95">
+                <i class="fas fa-home mr-2"></i> 메인화면으로 이동하기
+            </a>
+        </div>
+    </div>
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, 
+                                 products=products, 
+                                 display_name=display_name, 
+                                 cat=cat,
+                                 latest_all=latest_all,
+                                 cat_previews=cat_previews,
+                                 now=datetime.now())
 
 @app.route('/product/<int:pid>')
 def product_detail(pid):
