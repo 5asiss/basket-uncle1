@@ -7,24 +7,15 @@ import hmac
 import hashlib
 import re
 import uuid
-import base64
 from datetime import datetime, timedelta
 from flask import Blueprint, render_template_string, request, redirect, jsonify, flash, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text, UniqueConstraint
-# 파일 상단 import 아래에 배치
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-# Render와 로컬 모두에서 작동하는 절대 경로 설정
-INSTANCE_PATH = os.path.join(BASE_DIR, 'instance')
-PROOF_FOLDER = os.path.join(BASE_DIR, 'static', 'proof_photos')
 
-# 배포 환경에서 폴더가 없을 경우를 대비해 자동 생성
-os.makedirs(INSTANCE_PATH, exist_ok=True)
-os.makedirs(PROOF_FOLDER, exist_ok=True)
-# [핵심] Blueprint 정의
+# [핵심] Blueprint 정의 (이름: logi, 주소 접두어: /logi)
+# 이 설정으로 인해 이제 모든 주소는 basam.co.kr/logi/... 가 됩니다.
 logi_bp = Blueprint('logi', __name__, url_prefix='/logi')
 db_delivery = SQLAlchemy()
-
 
 # --------------------------------------------------------------------------------
 # 3. 데이터베이스 모델 (기존 기능 100% 보존)
@@ -59,47 +50,23 @@ class DeliveryTask(db_delivery.Model):
     completed_at = db_delivery.Column(db_delivery.DateTime, nullable=True)
     __table_args__ = (UniqueConstraint('order_id', 'category', name='_order_cat_v12_uc_bp'),)
 
-# 통합 로그 및 메시지 이력 테이블
-# 통합 로그 및 메시지 이력 테이블 (기존 DeliveryLog 역할을 대신함)
-class MessageLog(db_delivery.Model):
+class DeliveryLog(db_delivery.Model):
     id = db_delivery.Column(db_delivery.Integer, primary_key=True)
-    task_id = db_delivery.Column(db_delivery.Integer, nullable=True)
-    order_id = db_delivery.Column(db_delivery.String(100), nullable=True)
-    message_type = db_delivery.Column(db_delivery.String(50)) # 가입, 픽업, 완료, 로그
-    phone = db_delivery.Column(db_delivery.String(20), nullable=True)
+    task_id = db_delivery.Column(db_delivery.Integer)
+    order_id = db_delivery.Column(db_delivery.String(100))
     status = db_delivery.Column(db_delivery.String(50))
     message = db_delivery.Column(db_delivery.String(500))
     created_at = db_delivery.Column(db_delivery.DateTime, default=datetime.now)
+
 # --------------------------------------------------------------------------------
 # 4. 유틸리티 함수 (함수명 겹침 방지 접두어 사용)
 # --------------------------------------------------------------------------------
 
 def logi_add_log(task_id, order_id, status, message):
-    try:
-        # 새 세션 상태에서 시작하기 위해 명시적으로 롤백 후 시도
-        db_delivery.session.rollback() 
-        log = MessageLog(
-            task_id=task_id, 
-            order_id=order_id, 
-            status=status, 
-            message=message, 
-            message_type='시스템로그'
-        )
-        db_delivery.session.add(log)
-        db_delivery.session.commit()
-    except Exception as e:
-        print(f"⚠️ 로그 기록 실패 (무시됨): {e}")
-        db_delivery.session.rollback() # 중요: 에러 발생 시 세션을 깨끗하게 비움
-# 수정 전: 없음
-# 수정 후: MessageLog 테이블 구조 보정 로직 (init_db 등 적절한 곳에 추가)
-def logi_patch_db():
-    try:
-        # message_log 테이블에 task_id 컬럼이 있는지 확인하고 없으면 추가
-        db_delivery.session.execute(text('ALTER TABLE message_log ADD COLUMN task_id INTEGER'))
-        db_delivery.session.commit()
-        print("✅ message_log 테이블에 task_id 컬럼이 추가되었습니다.")
-    except:
-        db_delivery.session.rollback() # 이미 있으면 에러가 나므로 롤백
+    log = DeliveryLog(task_id=task_id, order_id=order_id, status=status, message=message)
+    db_delivery.session.add(log)
+    db_delivery.session.commit()
+
 def logi_extract_qty(text_data):
     match = re.search(r'\((\d+)\)', text_data)
     return int(match.group(1)) if match else 0
@@ -115,8 +82,8 @@ def logi_get_item_summary(tasks):
     return summary
 
 def logi_get_main_db_path():
-    # 상단에서 정의한 INSTANCE_PATH를 사용하여 경로 충돌 방지
-    return os.path.join(INSTANCE_PATH, 'direct_trade_mall.db')
+    # app.py와 같은 레벨의 instance 폴더 내 DB 경로를 정확히 반환
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'direct_trade_mall.db')
 
 # --------------------------------------------------------------------------------
 # 5. 관리자 보안 라우트 (로그인/로그아웃)
@@ -342,58 +309,23 @@ def logi_admin_dashboard():
                                 </div>
                                 <div id="log-view-{{t.id}}" class="hidden mt-2 p-3 bg-slate-50 rounded-xl text-[9px] text-slate-500 border border-dashed border-slate-200 leading-normal"></div>
                             </td>
-                         <td class="py-3 px-2 text-right">
-    {% if t.status == '완료' %}
-        {% if t.photo_data %}
-        <button onclick="viewAdminPhoto('{{ t.photo_data }}')" class="inline-block text-[10px] bg-green-600 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap">
-            <i class="fas fa-image mr-1"></i>사진확인
-        </button>
-        {% else %}
-        <span class="text-[10px] text-slate-300 italic">사진없음</span>
-        {% endif %}
-    {% else %}
-        <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" 
-           class="inline-block text-[10px] bg-slate-800 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap" 
-           onclick="return confirm('배정을 해제하고 대기목록으로 보낼까요?')">
-            재배정
-        </a>
-    {% endif %}
-</td>
+                            <td class="py-3 px-2 text-right">
+                                <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" class="inline-block text-[10px] bg-slate-800 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap" onclick="return confirm('배정을 해제할까요?')">재배정</a>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </main>
-        <div id="admin-photo-modal" class="fixed inset-0 bg-black/80 z-[9999] hidden flex flex-col items-center justify-center p-4" onclick="this.classList.add('hidden')">
-    <div class="bg-white p-2 rounded-[2rem] max-w-lg w-full relative overflow-hidden shadow-2xl" onclick="event.stopPropagation()">
-        <img id="admin-modal-img" src="" class="w-full h-auto rounded-2xl">
-        <button onclick="document.getElementById('admin-photo-modal').classList.add('hidden')" class="absolute top-4 right-4 bg-black/50 text-white w-10 h-10 rounded-full flex items-center justify-center">✕</button>
-        <div class="p-6 text-center">
-            <p class="text-slate-800 font-black text-lg">배송 완료 증빙 사진</p>
-            <p class="text-slate-400 text-xs mt-1">기사님이 직접 촬영하여 등록한 사진입니다.</p>
-        </div>
-    </div>
-</div>
 
-<script>
-function viewAdminPhoto(data) {
-    const modal = document.getElementById('admin-photo-modal');
-    document.getElementById('admin-modal-img').src = data;
-    modal.classList.remove('hidden');
-}
-</script>
-
-        // 1. 폰트 크기 조절 기능
-    function changeFontSize(delta) {
-        const body = document.getElementById('driver-body');
-        if (!body) return;
-        currentBaseSize += delta;
-        if (currentBaseSize < 12) currentBaseSize = 12;
-        if (currentBaseSize > 35) currentBaseSize = 35;
-        body.style.fontSize = currentBaseSize + 'px';
-        document.querySelectorAll('.address-highlight').forEach(el => el.style.fontSize = (currentBaseSize + 7) + 'px');
-        document.querySelectorAll('.product-badge').forEach(el => el.style.fontSize = (currentBaseSize + 1) + 'px');
+        <script>
+            let currentSize = 12;
+            function changeFontSize(delta) {
+                currentSize += delta;
+                if(currentSize < 10) currentSize = 10;
+                if(currentSize > 20) currentSize = 20;
+                document.getElementById('app-body').style.fontSize = currentSize + 'px';
             }
 
             // [추가] 카테고리별 전체 선택 기능
@@ -607,67 +539,25 @@ def logi_driver_work():
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
-    
-    body { 
-        font-family: 'Pretendard', sans-serif; 
-        background-color: #0f172a; color: #f8fafc; 
-        letter-spacing: -0.03em; word-break: keep-all;
-    }
-
-    /* 기사님 가독성을 위한 큼직한 카드 스타일 */
-    .task-card {
-        background: #1e293b; border-radius: 1.5rem;
-        padding: 1.5rem; border: 1px solid #334155;
-        margin-bottom: 1.25rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
-    }
-
-    /* 주소: 가독성을 위해 크기 유지 및 줄간격 확보 */
-    .address-highlight { 
-        color: #ffffff; 
-        font-weight: 900; 
-        line-height: 1.3; 
-        font-size: 24px; 
-        margin-bottom: 8px;
-    }
-
-    /* [수정 핵심] 품목 배지: 두 줄이 되어도 글자가 겹치지 않도록 line-height와 padding 조정 */
-.product-badge { 
-    /* 1. 줄바꿈 시 배경 겹침 방지의 핵심 */
-    display: inline-block;      
-    line-height: 1.6;           /* 줄 간격을 글자 크기의 1.6배로 벌림 */
-    
-    /* 2. 디자인 및 색상 */
-    background: #064e3b; 
-    color: #34d399; 
-    border: 1px solid #065f46;
-    border-radius: 8px; 
-    
-    /* 3. 여백 조절 (글자가 배경 끝에 붙지 않게 함) */
-    padding: 2px 10px;          /* 위아래(2px), 좌우(10px) */
-    margin-top: 4px;            /* 배지 위쪽 간격 */
-    margin-bottom: 4px;         /* 배지 아래쪽 간격 */
-    
-    /* 4. 가독성 */
-    font-weight: 800; 
-    font-size: 15px; 
-    word-break: keep-all;       /* 단어 중간에서 끊기지 않게 함 */
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-
-    /* 하단 조작바 */
-    .bottom-ctrl { 
-        position: fixed; 
-        bottom: 20px; 
-        left: 50%; 
-        transform: translateX(-50%); 
-        width: 92%; 
-        z-index: 1000; 
-    }
-
-    .no-scrollbar::-webkit-scrollbar { display: none; }
-</style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;700;900&display=swap');
+        body { 
+            font-family: 'Pretendard', sans-serif; 
+            background-color: #0f172a; color: #f8fafc; 
+            letter-spacing: -0.03em; word-break: keep-all;
+        }
+        /* 기사님 가독성을 위한 큼직한 카드 스타일 */
+        .task-card {
+            background: #1e293b; border-radius: 1.5rem;
+            padding: 1.5rem; border: 1px solid #334155;
+            margin-bottom: 1.25rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+        }
+        .address-highlight { color: #ffffff; font-weight: 900; line-height: 1.2; font-size: 24px; }
+        .product-badge { background: #064e3b; color: #34d399; padding: 6px 12px; border-radius: 10px; font-weight: 800; font-size: 16px; border: 1px solid #065f46; }
+        .bottom-ctrl { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; z-index: 1000; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
 </head>
-<body class="pb-32 px-3" id="driver-body">
+<body class="pb-32 px-3">
     <div class="grid grid-cols-3 bg-slate-900 text-white rounded-b-[2.5rem] shadow-2xl mb-6 border-b border-slate-800 py-6 sticky top-0 z-50 backdrop-blur-md bg-opacity-95">
         <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned" class="text-center border-r border-slate-800">
             <div class="text-[10px] text-slate-500 font-black uppercase mb-1">배정대기</div>
@@ -809,138 +699,102 @@ def logi_driver_work():
         </div>
     </div>
 
-<input type="file" id="emergency-file-input" accept="image/*" capture="environment" class="hidden">
-
-<div id="camera-layer" class="fixed inset-0 bg-black z-[9999] hidden flex flex-col items-center justify-center p-4">
-    <div class="relative w-full max-w-md aspect-[3/4] overflow-hidden rounded-[2.5rem] shadow-2xl bg-slate-900 mb-8 border-4 border-slate-800">
-        <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
-        <img id="photo-preview" class="hidden w-full h-full object-cover">
-        <canvas id="canvas" class="hidden"></canvas>
+    <div id="camera-layer" class="fixed inset-0 bg-black z-[5000] hidden flex flex-col items-center justify-center p-4">
+        <div class="relative w-full max-w-md aspect-[3/4] overflow-hidden rounded-[2.5rem] shadow-2xl bg-slate-900 mb-8 border-4 border-slate-800">
+            <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
+            <img id="photo-preview" class="hidden w-full h-full object-cover">
+            <canvas id="canvas" class="hidden"></canvas>
+        </div>
+        <div class="flex gap-4 w-full max-w-md px-2">
+            <button id="capture-btn" type="button" class="flex-1 bg-white text-slate-900 py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform"><i class="fas fa-camera mr-2"></i>사진 촬영</button>
+            <button id="confirm-btn" type="button" class="hidden flex-1 bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform"><i class="fas fa-check-circle mr-2"></i>배송 완료 확정</button>
+            <button id="cancel-camera" type="button" class="w-24 bg-slate-800 text-slate-400 py-6 rounded-2xl font-bold">취소</button>
+        </div>
     </div>
 
-    <div class="flex gap-4 w-full max-w-md px-2">
-        <button id="capture-btn" type="button" class="flex-1 bg-white text-slate-900 py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform">
-            <i class="fas fa-camera mr-2"></i>사진 촬영
-        </button>
-        <button id="confirm-btn" type="button" class="hidden flex-1 bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform">
-            <i class="fas fa-check-circle mr-2"></i>배송 완료 확정
-        </button>
-        <button id="cancel-camera" type="button" class="w-24 bg-slate-800 text-slate-400 py-6 rounded-2xl font-bold">취소</button>
-    </div>
-</div>
-<script>
-    let currentTaskId = null; 
-    let stream = null;
-    let currentBaseSize = 15; 
+    <script>
+        let currentSize = 15;
+        let currentTaskId = null; 
+        let stream = null;
 
-    // 1. 폰트 크기 조절
-    function changeFontSize(delta) {
-        const body = document.getElementById('driver-body');
-        if (!body) return;
-        currentBaseSize += delta;
-        if (currentBaseSize < 12) currentBaseSize = 12;
-        if (currentBaseSize > 35) currentBaseSize = 35;
-        body.style.fontSize = currentBaseSize + 'px';
-        document.querySelectorAll('.address-highlight').forEach(el => el.style.fontSize = (currentBaseSize + 7) + 'px');
-        document.querySelectorAll('.product-badge').forEach(el => el.style.fontSize = (currentBaseSize + 1) + 'px');
-    }
+        function changeFontSize(d) { 
+            currentSize += d; 
+            if(currentSize < 12) currentSize = 12; if(currentSize > 35) currentSize = 35; 
+            document.getElementById('driver-body').style.fontSize = currentSize+'px';
+        }
 
-    // 2. 카메라 UI 열기
-    async function openCameraUI(tid) {
-        currentTaskId = tid;
-        const video = document.getElementById('video');
-        const layer = document.getElementById('camera-layer');
-        try {
-            stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: { ideal: "environment" } } 
+        function toggleDriverAll(master) {
+            document.querySelectorAll('.task-check').forEach(cb => cb.checked = master.checked);
+        }
+
+        async function bulkPickup() {
+            const ids = Array.from(document.querySelectorAll('.task-check:checked')).map(cb => cb.value);
+            if(ids.length === 0) return alert("항목을 선택해주세요.");
+            if(!confirm(ids.length + "건을 일괄 상차 처리할까요?")) return;
+            const res = await fetch('{{ url_for("logi.logi_bulk_pickup") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ task_ids: ids })
             });
-            video.srcObject = stream;
-            layer.classList.remove('hidden');
-            video.classList.remove('hidden');
+            const result = await res.json();
+            if(result.success) location.reload();
+        }
+
+        async function secureStatus(tid, status) {
+            if(confirm("["+status+"] 처리를 진행할까요?")) {
+                await fetch('{{ url_for("logi.logi_update_task_status", tid=0, new_status="X") }}'.replace('0', tid).replace('X', status));
+                location.reload();
+            }
+        }
+
+        async function openCameraUI(tid){
+            currentTaskId = tid; 
+            document.getElementById('camera-layer').classList.remove('hidden');
+            try { 
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); 
+                document.getElementById('video').srcObject = stream; 
+            } catch (e) { alert("카메라 권한 오류: " + e); }
+        }
+
+        document.getElementById('capture-btn').onclick = () => {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const previewImg = document.getElementById('photo-preview');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            previewImg.src = dataUrl;
+            video.style.display = 'none'; 
+            previewImg.classList.remove('hidden');
+            document.getElementById('capture-btn').classList.add('hidden');
+            document.getElementById('confirm-btn').classList.remove('hidden');
+        };
+
+        document.getElementById('confirm-btn').onclick = async () => {
+            const photo = document.getElementById('photo-preview').src;
+            const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ photo: photo }) 
+            });
+            const data = await res.json();
+            if(data.success) {
+                const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문하신 상품이 문 앞에 배송 완료되었습니다. 🧺`;
+                const smsUrl = `sms:${data.phone}${navigator.userAgent.match(/iPhone/i) ? '&' : '?'}body=${encodeURIComponent(msg)}`;
+                location.href = smsUrl;
+                if(stream) stream.getTracks().forEach(t => t.stop());
+                setTimeout(() => location.reload(), 500);
+            }
+        };
+
+        document.getElementById('cancel-camera').onclick = () => { 
+            if(stream) stream.getTracks().forEach(t => t.stop()); 
+            document.getElementById('camera-layer').classList.add('hidden'); 
+            document.getElementById('video').style.display = 'block';
             document.getElementById('photo-preview').classList.add('hidden');
             document.getElementById('capture-btn').classList.remove('hidden');
             document.getElementById('confirm-btn').classList.add('hidden');
-            document.body.style.overflow = 'hidden';
-        } catch (e) {
-            alert("카메라를 켤 수 없습니다. 권한 설정을 확인하세요.");
-        }
-    }
-
-    // 3. 사진 촬영
-    document.getElementById('capture-btn').onclick = () => {
-        const v = document.getElementById('video');
-        const c = document.getElementById('canvas');
-        const p = document.getElementById('photo-preview');
-        c.width = 800;
-        c.height = v.videoHeight * (800 / v.videoWidth);
-        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-        p.src = c.toDataURL('image/jpeg', 0.8);
-        v.classList.add('hidden');
-        p.classList.remove('hidden');
-        document.getElementById('capture-btn').classList.add('hidden');
-        document.getElementById('confirm-btn').classList.remove('hidden');
-    };
-
-    // 4. 배송 완료 확정 (에러 수정된 핵심 로직)
-    document.getElementById('confirm-btn').onclick = async () => {
-        const btn = document.getElementById('confirm-btn');
-        if(btn.disabled) return;
-        btn.disabled = true;
-        btn.innerText = "서버 저장 중...";
-
-        const photoData = document.getElementById('photo-preview').src;
-        const targetUrl = '{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId);
-        
-        try {
-            const res = await fetch(targetUrl, { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ photo: photoData }) 
-            });
-            const data = await res.json();
-
-            if(data.success) {
-                // 레이어 닫기 및 초기화
-                document.getElementById('camera-layer').classList.add('hidden');
-                document.body.style.overflow = 'auto';
-                if(stream) stream.getTracks().forEach(t => t.stop());
-
-                // 문자 전송 앱 호출
-                const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 배송 완료되었습니다. 🧺\n사진확인: https://basam.co.kr${data.photo_url}`;
-                const isIphone = navigator.userAgent.match(/iPhone/i);
-                location.href = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
-
-                // 배정창으로 복귀
-                setTimeout(() => { 
-                    location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
-                }, 1000);
-            } else {
-                alert("오류: " + data.error);
-                btn.disabled = false;
-            }
-        } catch (e) {
-            alert("서버 통신 실패");
-            btn.disabled = false;
-        }
-    };
-
-    // 5. 취소 버튼
-    document.getElementById('cancel-camera').onclick = () => { 
-        if(stream) stream.getTracks().forEach(t => t.stop());
-        document.getElementById('camera-layer').classList.add('hidden'); 
-        document.body.style.overflow = 'auto';
-    };
-
-    function toggleDriverAll(master) {
-        document.querySelectorAll('.task-check').forEach(cb => cb.checked = master.checked);
-    }
-    
-    async function secureStatus(tid, status) {
-        if(confirm("["+status+"] 처리를 진행할까요?")) {
-            location.href = `/logi/update_status/${tid}/${status}`;
-        }
-    }
-</script>
+        };
+    </script>
 </body>
 </html>
     """
@@ -949,48 +803,10 @@ def logi_driver_work():
 # --------------------------------------------------------------------------------
 # 8. 핵심 비즈니스 로직 & API (모든 기능 통합 복구)
 # --------------------------------------------------------------------------------
-# 솔라피 설정 (관리자 페이지에서 환경변수화 권장)
-SOLAPI_API_KEY = 'NCSFMENLMWQDMAVG'
-SOLAPI_API_SECRET = 'WFCUQXKPU8YUTHWE4QKKXLWMBVZMK8ON'
-SOLAPI_SENDER = '01066681661' # 하이픈 제거
-
-def get_solapi_header():
-    date = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-    salt = str(uuid.uuid4().hex)
-    combined = date + salt
-    signature = hmac.new(SOLAPI_API_SECRET.encode('utf-8'), combined.encode('utf-8'), hashlib.sha256).hexdigest()
-    return {
-        'Authorization': f'HMAC-SHA256 apiKey={SOLAPI_API_KEY}, date={date}, salt={salt}, signature={signature}',
-        'Content-Type': 'application/json; charset=utf-8'
-    }
-
-def send_solapi_message(to_phone, text, order_id=None, msg_type="알림"):
-    url = "https://api.solapi.com/messages/v4/send"
-    payload = {
-        "message": {
-            "to": to_phone.replace('-', ''),
-            "from": SOLAPI_SENDER,
-            "text": text
-        }
-    }
-    try:
-        res = requests.post(url, json=payload, headers=get_solapi_header())
-        # 발송 이력 기록 (MessageLog 활용)
-        new_msg = MessageLog(order_id=order_id, message_type=msg_type, phone=to_phone, message=text, status="발송완료")
-        db_delivery.session.add(new_msg)
-        db_delivery.session.commit()
-        return res.json()
-    except Exception as e:
-        print(f"SMS 발송 에러: {e}")
-        return None
-
-
-
 
 @logi_bp.route('/api/logs/<int:tid>')
 def logi_get_task_logs(tid):
-    # MessageLog를 사용하여 통합 로그(시스템로그 + 메시지로그) 반환
-    logs = MessageLog.query.filter_by(task_id=tid).order_by(MessageLog.created_at.desc()).all()
+    logs = DeliveryLog.query.filter_by(task_id=tid).order_by(DeliveryLog.created_at.desc()).all()
     return jsonify([{"time": l.created_at.strftime('%m-%d %H:%M'), "msg": l.message} for l in logs])
 
 @logi_bp.route('/sync')
@@ -1066,110 +882,27 @@ def logi_bulk_pickup():
             t.status, t.pickup_at = '픽업', datetime.now()
             logi_add_log(t.id, t.order_id, '픽업', '일괄 상차 완료 처리')
     db_delivery.session.commit(); return jsonify({"success": True})
-# 상태 업데이트 API (BuildError 해결 버전)
+
 @logi_bp.route('/update_status/<int:tid>/<string:new_status>')
 def logi_update_task_status(tid, new_status):
-    """배송 건의 상태(픽업 등)를 업데이트하고 이전 페이지로 복귀"""
     t = DeliveryTask.query.get(tid)
-    if not t:
-        return "Task not found", 404
-    
-    if t.status == '완료':
-        return "수정불가", 403
+    if t:
+        if t.status == '완료': return "수정불가", 403
+        old = t.status; t.status = new_status
+        if new_status == '픽업': t.pickup_at = datetime.now()
+        logi_add_log(t.id, t.order_id, new_status, f'{old} -> {new_status} 상태 변경')
+        db_delivery.session.commit()
+    return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
 
-    old_status = t.status
-    t.status = new_status
-    
-    # 상차(픽업) 시 시간 기록 및 알림톡 발송
-    if new_status == '픽업':
-        t.pickup_at = datetime.now()
-        pickup_msg = f"[바구니삼촌] {t.customer_name}님, 기사가 배송을 시작했습니다. 순차적으로 배송됩니다."
-        try:
-            send_solapi_message(t.phone, pickup_msg, t.order_id, "기사픽업")
-        except:
-            pass
-            
-    # 로그 기록
-    try:
-        logi_add_log(t.id, t.order_id, new_status, f'{old_status} -> {new_status} 상태 변경')
-    except:
-        pass
-
-    db_delivery.session.commit()
-    
-    # 호출한 페이지(referrer)로 돌아가거나, 없으면 대시보드로 이동
-    target_url = request.referrer if request.referrer else url_for('logi.logi_admin_dashboard')
-    return redirect(target_url)
 @logi_bp.route('/complete_action/<int:tid>', methods=['POST'])
 def logi_complete_action(tid):
-    """
-    배송 완료 처리: 이미지 저장 + DB 업데이트 + 알림 발송
-    Render 클라우드 배포 환경 최적화 버전
-    """
-    t = DeliveryTask.query.get(tid)
-    d = request.json
-    photo_b64 = d.get('photo')
-
-    if not t or not photo_b64:
-        return jsonify({"success": False, "error": "데이터가 유효하지 않거나 태스크를 찾을 수 없습니다."})
-
-    try:
-        # 1. 이미지 데이터 처리 (Base64 디코딩)
-        try:
-           # 1. 이미지 데이터 안전하게 디코딩
-            try:
-                header, encoded = photo_b64.split(",", 1)
-                img_data = base64.b64decode(encoded)
-            except Exception as e:
-                return jsonify({"success": False, "error": f"이미지 데이터 처리 실패: {str(e)}"})
-
-            # 2. 파일명 및 절대 경로 생성
-            filename = f"proof_{t.order_id}_{datetime.now().strftime('%H%M%S')}.jpg"
-            filepath = os.path.join(PROOF_FOLDER, filename)
-
-            # 3. 파일 쓰기 (절대 경로 보장)
-            with open(filepath, "wb") as f:
-                f.write(img_data)
-        except Exception as e:
-            print(f"❌ 파일 저장 시스템 에러: {str(e)}")
-            return jsonify({"success": False, "error": f"서버 파일 시스템 오류: {str(e)}"})
-
-        # 4. 데이터베이스 업데이트
-        # 웹 브라우저에서 접근 가능한 상대 경로를 저장합니다.
-        t.photo_data = f"/static/proof_photos/{filename}"
-        t.status = '완료'
-        t.completed_at = datetime.now()
-        
-        # 5. 시스템 로그 기록 (메인 업데이트와 독립적으로 실행)
-        try:
-            logi_add_log(t.id, t.order_id, '완료', '기사가 사진 촬영 후 배송 완료 처리함')
-        except:
-            pass # 로그 기록 실패가 배송 처리를 막지 않음
-
-        # 6. DB 커밋 (최종 확정)
+    t = DeliveryTask.query.get(tid); d = request.json
+    if t:
+        t.status, t.completed_at, t.photo_data = '완료', datetime.now(), d.get('photo')
+        logi_add_log(t.id, t.order_id, '완료', '기사 배송 완료 및 안내 전송')
         db_delivery.session.commit()
-        
-        # 7. 솔라피 알림 발송 (커밋 후 실행하여 발송 실패 시에도 DB는 유지)
-        try:
-            full_photo_url = f"https://basam.co.kr{t.photo_data}"
-            complete_msg = f"[바구니삼촌] 배송이 완료되었습니다. 지정된 장소를 확인해주세요!\n사진확인: {full_photo_url}"
-            send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
-        except Exception as e:
-            print(f"⚠️ 솔라피 발송 지연 혹은 실패 (무시됨): {str(e)}")
-
-        return jsonify({
-            "success": True, 
-            "customer": t.customer_name, 
-            "phone": t.phone, 
-            "photo_url": t.photo_data
-        })
-
-    except Exception as e:
-        print(f"❌ 예상치 못한 서버 오류: {str(e)}")
-        db_delivery.session.rollback()
-        return jsonify({"success": False, "error": f"서버 처리 오류: {str(e)}"})
-            
-    return jsonify({"success": False, "error": "유효하지 않은 데이터"})
+        return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone})
+    return jsonify({"success": False})
 
 # --------------------------------------------------------------------------------
 # 9. 기사/사용자 설정 및 지도 (복구 완료)
@@ -1179,61 +912,62 @@ def logi_complete_action(tid):
 def logi_driver_mgmt():
     if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
     drivers = Driver.query.all()
-    # 공통 접속 주소
+    # 공통 접속 주소 (토큰 없음)
     work_url = request.host_url.rstrip('/') + "/logi/work"
     
     return render_template_string("""
+                                  
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <body class="bg-slate-50 p-6 font-bold">
+    <body class="bg-slate-50 p-6">
         <div class="max-w-md mx-auto">
-            <nav class="mb-8 flex justify-between items-center">
-                <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i>관제로 돌아가기</a>
-            </nav>
-
-            <h2 class="font-black mb-8 text-2xl text-slate-800 italic uppercase tracking-tighter">Driver Management</h2>
-            
-            <form action="{{ url_for('logi.logi_add_driver') }}" method="POST" class="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 mb-10 space-y-5">
-                <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest px-1">기사 신규 등록</p>
-                <input name="name" placeholder="기사님 성함" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm outline-none focus:ring-2 focus:ring-green-500" required>
-                <input name="phone" placeholder="전화번호 (010-0000-0000)" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm outline-none focus:ring-2 focus:ring-green-500" required>
-                <button class="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-lg hover:bg-black transition active:scale-95">기사님 등록하기</button>
+            <nav class="mb-8"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i>돌아가기</a></nav>
+            <h2 class="font-black mb-8 text-2xl text-slate-800 italic uppercase">Driver Management</h2>
+            <form action="{{ url_for('logi.logi_add_driver') }}" method="POST" class="bg-white p-8 rounded-[2.5rem] shadow-xl border mb-10 space-y-5">
+                <input name="name" placeholder="기사님 성함" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm" required>
+                <input name="phone" placeholder="전화번호 (인증용)" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm" required>
+                <button class="w-full bg-green-600 text-white py-5 rounded-2xl font-black text-lg shadow-lg hover:bg-green-700 transition active:scale-95">신규 기사 생성</button>
             </form>
-
-            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest px-2 mb-4">등록된 기사 목록 ({{ drivers|length }}명)</p>
-            
             <div class="space-y-4">
                 {% for d in drivers %}
-                <div class="bg-white p-6 rounded-[2rem] border border-slate-100 flex justify-between items-center shadow-md">
-                    <div>
-                        <p class="font-black text-slate-800 text-lg">{{ d.name }}</p>
-                        <p class="text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
-                    </div>
-                    <div class="flex gap-2">
-                        <button onclick="copyDriverUrl()" class="bg-green-50 text-green-600 px-4 py-2 rounded-xl font-black text-[10px] border border-green-100 active:scale-90 transition">주소복사</button>
-                        <a href="{{ url_for('logi.logi_delete_driver', did=d.id) }}" onclick="return confirm('정말 삭제할까요?')" class="text-slate-300 hover:text-red-500 transition p-2 text-sm"><i class="fas fa-trash-alt"></i></a>
-                    </div>
+<div class="bg-white p-6 rounded-[2rem] border flex justify-between items-center shadow-md border-slate-100">
+        <div>
+            <p class="font-black text-slate-800 text-lg">{{ d.name }}</p>
+            <p class="text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="copyUrl()" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-black text-[10px] border border-blue-100">접속주소 복사</button>
+            <button onclick="secureDelete({{d.id}})" class="text-red-300 hover:text-red-500 transition p-3"><i class="fas fa-trash-alt"></i></button>
+        </div>
+    </div>
+<div class="flex justify-around py-6 bg-slate-900 text-white rounded-b-[2rem] shadow-lg mb-4">
+    <div class="text-center">
+        <div class="text-[10px] text-slate-400 mb-1">배정 중</div>
+        <div class="text-xl font-black text-blue-400">{{ assigned_count }}<span class="text-xs ml-0.5">건</span></div>
+        <div class="text-sm font-bold">배정</div>
+    </div>
+    <div class="text-center border-x border-slate-800 px-8">
+        <div class="text-[10px] text-slate-400 mb-1">픽업 대기</div>
+        <div class="text-xl font-black text-yellow-400">{{ picking_count }}<span class="text-xs ml-0.5">건</span></div>
+        <div class="text-sm font-bold">픽업</div>
+    </div>
+    <div class="text-center">
+        <div class="text-[10px] text-slate-400 mb-1">오늘 성공</div>
+        <div class="text-xl font-black text-green-400">{{ complete_today }}<span class="text-xs ml-0.5">건</span></div>
+        <div class="text-sm font-bold">완료</div>
+    </div>
+</div>
                 </div>
                 {% endfor %}
             </div>
-            
-            {% if not drivers %}
-            <div class="py-20 text-center text-slate-300 font-bold italic text-sm">등록된 기사님이 없습니다.</div>
-            {% endif %}
         </div>
-
-        <script>
-            function copyDriverUrl() {
-                const t = document.createElement("input");
-                document.body.appendChild(t);
-                t.value = "{{ work_url }}";
-                t.select();
-                document.execCommand("copy");
-                document.body.removeChild(t);
-                alert("기사용 접속 주소가 복사되었습니다.\\n기사님께 이 주소를 보내주시면 성함과 번호로 로그인이 가능합니다.");
-            }
-        </script>
-    </body>
+<script>
+        function copyUrl() {
+            const t = document.createElement("input"); document.body.appendChild(t); 
+            t.value = "{{work_url}}"; t.select();
+            document.execCommand("copy"); document.body.removeChild(t); 
+            alert("기사용 접속 주소가 복사되었습니다.\\n기사님은 성함과 전화번호로 로그인하시면 됩니다.");
+        }
+    </script>
     """, drivers=drivers, work_url=work_url)
 
 @logi_bp.route('/driver/add', methods=['POST'])
