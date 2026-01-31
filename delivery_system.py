@@ -954,20 +954,25 @@ document.getElementById('capture-btn').onclick = () => {
 };
 };
 
-        document.getElementById('confirm-btn').onclick = async () => {
-            const photo = document.getElementById('photo-preview').src;
-            const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
-                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ photo: photo }) 
-            });
-            const data = await res.json();
-            if(data.success) {
-                const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문하신 상품이 문 앞에 배송 완료되었습니다. 🧺`;
-                const smsUrl = `sms:${data.phone}${navigator.userAgent.match(/iPhone/i) ? '&' : '?'}body=${encodeURIComponent(msg)}`;
-                location.href = smsUrl;
-                if(stream) stream.getTracks().forEach(t => t.stop());
-                setTimeout(() => location.reload(), 500);
-            }
-        };
+        // 기존 코드의 confirm-btn 클릭 이벤트 수정
+document.getElementById('confirm-btn').onclick = async () => {
+    const photo = document.getElementById('photo-preview').src;
+    const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({ photo: photo }) 
+    });
+    
+    const data = await res.json();
+    if(data.success) {
+        alert("배송 완료 및 알림 발송 요청 성공!");
+        // 문자 앱을 강제로 여는 대신, 서버에서 이미 발송했으므로 바로 종료
+        if(stream) stream.getTracks().forEach(t => t.stop());
+        setTimeout(() => location.reload(), 500);
+    } else {
+        alert("오류 발생: " + data.error);
+    }
+};
 
         document.getElementById('cancel-camera').onclick = () => { 
             if(stream) stream.getTracks().forEach(t => t.stop()); 
@@ -1143,15 +1148,26 @@ def logi_complete_action(tid):
             t.photo_data = f"/static/proof_photos/{filename}"
             t.status = '완료'
             t.completed_at = datetime.now()
-
-            # 3. [솔라피 추가] 배송 완료 문자 (사진 링크 포함)
-            full_photo_url = f"https://basam.co.kr{t.photo_data}" 
-            complete_msg = (f"[바구니삼촌] 배송이 완료되었습니다. 지정된 장소를 확인해주세요!\n"
-                            f"아래 링크에서 배송사진을 확인하세요.\n{full_photo_url}")
-            send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
-
+            
+            # DB 반영 (문자 발송 전 상태 확정)
             db_delivery.session.commit()
+
+            # 3. [솔라피 자동 발송] 
+            # 외부에서 접속 가능한 전체 URL 생성
+            full_photo_url = f"https://basam.co.kr{t.photo_data}" 
+            complete_msg = (f"[바구니삼촌] 배송완료! 🧺\n\n"
+                            f"{t.customer_name}님, 주문하신 상품이 배송되었습니다.\n"
+                            f"배송사진 확인: {full_photo_url}\n\n"
+                            f"이용해주셔서 감사합니다.")
+            
+            # 서버에서 직접 솔라피 API 호출 (기사 휴대폰 문자앱 연동 아님)
+            send_result = send_solapi_message(t.phone, complete_msg, t.order_id, "배송완료")
+            
+            # 발송 로그 기록
+            logi_add_log(t.id, t.order_id, '알림발송', f'배송완료 문자 발송 완료')
+
             return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone})
+            
         except Exception as e:
             db_delivery.session.rollback()
             return jsonify({"success": False, "error": str(e)})
