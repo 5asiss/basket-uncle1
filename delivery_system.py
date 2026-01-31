@@ -359,13 +359,16 @@ function viewAdminPhoto(data) {
 }
 </script>
 
-        <script>
-            let currentSize = 12;
-            function changeFontSize(delta) {
-                currentSize += delta;
-                if(currentSize < 10) currentSize = 10;
-                if(currentSize > 20) currentSize = 20;
-                document.getElementById('app-body').style.fontSize = currentSize + 'px';
+        // 1. 폰트 크기 조절 기능
+    function changeFontSize(delta) {
+        const body = document.getElementById('driver-body');
+        if (!body) return;
+        currentBaseSize += delta;
+        if (currentBaseSize < 12) currentBaseSize = 12;
+        if (currentBaseSize > 35) currentBaseSize = 35;
+        body.style.fontSize = currentBaseSize + 'px';
+        document.querySelectorAll('.address-highlight').forEach(el => el.style.fontSize = (currentBaseSize + 7) + 'px');
+        document.querySelectorAll('.product-badge').forEach(el => el.style.fontSize = (currentBaseSize + 1) + 'px');
             }
 
             // [추가] 카테고리별 전체 선택 기능
@@ -782,7 +785,6 @@ def logi_driver_work():
     </div>
 
 <input type="file" id="emergency-file-input" accept="image/*" capture="environment" class="hidden">
-<input type="file" id="emergency-file-input" accept="image/*" capture="environment" class="hidden">
 
 <div id="camera-layer" class="fixed inset-0 bg-black z-[9999] hidden flex flex-col items-center justify-center p-4">
     <div class="relative w-full max-w-md aspect-[3/4] overflow-hidden rounded-[2.5rem] shadow-2xl bg-slate-900 mb-8 border-4 border-slate-800">
@@ -790,356 +792,165 @@ def logi_driver_work():
         <img id="photo-preview" class="hidden w-full h-full object-cover">
         <canvas id="canvas" class="hidden"></canvas>
     </div>
+
     <div class="flex gap-4 w-full max-w-md px-2">
-        <button id="capture-btn" class="flex-1 bg-white text-slate-900 py-6 rounded-2xl font-black text-xl"><i class="fas fa-camera mr-2"></i>사진 촬영</button>
-        <button id="confirm-btn" class="hidden flex-1 bg-green-600 text-white py-6 rounded-2xl font-black text-xl"><i class="fas fa-check-circle mr-2"></i>배송 확정</button>
-        <button id="cancel-camera" class="w-24 bg-slate-800 text-slate-400 py-6 rounded-2xl font-bold">취소</button>
+        <button id="capture-btn" type="button" class="flex-1 bg-white text-slate-900 py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform">
+            <i class="fas fa-camera mr-2"></i>사진 촬영
+        </button>
+        <button id="confirm-btn" type="button" class="hidden flex-1 bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform">
+            <i class="fas fa-check-circle mr-2"></i>배송 완료 확정
+        </button>
+        <button id="cancel-camera" type="button" class="w-24 bg-slate-800 text-slate-400 py-6 rounded-2xl font-bold">취소</button>
     </div>
 </div>
-            <img id="photo-preview" class="hidden w-full h-full object-cover">
-            <canvas id="canvas" class="hidden"></canvas>
-        </div>
-        <div class="flex gap-4 w-full max-w-md px-2">
-            <button id="capture-btn" type="button" class="flex-1 bg-white text-slate-900 py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform"><i class="fas fa-camera mr-2"></i>사진 촬영</button>
-            <button id="confirm-btn" type="button" class="hidden flex-1 bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform"><i class="fas fa-check-circle mr-2"></i>배송 완료 확정</button>
-            <button id="cancel-camera" type="button" class="w-24 bg-slate-800 text-slate-400 py-6 rounded-2xl font-bold">취소</button>
-        </div>
-    </div>
+<script>
+    let currentTaskId = null; 
+    let stream = null;
+    let currentBaseSize = 15; 
 
-    <script>
-        let currentSize = 15;
-        let currentTaskId = null; 
-        let stream = null;
+    // 1. 폰트 크기 조절 기능
+    function changeFontSize(delta) {
+        const body = document.getElementById('driver-body');
+        if (!body) return;
+        currentBaseSize += delta;
+        if (currentBaseSize < 12) currentBaseSize = 12;
+        if (currentBaseSize > 35) currentBaseSize = 35;
+        body.style.fontSize = currentBaseSize + 'px';
+        document.querySelectorAll('.address-highlight').forEach(el => el.style.fontSize = (currentBaseSize + 7) + 'px');
+        document.querySelectorAll('.product-badge').forEach(el => el.style.fontSize = (currentBaseSize + 1) + 'px');
+    }
 
-       let currentBaseSize = 15; 
-
-function changeFontSize(delta) {
-    const body = document.getElementById('driver-body');
-    if (!body) return;
-
-    // 1. 크기 계산 (최소 12px ~ 최대 35px 제한)
-    currentBaseSize += delta;
-    if (currentBaseSize < 12) currentBaseSize = 12;
-    if (currentBaseSize > 35) currentBaseSize = 35;
-
-    // 2. 전체 본문 크기 변경
-    body.style.fontSize = currentBaseSize + 'px';
-
-    // 3. [추가] 주소나 품목 텍스트처럼 중요한 부분은 비례해서 더 커지도록 처리
-    document.querySelectorAll('.address-highlight').forEach(el => {
-        el.style.fontSize = (currentBaseSize + 7) + 'px';
-    });
-    document.querySelectorAll('.product-badge').forEach(el => {
-        el.style.fontSize = (currentBaseSize + 1) + 'px';
-    });
-}
-
-        function toggleDriverAll(master) {
-            document.querySelectorAll('.task-check').forEach(cb => cb.checked = master.checked);
-        }
-
-        async function bulkPickup() {
-            const ids = Array.from(document.querySelectorAll('.task-check:checked')).map(cb => cb.value);
-            if(ids.length === 0) return alert("항목을 선택해주세요.");
-            if(!confirm(ids.length + "건을 일괄 상차 처리할까요?")) return;
-            const res = await fetch('{{ url_for("logi.logi_bulk_pickup") }}', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ task_ids: ids })
-            });
-            const result = await res.json();
-            if(result.success) location.reload();
-        }
-
-        async function secureStatus(tid, status) {
-            if(confirm("["+status+"] 처리를 진행할까요?")) {
-                await fetch('{{ url_for("logi.logi_update_task_status", tid=0, new_status="X") }}'.replace('0', tid).replace('X', status));
-                location.reload();
-            }
-        }
-
-        // 통합된 배송 완료 처리 함수
-async function openCameraUI(tid) {
-    currentTaskId = tid;
-    
-    try {
-        // 1. 카메라 스트림 시도 (후면 카메라 우선)
-        stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: { ideal: "environment" } } 
-        });
-
+    // 2. 카메라 UI 열기 (배송 완료 버튼 클릭 시)
+    async function openCameraUI(tid) {
+        currentTaskId = tid;
         const video = document.getElementById('video');
-        video.srcObject = stream;
-        
-        // 카메라 레이어 표시
-        document.getElementById('camera-layer').classList.remove('hidden');
-        video.classList.remove('hidden');
-        document.getElementById('photo-preview').classList.add('hidden');
-        document.getElementById('capture-btn').classList.remove('hidden');
-        document.getElementById('confirm-btn').classList.add('hidden');
-        
-    } catch (e) {
-        console.error("카메라 실행 실패:", e);
-        
-        // 2. 카메라 실패 시 갤러리/파일 선택창 실행 (비상 로직)
-        if (confirm("카메라를 켤 수 없습니다. 갤러리에서 사진을 선택하여 배송 완료하시겠습니까?")) {
-            const fileInput = document.getElementById('emergency-file-input');
-            if(!fileInput) {
-                alert("시스템 오류: emergency-file-input 요소가 없습니다.");
-                return;
-            }
-            fileInput.click(); 
+        const layer = document.getElementById('camera-layer');
+        const preview = document.getElementById('photo-preview');
 
-            fileInput.onchange = async (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = async (e) => {
-                        const base64Photo = e.target.result;
-                        // 선택 시 즉시 업로드 함수 호출
-                        await uploadPhotoDirectly(currentTaskId, base64Photo);
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
-        }
-    }
-}
-
-// 갤러리 사진 전용 업로드 함수
-async function uploadPhotoDirectly(tid, photoData) {
-    const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', tid), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photo: photoData })
-    });
-    const data = await res.json();
-    if (data.success) {
-        alert("배송 완료 처리되었습니다.");
-        location.reload();
-    } else {
-        alert("업로드 실패: " + data.error);
-    }
-}
-    
-    try {
-        // 1. 카메라 스트림 시도
-        stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: { ideal: "environment" } } 
-        });
-        
-        document.getElementById('video').srcObject = stream;
-        document.getElementById('camera-layer').classList.remove('hidden');
-        
-    } catch (e) {
-        console.error("카메라 권한 없음:", e);
-        
-        // 2. 카메라 실패 시 비상용 갤러리/파일 선택창 실행
-        if (confirm("카메라 권한이 거부되었거나 지원하지 않는 브라우저입니다.\n갤러리에서 직접 사진을 선택하시겠습니까?")) {
-            const fileInput = document.getElementById('emergency-file-input');
-            fileInput.click(); // 파일 선택창 강제 실행
-
-            // 파일 선택 시 바로 배송 완료 처리로 연결
-            fileInput.onchange = async (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = async (e) => {
-                        const base64Photo = e.target.result;
-                        // 선택한 사진으로 바로 완료 API 호출
-                        await uploadPhotoDirectly(currentTaskId, base64Photo);
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
-        }
-    }
-}
-
-// 갤러리 사진 선택 시 바로 서버로 쏘는 함수
-async function uploadPhotoDirectly(tid, photoData) {
-    const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', tid), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photo: photoData })
-    });
-    const data = await res.json();
-    if (data.success) {
-        alert("갤러리 사진으로 배송 완료 처리되었습니다.");
-        location.reload();
-    } else {
-        alert("업로드 실패: " + data.error);
-    }
-}
-    } catch (e) { 
-        console.error("카메라 에러:", e);
-        alert("카메라 권한이 거부되었습니다.\n\n[해결방법]\n1. 브라우저 주소창 왼쪽/오른쪽의 설정 아이콘 클릭\n2. 카메라 권한을 '허용'으로 변경\n3. 페이지 새로고침 후 다시 시도해주세요.");
-    }
-}
-
-// 사진 촬영 버튼 클릭 시
-document.getElementById('capture-btn').onclick = () => {
-    const v = document.getElementById('video');
-    const c = document.getElementById('canvas');
-    const p = document.getElementById('photo-preview');
-
-    // 캔버스 크기 최적화 (가로 800px)
-    c.width = 800;
-    c.height = v.videoHeight * (800 / v.videoWidth);
-    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-    
-    // 미리보기 이미지 생성
-    p.src = c.toDataURL('image/jpeg', 0.7);
-
-    // 카메라 즉시 종료하여 자원 해제
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        stream = null;
-    }
-
-    // UI 전환: 비디오 숨기고 사진 표시
-    v.style.display = 'none'; 
-    v.classList.add('hidden');
-    p.classList.remove('hidden');
-    
-    document.getElementById('capture-btn').classList.add('hidden');
-    document.getElementById('confirm-btn').classList.remove('hidden');
-};
-// 확정 버튼 클릭 시 서버 전송
-// 통합 로직: 서버 저장 + 기사폰 문자 발송 연동
-// 문자 앱 실행 후, '배정대기' 화면으로 자동 이동
-document.getElementById('confirm-btn').onclick = async () => {
-    const confirmBtn = document.getElementById('confirm-btn');
-    if(confirmBtn.disabled) return;
-    confirmBtn.disabled = true;
-    confirmBtn.innerText = "처리 중...";
-
-    const photoData = document.getElementById('photo-preview').src;
-    
-    try {
-        const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({ photo: photoData }) 
-        });
-        const data = await res.json();
-
-       if(data.success) {
-            // 1. 카메라 레이어를 즉시 숨김 (가장 먼저 실행)
-            document.getElementById('camera-layer').classList.add('hidden');
-            document.body.style.overflow = 'auto'; // 스크롤 복구
-
-            // 2. 카메라 스트림 종료
-            if(stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-
-            // 3. 문자 전송용 정보 구성
-            const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 상품 배송이 완료되었습니다.\n사진확인: https://basam.co.kr${data.photo_url}`;
-            const isIphone = navigator.userAgent.match(/iPhone/i);
-            const smsUrl = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
-            
-            // 4. 문자 앱 실행 및 배정 리스트(assigned)로 강제 이동
-            location.href = smsUrl;
-            
-            setTimeout(() => { 
-                location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
-            }, 1000);
-        }, 300); 
-        } else {
-            alert("오류: " + data.error);
-            confirmBtn.disabled = false;
-            confirmBtn.innerText = "다시 시도";
-        }
-    } catch (e) {
-        alert("네트워크 오류");
-        confirmBtn.disabled = false;
-    }
-};
-};
-
-        // 확정 버튼 클릭 시 호출되는 최종 로직
-document.getElementById('confirm-btn').onclick = async () => {
-    const confirmBtn = document.getElementById('confirm-btn');
-    if(confirmBtn.disabled) return;
-    
-    confirmBtn.disabled = true;
-    confirmBtn.innerText = "서버 저장 중...";
-
-    const photoData = document.getElementById('photo-preview').src;
-    
-    try {
-        // [중요] fetch 앞에 await를 두어 서버 응답이 올 때까지 기다립니다.
-        const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
-            document.getElementById('camera-layer').classList.add('hidden');
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({ photo: photoData }) 
-        });
-        
-        if (!res.ok) throw new Error('서버 응답 실패');
-        const data = await res.json();
-
-        if(data.success) {
-            // 서버에 데이터가 안전하게 저장된 후 문자를 보냅니다.
-            const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문 상품 배송 완료되었습니다.\n사진: https://basam.co.kr${data.photo_url}`;
-            const isIphone = navigator.userAgent.match(/iPhone/i);
-            const smsUrl = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
-            
-            // 카메라 자원 해제
-            if(stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-
-            // 1. 문자 앱 실행
-            location.href = smsUrl;
-
-            // 2. 문자 앱으로 넘어간 뒤, 잠시 후 배정 리스트(assigned)로 이동
-            setTimeout(() => { 
-                location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
-            }, 800); 
-        } else {
-            alert("서버 저장 실패: " + data.error);
-            confirmBtn.disabled = false;
-            confirmBtn.innerText = "다시 시도";
-        }
-    } catch (e) {
-        console.error(e);
-        alert("네트워크 오류: 배송 완료 처리가 되지 않았습니다.");
-        confirmBtn.disabled = false;
-        confirmBtn.innerText = "배송 완료 확정";
-    }
-};
-                const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문하신 상품이 문 앞에 배송 완료되었습니다. 🧺`;
-                const smsUrl = `sms:${data.phone}${navigator.userAgent.match(/iPhone/i) ? '&' : '?'}body=${encodeURIComponent(msg)}`;
-                location.href = smsUrl;
-                if(stream) stream.getTracks().forEach(t => t.stop());
-                setTimeout(() => location.reload(), 500);
-            }
-        };
-
-        document.getElementById('cancel-camera').onclick = () => { 
-            if(stream) {
-                stream.getTracks().forEach(t => t.stop());
-                stream = null;
-            }
-            // 레이어 숨기고 비디오 상태 초기화
-            const layer = document.getElementById('camera-layer');
-            layer.classList.add('hidden'); 
-            
-            const v = document.getElementById('video');
-            v.style.display = 'block';
-            v.classList.remove('hidden');
-            
-            document.getElementById('photo-preview').classList.add('hidden');
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: { ideal: "environment" } } 
+            });
+            video.srcObject = stream;
+            layer.classList.remove('hidden');
+            video.classList.remove('hidden');
+            video.style.display = 'block';
+            preview.classList.add('hidden');
             document.getElementById('capture-btn').classList.remove('hidden');
             document.getElementById('confirm-btn').classList.add('hidden');
-            
-            document.body.style.overflow = 'auto'; // 스크롤 차단 해제
-        };
-    </script>
+            document.body.style.overflow = 'hidden'; // 스크롤 방지
+        } catch (e) {
+            console.error("카메라 권한 에러:", e);
+            if (confirm("카메라를 켤 수 없습니다. 갤러리에서 사진을 선택하시겠습니까?")) {
+                document.getElementById('emergency-file-input').click();
+            }
+        }
+    }
+
+    // 3. 비상용 갤러리 업로드 로직
+    document.getElementById('emergency-file-input').onchange = async (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                await uploadPhotoDirectly(currentTaskId, e.target.result);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    async function uploadPhotoDirectly(tid, photoData) {
+        const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', tid), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ photo: photoData })
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert("배송 완료 처리되었습니다.");
+            location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
+        }
+    }
+
+    // 4. 사진 촬영 버튼
+    document.getElementById('capture-btn').onclick = () => {
+        const v = document.getElementById('video');
+        const c = document.getElementById('canvas');
+        const p = document.getElementById('photo-preview');
+
+        c.width = 800;
+        c.height = v.videoHeight * (800 / v.videoWidth);
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        p.src = c.toDataURL('image/jpeg', 0.8);
+
+        v.classList.add('hidden');
+        v.style.display = 'none';
+        p.classList.remove('hidden');
+        document.getElementById('capture-btn').classList.add('hidden');
+        document.getElementById('confirm-btn').classList.remove('hidden');
+    };
+
+    // 5. 배송 완료 확정 (최종 서버 전송 및 문자 연동)
+    document.getElementById('confirm-btn').onclick = async () => {
+        const btn = document.getElementById('confirm-btn');
+        if(btn.disabled) return;
+        btn.disabled = true;
+        btn.innerText = "서버 저장 중...";
+
+        const photoData = document.getElementById('photo-preview').src;
+        
+        try {
+            const res = await fetch('{{ url_for("logi.logi_complete_action", tid=0) }}'.replace('0', currentTaskId), { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ photo: photoData }) 
+            });
+            const data = await res.json();
+
+            if(data.success) {
+                // 카메라 종료 및 레이어 닫기
+                if(stream) stream.getTracks().forEach(t => t.stop());
+                document.getElementById('camera-layer').classList.add('hidden');
+                document.body.style.overflow = 'auto';
+
+                // 문자 메시지 앱 호출
+                const msg = `[바구니삼촌] 안녕하세요, ${data.customer}님! 주문 상품 배송 완료되었습니다. 🧺\n사진확인: https://basam.co.kr${data.photo_url}`;
+                const isIphone = navigator.userAgent.match(/iPhone/i);
+                const smsUrl = `sms:${data.phone}${isIphone ? '&' : '?'}body=${encodeURIComponent(msg)}`;
+                location.href = smsUrl;
+
+                // 배정 리스트로 이동
+                setTimeout(() => { 
+                    location.href = `?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned`;
+                }, 1200); 
+            } else {
+                alert("오류: " + data.error);
+                btn.disabled = false;
+            }
+        } catch (e) {
+            alert("서버 연결 실패");
+            btn.disabled = false;
+        }
+    };
+
+    // 6. 취소 버튼
+    document.getElementById('cancel-camera').onclick = () => { 
+        if(stream) stream.getTracks().forEach(t => t.stop());
+        document.getElementById('camera-layer').classList.add('hidden'); 
+        document.body.style.overflow = 'auto';
+    };
+
+    function toggleDriverAll(master) {
+        document.querySelectorAll('.task-check').forEach(cb => cb.checked = master.checked);
+    }
+    
+    async function secureStatus(tid, status) {
+        if(confirm("["+status+"] 처리를 진행할까요?")) {
+            await fetch('{{ url_for("logi.logi_update_task_status", tid=0, new_status="X") }}'.replace('0', tid).replace('X', status));
+            location.reload();
+        }
+    }
+</script>
 </body>
 </html>
     """
