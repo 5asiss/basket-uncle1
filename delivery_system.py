@@ -303,8 +303,17 @@ def logi_admin_dashboard():
                                     <span class="text-[9px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-black border border-slate-200">
                                         <i class="fas fa-truck mr-0.5 text-slate-300"></i>{{ t.driver_name }}
                                     </span>
-                                    <button onclick="viewTaskLog('{{t.id}}')" class="text-[9px] text-blue-500 font-black flex items-center gap-0.5">
-                                        <i class="fas fa-history"></i> Log보기
+                                   <div class="flex gap-3 items-center">
+    <button onclick="viewTaskLog('{{t.id}}')" class="text-[9px] text-blue-500 font-black flex items-center gap-0.5">
+        <i class="fas fa-history"></i> Log보기
+    </button>
+    
+    {% if t.photo_data %}
+    <button onclick="viewPhoto('{{t.id}}')" class="text-[9px] text-green-600 font-black flex items-center gap-0.5">
+        <i class="fas fa-camera"></i> 사진보기
+    </button>
+    {% endif %}
+</div>
                                     </button>
                                 </div>
                                 <div id="log-view-{{t.id}}" class="hidden mt-2 p-3 bg-slate-50 rounded-xl text-[9px] text-slate-500 border border-dashed border-slate-200 leading-normal"></div>
@@ -393,6 +402,92 @@ def logi_admin_dashboard():
                 else { alert("오류 발생: " + result.error); }
             }
         </script>
+        <div id="photo-modal" class="fixed inset-0 bg-black/90 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
+    <div class="relative max-w-2xl w-full" onclick="event.stopPropagation()">
+        <img id="modal-img" src="" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/10">
+        <button onclick="closePhoto()" class="absolute -top-12 right-0 text-white text-xl font-black">
+            <i class="fas fa-times mr-1"></i> 닫기
+        </button>
+    </div>
+</div>
+
+<script>
+    // 사진 데이터 가져오기 및 모달 띄우기
+    // 수정 후: 강력한 에러 체크 및 모달 제어
+async function viewPhoto(tid) {
+    try {
+        // url_for를 사용하여 경로를 정확히 잡습니다.
+        const res = await fetch('{{ url_for("logi.logi_get_photo", tid=0) }}'.replace('0', tid));
+        const data = await res.json();
+        
+        if(data.success && data.photo) {
+            const modalImg = document.getElementById('modal-img');
+            const modal = document.getElementById('photo-modal');
+            
+            modalImg.src = data.photo; // Base64 데이터를 이미지 소스에 주입
+            modal.classList.remove('hidden'); // 모달 보이기
+            document.body.style.overflow = 'hidden'; // 배경 스크롤 방지
+        } else {
+            alert("저장된 배송 사진을 찾을 수 없습니다.");
+        }
+    } catch(e) {
+        console.error(e);
+        alert("사진을 불러오는 중 네트워크 오류가 발생했습니다.");
+    }
+}
+
+function closePhoto() {
+    document.getElementById('photo-modal').classList.add('hidden');
+    document.getElementById('modal-img').src = "";
+    document.body.style.overflow = 'auto'; // 스크롤 재개
+}
+</script>
+<div id="photo-modal" class="fixed inset-0 bg-black/90 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
+    <div class="relative max-w-2xl w-full" onclick="event.stopPropagation()">
+        <img id="modal-img" src="" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/10">
+        
+        <button onclick="closePhoto()" class="absolute -top-12 right-0 text-white text-xl font-black">
+            <i class="fas fa-times mr-1"></i> 닫기
+        </button>
+    </div>
+</div>
+<div id="photo-modal" class="fixed inset-0 bg-black/90 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
+    <div class="relative max-w-2xl w-full" onclick="event.stopPropagation()">
+        <img id="modal-img" src="" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/10">
+        <button onclick="closePhoto()" class="absolute -top-12 right-0 text-white text-xl font-black">
+            <i class="fas fa-times mr-1"></i> 닫기
+        </button>
+    </div>
+</div>
+
+<script>
+async function viewPhoto(tid) {
+    try {
+        // API 경로를 Flask url_for를 통해 정확히 매칭합니다.
+        const res = await fetch('{{ url_for("logi.logi_get_photo", tid=0) }}'.replace('0', tid));
+        const data = await res.json();
+        
+        if(data.success && data.photo) {
+            const modalImg = document.getElementById('modal-img');
+            const modal = document.getElementById('photo-modal');
+            
+            modalImg.src = data.photo; // Base64 이미지를 로드
+            modal.classList.remove('hidden'); // 모달 표시
+            document.body.style.overflow = 'hidden'; // 배경 스크롤 차단
+        } else {
+            alert("저장된 배송 사진이 없습니다.");
+        }
+    } catch(e) {
+        alert("사진을 불러오는 중 오류가 발생했습니다.");
+    }
+}
+
+function closePhoto() {
+    document.getElementById('photo-modal').classList.add('hidden');
+    document.getElementById('modal-img').src = "";
+    document.body.style.overflow = 'auto'; // 스크롤 다시 허용
+}
+</script>
     </body>
     </html>
     """
@@ -803,7 +898,12 @@ def logi_driver_work():
 # --------------------------------------------------------------------------------
 # 8. 핵심 비즈니스 로직 & API (모든 기능 통합 복구)
 # --------------------------------------------------------------------------------
-
+@logi_bp.route('/api/photo/<int:tid>')
+def logi_get_photo(tid):
+    task = DeliveryTask.query.get(tid)
+    if task and task.photo_data:
+        return jsonify({"success": True, "photo": task.photo_data})
+    return jsonify({"success": False, "error": "사진이 없습니다."})
 @logi_bp.route('/api/logs/<int:tid>')
 def logi_get_task_logs(tid):
     logs = DeliveryLog.query.filter_by(task_id=tid).order_by(DeliveryLog.created_at.desc()).all()
@@ -1030,6 +1130,33 @@ def logi_admin_users_mgmt():
                 {% endfor %}
             </div>
         </div>
+        <div id="photo-modal" class="fixed inset-0 bg-black/80 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
+    <div class="relative max-w-2xl w-full">
+        <img id="modal-img" src="" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/20">
+        <button class="absolute -top-12 right-0 text-white text-3xl font-black">&times; 닫기</button>
+    </div>
+</div>
+
+<script>
+    // 사진 보기 함수
+    async function viewPhoto(tid) {
+        const res = await fetch('{{ url_for("logi.logi_get_photo", tid=0) }}'.replace('0', tid));
+        const data = await res.json();
+        if(data.photo) {
+            document.getElementById('modal-img').src = data.photo;
+            document.getElementById('photo-modal').classList.remove('hidden');
+        } else {
+            alert("저장된 사진이 없습니다.");
+        }
+    }
+
+    function closePhoto() {
+        document.getElementById('photo-modal').classList.add('hidden');
+        document.getElementById('modal-img').src = "";
+    }
+    
+    // (이하 기존 스크립트...)
+</script>
     </body>
     """
     return render_template_string(html, users=users)
