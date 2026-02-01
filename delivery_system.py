@@ -20,7 +20,9 @@ db_delivery = SQLAlchemy()
 # --------------------------------------------------------------------------------
 # 3. 데이터베이스 모델 (기존 기능 100% 보존)
 # --------------------------------------------------------------------------------
-
+def get_kst():
+    """한국 표준시(UTC+9) 반환 함수"""
+    return datetime.utcnow() + timedelta(hours=9)
 class AdminUser(db_delivery.Model):
     id = db_delivery.Column(db_delivery.Integer, primary_key=True)
     username = db_delivery.Column(db_delivery.String(50), unique=True)
@@ -31,7 +33,8 @@ class Driver(db_delivery.Model):
     name = db_delivery.Column(db_delivery.String(50), nullable=False)
     phone = db_delivery.Column(db_delivery.String(20))
     token = db_delivery.Column(db_delivery.String(100), unique=True)
-    created_at = db_delivery.Column(db_delivery.DateTime, default=datetime.now)
+    # default 값을 get_kst 함수로 변경
+    created_at = db_delivery.Column(db_delivery.DateTime, default=get_kst)
 
 class DeliveryTask(db_delivery.Model):
     id = db_delivery.Column(db_delivery.Integer, primary_key=True)
@@ -56,14 +59,19 @@ class DeliveryLog(db_delivery.Model):
     order_id = db_delivery.Column(db_delivery.String(100))
     status = db_delivery.Column(db_delivery.String(50))
     message = db_delivery.Column(db_delivery.String(500))
+    # default 값을 get_kst 함수로 변경
+    created_at = db_delivery.Column(db_delivery.DateTime, default=get_kst)
     created_at = db_delivery.Column(db_delivery.DateTime, default=datetime.now)
 
 # --------------------------------------------------------------------------------
 # 4. 유틸리티 함수 (함수명 겹침 방지 접두어 사용)
 # --------------------------------------------------------------------------------
-
+def get_kst():
+    """한국 표준시(UTC+9) 반환 함수"""
+    return datetime.utcnow() + timedelta(hours=9)
 def logi_add_log(task_id, order_id, status, message):
-    log = DeliveryLog(task_id=task_id, order_id=order_id, status=status, message=message)
+    # 로그 생성 시 시점을 한국 시간으로 고정
+    log = DeliveryLog(task_id=task_id, order_id=order_id, status=status, message=message, created_at=get_kst())
     db_delivery.session.add(log)
     db_delivery.session.commit()
 
