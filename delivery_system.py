@@ -655,7 +655,16 @@ def logi_driver_work():
             margin-bottom: 1.25rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
         }
         .address-highlight { color: #ffffff; font-weight: 900; line-height: 1.2; font-size: 24px; }
-        .product-badge { background: #064e3b; color: #34d399; padding: 6px 12px; border-radius: 10px; font-weight: 800; font-size: 16px; border: 1px solid #065f46; }
+        .product-badge { 
+    background: #064e3b; 
+    color: #34d399; 
+    padding: 4px 10px; 
+    border-radius: 8px; 
+    font-weight: 800; 
+    font-size: 15px; 
+    display: inline-block; /* 테두리 겹침 방지를 위해 한 줄 차지 방지 */
+    border: none; /* 겹쳐 보이는 초록 테두리 제거 */
+}
         .bottom-ctrl { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; z-index: 1000; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
     </style>

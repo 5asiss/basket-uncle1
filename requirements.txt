@@ -7,3 +7,4 @@ werkzeug
 gunicorn
 requests
 Pillow
+python-dotenv

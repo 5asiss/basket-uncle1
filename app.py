@@ -1,5 +1,6 @@
 import os
 import requests
+from dotenv import load_dotenv
 import base64
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -14,7 +15,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from sqlalchemy import text
 from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint 가져오기
-
+load_dotenv()
 
 # --------------------------------------------------------------------------------
 # 1. 초기 설정 및 Flask 인스턴스 생성
@@ -26,29 +27,29 @@ from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint �
 # db = SQLAlchemy(app)
 
 # --- 수정 후 (이 부분으로 교체하세요) ---
-from delivery_system import logi_bp, db_delivery  # 배송 시스템 파일에서 객체 가져오기
+from delivery_system import logi_bp, db_delivery
 
 app = Flask(__name__)
-app.secret_key = "basket_uncle_direct_trade_key_999_secure"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_fallback_key")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
-# 1. 모든 DB 경로를 설정에 먼저 등록합니다.
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///direct_trade_mall.db' # 쇼핑몰 DB
+
+# 1. 모든 DB 경로 설정
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///direct_trade_mall.db")
 app.config['SQLALCHEMY_BINDS'] = {
-    'delivery': 'sqlite:///delivery.db' # 배송 시스템 DB
+    'delivery': os.getenv("DELIVERY_DATABASE_URL", "sqlite:///delivery.db")
 }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# 2. [핵심] 쇼핑몰 주방장(db)을 배송팀(db_delivery)과 공유합니다.
-# 새로 만들지 않고 기존에 정의된 배송팀 주방장 객체를 가져와서 쇼핑몰 앱에 연결합니다.
-db = db_delivery  
+# 2. DB 연결 (공백 제거 버전)
+db = db_delivery
 db.init_app(app)
 
 # 3. 배송 관리 시스템 Blueprint 등록 (주소 접두어 /logi 적용됨)
 app.register_blueprint(logi_bp)
 
 # 결제 연동 키 (Toss Payments)
-TOSS_CLIENT_KEY = "test_ck_DpexMgkW36zB9qm5m4yd3GbR5ozO"
-TOSS_SECRET_KEY = "test_sk_0RnYX2w532E5k7JYaJye8NeyqApQ"
+TOSS_CLIENT_KEY = os.getenv("TOSS_CLIENT_KEY")
+TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY")
 
 # 파일 업로드 경로 설정
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
