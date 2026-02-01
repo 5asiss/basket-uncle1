@@ -1403,13 +1403,13 @@ def category_view(cat_name):
 
 @app.route('/product/<int:pid>')
 def product_detail(pid):
-    """상품 상세 정보 페이지"""
+    """상품 상세 정보 페이지 (최근등록상품 복구 및 추천 카테고리 추가 완료본)"""
     p = Product.query.get_or_404(pid)
     is_expired = (p.deadline and p.deadline < datetime.now())
     detail_images = p.detail_image_url.split(',') if p.detail_image_url else []
     cat_info = Category.query.filter_by(name=p.category).first()
     
-    # 추천 상품: 키워드(상품명 첫 단어) 기반
+    # 1. 연관 추천 상품: 키워드(상품명 첫 단어) 기반
     keyword = p.name.split()[0] if p.name else ""
     keyword_recommends = Product.query.filter(
         Product.name.contains(keyword),
@@ -1418,126 +1418,78 @@ def product_detail(pid):
         Product.stock > 0
     ).limit(10).all()
 
-    # 최신 상품 10개
+    # 2. 최근 등록 상품 10개 (이 데이터가 정상적으로 전달되어야 합니다)
     latest_all = Product.query.filter(Product.is_active == True, Product.id != pid).order_by(Product.id.desc()).limit(10).all()
     
-    # 리뷰 리스트
+    # 3. 하단 노출용 추천 카테고리 3개 및 미리보기 상품
+    recommend_cats_detail = Category.query.filter(Category.name != p.category).order_by(Category.order.asc()).limit(3).all()
+    cat_previews_detail = {c: Product.query.filter_by(category=c.name, is_active=True).limit(4).all() for c in recommend_cats_detail}
+    
+    # 4. 리뷰 리스트
     product_reviews = Review.query.filter_by(product_id=pid).order_by(Review.created_at.desc()).all()
 
     content = """
     <div class="max-w-4xl mx-auto px-4 md:px-6 py-16 md:py-24 font-black text-left">
         <div class="grid md:grid-cols-2 gap-10 md:gap-16 mb-24 text-left">
             <div class="relative text-left">
-                <img src="{{ p.image_url }}"loading="lazy" class="w-full aspect-square object-contain border border-gray-100 rounded-[3rem] bg-white p-8 md:p-12 shadow-sm text-left">
+                <img src="{{ p.image_url }}" loading="lazy" class="w-full aspect-square object-contain border border-gray-100 rounded-[3rem] bg-white p-8 md:p-12 shadow-sm">
                 {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge text-lg">판매마감</div>{% endif %}
             </div>
             
             <div class="flex flex-col justify-center text-left">
-                <div class="flex flex-wrap items-center gap-3 mb-6 text-left">
-                    <span class="bg-green-50 text-green-600 px-5 py-1.5 rounded-full text-[10px] md:text-xs font-black text-left shadow-sm">{{ p.category }}</span>
+                <div class="flex flex-wrap items-center gap-3 mb-6">
+                    <span class="bg-green-50 text-green-600 px-5 py-1.5 rounded-full text-[10px] md:text-xs font-black shadow-sm">{{ p.category }}</span>
                     {% if cat_info and cat_info.description %}
-                    <span class="text-gray-400 text-[10px] md:text-xs font-bold text-left opacity-60">| {{ cat_info.description }}</span>
+                    <span class="text-gray-400 text-[10px] md:text-xs font-bold opacity-60">| {{ cat_info.description }}</span>
                     {% endif %}
                 </div>
-                <h2 class="text-3xl md:text-5xl text-gray-800 mb-6 leading-tight tracking-tighter text-left">{{ p.name }}</h2>
-                <p class="text-green-600 text-lg md:text-2xl mb-8 font-bold text-left">{{ p.description or '' }}</p>
+                <h2 class="text-3xl md:text-5xl text-gray-800 mb-6 leading-tight tracking-tighter">{{ p.name }}</h2>
+                <p class="text-green-600 text-lg md:text-2xl mb-8 font-bold">{{ p.description or '' }}</p>
                 
-                <div class="space-y-3 mb-10 text-xs md:text-sm text-gray-400 text-left border-l-4 border-gray-100 pl-6 py-2">
-                    <p class="text-blue-600 font-bold text-left flex items-center gap-2"><i class="fas fa-warehouse opacity-30"></i> 잔여수량: {{ p.stock }}개 한정</p>
-                    <p class="countdown-timer text-red-500 font-bold text-left flex items-center gap-2" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
-                 
-                    <p class="text-left flex items-center gap-2"><i class="fas fa-box-open opacity-30"></i> 규격: {{ p.spec or '일반' }}</p>
+                <div class="space-y-3 mb-10 text-xs md:text-sm text-gray-400 border-l-4 border-gray-100 pl-6 py-2">
+                    <p class="text-blue-600 font-bold flex items-center gap-2"><i class="fas fa-warehouse opacity-30"></i> 잔여수량: {{ p.stock }}개 한정</p>
+                    <p class="countdown-timer text-red-500 font-bold flex items-center gap-2" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                    <p class="flex items-center gap-2"><i class="fas fa-box-open opacity-30"></i> 규격: {{ p.spec or '일반' }}</p>
                 </div>
                 
-                <div class="bg-gray-50 p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] mb-12 border border-gray-100 text-4xl md:text-6xl font-black text-green-600 text-left shadow-inner">
+                <div class="bg-gray-50 p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] mb-12 border border-gray-100 text-4xl md:text-6xl font-black text-green-600 shadow-inner text-left">
                     {{ "{:,}".format(p.price) }}<span class="text-xl md:text-2xl ml-1">원</span>
                 </div>
                 
                 {% if p.stock > 0 and not is_expired %}
-                <button onclick="addToCart('{{p.id}}')" class="w-full bg-green-600 text-white py-6 md:py-8 rounded-[2rem] md:rounded-[2.5rem] font-black text-xl md:text-2xl shadow-2xl active:scale-95 transition-all mb-6 hover:bg-green-700 hover:shadow-green-100">장바구니 담기</button>
+                <button onclick="addToCart('{{p.id}}')" class="w-full bg-green-600 text-white py-6 md:py-8 rounded-[2rem] md:rounded-[2.5rem] font-black text-xl md:text-2xl shadow-2xl active:scale-95 transition-all mb-6 hover:bg-green-700">장바구니 담기</button>
                 {% else %}
-                <button class="w-full bg-gray-300 text-white py-6 md:py-8 rounded-[2rem] font-black text-xl cursor-not-allowed italic mb-6 shadow-none">판매가 마감되었습니다</button>
+                <button class="w-full bg-gray-300 text-white py-6 md:py-8 rounded-[2rem] font-black text-xl cursor-not-allowed italic mb-6">판매가 마감되었습니다</button>
                 {% endif %}
             </div>
         </div>
         
-        <div class="border-t border-gray-100 pt-20 text-left">
-            <h3 class="font-black text-2xl md:text-3xl mb-16 border-l-8 border-green-600 pl-6 text-gray-800 text-left">상세 정보</h3>
-            <div class="flex flex-col gap-10 bg-white p-4 md:p-10 rounded-3xl md:rounded-[4rem] border border-gray-50 shadow-sm text-left">
+        <div class="border-t border-gray-100 pt-20">
+            <h3 class="font-black text-2xl md:text-3xl mb-16 border-l-8 border-green-600 pl-6 text-gray-800">상세 정보</h3>
+            <div class="flex flex-col gap-10 bg-white p-4 md:p-10 rounded-3xl md:rounded-[4rem] border border-gray-50 shadow-sm">
                 {% if detail_images %}
-                    {% for img in detail_images %}<img src="{{ img.strip() }}" class="w-full rounded-2xl md:rounded-[3rem] shadow-sm text-left" onerror="this.style.display='none'">{% endfor %}
+                    {% for img in detail_images %}<img src="{{ img.strip() }}" class="w-full rounded-2xl md:rounded-[3rem] shadow-sm">{% endfor %}
                 {% else %}
-                    <img src="{{ p.image_url }}"loading="lazy" class="w-full rounded-2xl md:rounded-[3rem] text-left">
+                    <img src="{{ p.image_url }}" loading="lazy" class="w-full rounded-2xl md:rounded-[3rem]">
                 {% endif %}
-                <div class="text-lg text-gray-600 leading-loose p-6 font-bold text-left">
+                <div class="text-lg text-gray-600 leading-loose p-6 font-bold">
                     {{ p.description or '상세 설명이 준비 중입니다.' }}
-                </div>
-            </div>
-
-            {% if product_reviews %}
-            <div class="mt-24 bg-white p-8 md:p-16 rounded-[3rem] md:rounded-[4rem] border border-gray-100 shadow-sm text-left">
-                <h3 class="text-2xl md:text-4xl font-black mb-12 flex items-center gap-4 text-left">
-                    <span class="bg-orange-100 p-3 rounded-2xl text-orange-500"><i class="fas fa-camera"></i></span>
-                    구매 후기 ({{ product_reviews|length }}건)
-                </h3>
-                <div class="space-y-10 text-left">
-                    {% for r in product_reviews %}
-                    <div class="border-b border-gray-100 pb-10 flex flex-col md:flex-row gap-8 text-left group">
-                        <img src="{{ r.image_url }}" class="w-full md:w-48 aspect-square object-cover rounded-3xl flex-shrink-0 shadow-sm transition group-hover:scale-105">
-                        <div class="flex-1 text-left">
-                            <div class="flex justify-between items-center mb-3">
-                                <p class="text-sm text-gray-400 font-bold text-left">{{ r.user_name[:1] }}**님 | {{ r.created_at.strftime('%Y-%m-%d') }}</p>
-                                <div class="text-orange-400 text-xs"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
-                            </div>
-                            <p class="text-base md:text-xl font-bold text-gray-700 leading-relaxed text-left whitespace-pre-line">{{ r.content }}</p>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-            
-            <div class="mt-20 p-8 md:p-16 bg-gray-50 rounded-[2.5rem] md:rounded-[4rem] text-[10px] md:text-sm text-gray-400 leading-relaxed border border-gray-100 font-black text-left">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-20 text-left">
-                    <div class="text-left">
-                        <h4 class="text-gray-700 mb-6 border-b border-gray-200 pb-2 font-black text-xs md:text-base uppercase tracking-widest text-left">배송정보 안내</h4>
-                        <p class="mb-2 text-left"><span class="inline-block w-20 md:w-28 font-black text-gray-500">배송방법</span>신선/냉장/냉동 최적화 배송</p>
-                        <p class="mb-2 text-left text-orange-500"><span class="inline-block w-20 md:w-28 font-black">배송비 정책</span>카테고리별 1,900원 (5만원 초과 시 5만원당 1,900원 추가)</p>
-                        <p class="mb-2 text-left"><span class="inline-block w-20 md:w-28 font-black text-gray-500">묶음배송</span>카테고리별 묶음 배송 가능</p>
-                        <p class="text-left"><span class="inline-block w-20 md:w-28 font-black text-gray-500">배송지역</span>인천광역시 연수구 송도동 전 지역 전용 서비스</p>
-                    </div>
-                    <div class="text-left">
-                        <h4 class="text-gray-700 mb-6 border-b border-gray-200 pb-2 font-black text-xs md:text-base uppercase tracking-widest text-left">교환/반품 상세규정</h4>
-                        <p class="mb-2 text-left"><span class="inline-block w-20 md:w-28 font-black text-gray-500">반품비용</span>상품 및 배송 상황에 따라 다름</p>
-                        <p class="mb-6 text-left"><span class="inline-block w-20 md:w-28 font-black text-gray-500">접수방법</span>고객센터(1666-8320) 접수 후 처리</p>
-                        <div class="mt-6 border-t border-gray-200 pt-6 text-left text-[9px] md:text-xs">
-                            <p class="text-gray-700 font-black mb-4 text-xs md:text-sm text-left">🚫 교환/반품 제한사항 (원상복구)</p>
-                            <ul class="list-disc pl-5 space-y-2 opacity-80 font-bold text-left">
-                                <li class="text-left">주문/제작 상품의 경우, 상품의 제작이 이미 진행된 경우</li>
-                                <li class="text-left">상품 포장을 개봉하여 사용 또는 설치 완료되어 상품의 가치가 훼손된 경우</li>
-                                <li class="text-left">고객의 사용, 시간경과, 일부 소비에 의하여 상품의 가치가 현저히 감소한 경우</li>
-                                <li class="text-left">세트상품 일부 사용, 구성품을 분실하였거나 취급 부주의로 인한 파손/고장/오염</li>
-                                <li class="text-left">모니터 해상도의 차이로 인해 색상이나 이미지가 실제와 달라 변심 무료 반품 요청 시</li>
-                                <li class="text-left">제조사의 사정 및 부품 가격 변동 등에 의해 무료 교환/반품으로 요청하는 경우</li>
-                            </ul>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
 
         {% if keyword_recommends %}
-        <div class="mt-24 border-t border-gray-100 pt-20 text-left">
-            <h3 class="font-black text-2xl md:text-3xl mb-12 flex items-center gap-4 tracking-tighter text-left text-left">
-                <span class="w-2 h-10 bg-green-500 rounded-full text-left"></span> ⭐ 연관 추천 상품
+        <div class="mt-24 border-t border-gray-100 pt-20">
+            <h3 class="font-black text-2xl md:text-3xl mb-12 flex items-center gap-4 tracking-tighter">
+                <span class="w-2 h-10 bg-green-500 rounded-full"></span> ⭐ 연관 추천 상품
             </h3>
-            <div class="horizontal-scroll no-scrollbar text-left text-left">
+            <div class="horizontal-scroll no-scrollbar">
                 {% for rp in keyword_recommends %}
-                <a href="/product/{{rp.id}}" class="group flex-shrink-0 w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] text-left text-left">
-                    <div class="bg-white rounded-[2rem] border border-gray-100 p-3 shadow-sm transition hover:shadow-xl hover:-translate-y-1 text-left text-left">
-                        <img src="{{ rp.image_url }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50 text-left text-left">
-                        <p class="text-[10px] md:text-sm font-black text-gray-800 truncate text-left text-left">{{ rp.name }}</p>
-                        <p class="text-[11px] md:text-base font-black text-green-600 mt-2 text-left text-left">{{ "{:,}".format(rp.price) }}원</p>
+                <a href="/product/{{rp.id}}" class="group flex-shrink-0 w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)]">
+                    <div class="bg-white rounded-[2rem] border border-gray-100 p-3 shadow-sm transition hover:shadow-xl hover:-translate-y-1 text-left">
+                        <img src="{{ rp.image_url }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50">
+                        <p class="text-[10px] md:text-sm font-black text-gray-800 truncate">{{ rp.name }}</p>
+                        <p class="text-[11px] md:text-base font-black text-green-600 mt-2">{{ "{:,}".format(rp.price) }}원</p>
                     </div>
                 </a>
                 {% endfor %}
@@ -1545,25 +1497,50 @@ def product_detail(pid):
         </div>
         {% endif %}
 
-        <div class="mt-16 border-t border-gray-100 pt-20 text-left text-left">
-            <h3 class="font-black text-2xl md:text-3xl mb-12 flex items-center gap-4 tracking-tighter text-left text-left">
-                <span class="w-2 h-10 bg-blue-500 rounded-full text-left"></span> ✨ 최근 등록 상품
+        {% if latest_all %}
+        <div class="mt-16 border-t border-gray-100 pt-20">
+            <h3 class="font-black text-2xl md:text-3xl mb-12 flex items-center gap-4 tracking-tighter">
+                <span class="w-2 h-10 bg-blue-500 rounded-full"></span> ✨ 최근 등록 상품
             </h3>
-            <div class="horizontal-scroll no-scrollbar text-left text-left">
+            <div class="horizontal-scroll no-scrollbar">
                 {% for rp in latest_all %}
-                <a href="/product/{{rp.id}}" class="group flex-shrink-0 w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] text-left text-left">
-                    <div class="bg-white rounded-[2rem] border border-gray-100 p-3 shadow-sm transition hover:shadow-xl hover:-translate-y-1 text-left text-left">
-                        <img src="{{ rp.image_url }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50 text-left">
-                        <p class="text-[10px] md:text-sm font-black text-gray-800 truncate text-left">{{ rp.name }}</p>
-                        <p class="text-[11px] md:text-base font-black text-green-600 mt-2 text-left">{{ "{:,}".format(rp.price) }}원</p>
+                <a href="/product/{{rp.id}}" class="group flex-shrink-0 w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)]">
+                    <div class="bg-white rounded-[2rem] border border-gray-100 p-3 shadow-sm transition hover:shadow-xl hover:-translate-y-1 text-left">
+                        <img src="{{ rp.image_url }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50">
+                        <p class="text-[10px] md:text-sm font-black text-gray-800 truncate">{{ rp.name }}</p>
+                        <p class="text-[11px] md:text-base font-black text-green-600 mt-2">{{ "{:,}".format(rp.price) }}원</p>
                     </div>
                 </a>
                 {% endfor %}
             </div>
         </div>
+        {% endif %}
 
-        <div class="mt-24 border-t border-gray-100 pt-20 space-y-10 text-left">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-left text-left">
+        <div class="mt-24 border-t border-gray-100 pt-20">
+            <h3 class="font-black text-2xl md:text-3xl mb-12 flex items-center gap-4 tracking-tighter">
+                <span class="w-2 h-10 bg-orange-400 rounded-full"></span> 📦 카테고리 더 둘러보기
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+                {% for c_info in recommend_cats_detail %}
+                <div class="bg-gray-50 p-8 rounded-[3rem] border border-gray-100 shadow-inner text-left">
+                    <h3 class="text-xl font-black mb-6 flex justify-between items-center">
+                        {{ c_info.name }}
+                        <a href="/category/{{ c_info.name }}" class="text-xs text-gray-400 font-bold hover:text-green-600">전체보기 ></a>
+                    </h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        {% for cp in cat_previews_detail[c_info] %}
+                        <a href="/product/{{ cp.id }}" class="bg-white p-3 rounded-2xl shadow-sm hover:scale-105 transition-transform">
+                            <img src="{{ cp.image_url }}" class="w-full aspect-square object-contain rounded-xl">
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="mt-24 border-t border-gray-100 pt-20 space-y-10">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <a href="/category/최신상품" class="bg-gray-800 text-white py-6 md:py-8 rounded-[2rem] text-center text-sm md:text-base font-black shadow-xl hover:bg-gray-700 transition flex items-center justify-center gap-3">
                     <i class="fas fa-sparkles"></i> 최신상품 전체보기
                 </a>
@@ -1571,56 +1548,16 @@ def product_detail(pid):
                     <i class="fas fa-store"></i> 이 판매자 상품 전체보기
                 </a>
             </div>
-            
-            <div class="bg-gray-100 p-10 md:p-16 rounded-[3.5rem] md:rounded-[5rem] text-left text-left">
-                <div class="max-w-2xl mx-auto text-center text-left">
-                    <p class="text-xs md:text-sm font-black text-gray-400 mb-6 uppercase tracking-[0.3em] text-center text-left">Looking for something else?</p>
-                    <form action="/search" method="GET" class="relative hidden md:block max-w-xs flex-1">
-    <input name="q" placeholder="상품검색" class="...">
-    <button class="..."><i class="fas fa-search"></i></button>
-</form>
-
-<div id="mobile-search-nav" class="hidden md:hidden pb-4">
-    <form action="/search" method="GET" class="relative">
-        <input name="q" placeholder="상품 검색..." class="...">
-        <button class="..."><i class="fas fa-search"></i></button>
-    </form>
-</div>
-                </div>
-            </div>
         </div>
-
-        {% if cat_info and cat_info.biz_name %}
-        <div class="mt-24 border-t border-gray-100 pt-20 text-left">
-            <div class="bg-gray-50 p-10 md:p-20 rounded-[3.5rem] md:rounded-[5rem] border border-gray-100 shadow-sm text-left">
-                <div class="flex items-center gap-5 mb-10 text-left text-left text-left">
-                    <div class="w-12 h-12 md:w-16 md:h-16 bg-green-600 text-white rounded-full flex items-center justify-center text-xl md:text-2xl shadow-xl text-center"><i class="fas fa-info-circle"></i></div>
-                    <h4 class="text-2xl md:text-4xl font-black text-gray-800 text-left text-left">서비스 이용 및 판매자 정보</h4>
-                </div>
-                <p class="text-gray-500 leading-loose mb-12 font-bold text-sm md:text-xl text-left text-left">본 상품은 바구니삼촌이 실제 상품 판매자의 제품을 송도 지역 고객님께 배송해 드리는 통합 유통 모델입니다. 실제 판매자 정보는 아래 버튼을 통해 확인 가능합니다.</p>
-                
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 text-left">
-                    <a href="/category/seller/{{ cat_info.id }}" class="bg-white border-2 border-gray-200 text-gray-800 px-8 py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-xs md:text-sm hover:bg-gray-100 transition shadow-sm flex items-center justify-center gap-4 text-center">
-                        <i class="fas fa-address-card text-xl text-gray-400"></i> 사업자정보보기
-                    </a>
-                    {% if cat_info.biz_contact %}
-                    <a href="tel:{{ cat_info.biz_contact }}" class="bg-white border-2 border-blue-100 text-blue-600 px-8 py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-xs md:text-sm hover:bg-blue-50 transition shadow-sm flex items-center justify-center gap-4 text-center">
-                        <i class="fas fa-phone-alt text-xl"></i> 고객센터 연결
-                    </a>
-                    {% endif %}
-                    {% if cat_info.seller_inquiry_link %}
-                    <a href="{{ cat_info.seller_inquiry_link }}" target="_blank" class="bg-green-600 text-white px-8 py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-xs md:text-sm hover:bg-green-700 transition shadow-lg flex items-center justify-center gap-4 text-center">
-                        <i class="fas fa-comment-dots text-xl"></i> 판매자 1:1 문의
-                    </a>
-                    {% endif %}
-                </div>
-                <p class="mt-12 text-[10px] md:text-sm text-gray-400 font-bold italic text-left text-left">※ 바구니삼촌은 물류 전문가가 송도 지역 거주민을 위해 구축한 프리미엄 배송 인프라입니다.</p>
-            </div>
-        </div>
-        {% endif %}
-    </div>"""
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, p=p, is_expired=is_expired, detail_images=detail_images, cat_info=cat_info, latest_all=latest_all, keyword_recommends=keyword_recommends, product_reviews=product_reviews)
-
+    </div>
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, 
+                                  p=p, is_expired=is_expired, detail_images=detail_images, 
+                                  cat_info=cat_info, latest_all=latest_all, 
+                                  keyword_recommends=keyword_recommends, 
+                                  product_reviews=product_reviews,
+                                  recommend_cats_detail=recommend_cats_detail,
+                                  cat_previews_detail=cat_previews_detail)
 @app.route('/category/seller/<int:cid>')
 def seller_info_page(cid):
     """판매 사업자 정보 상세 페이지"""
