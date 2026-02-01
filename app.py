@@ -65,6 +65,20 @@ login_manager.init_app(app)
 # 2. 데이터베이스 모델 설계 (DB 구조 변경 금지 규칙 준수)
 # --------------------------------------------------------------------------------
 
+class Settlement(db.Model):
+    """카테고리별 정산 내역 모델"""
+    id = db.Column(db.Integer, primary_key=True)
+    category_name = db.Column(db.String(50), nullable=False)
+    manager_email = db.Column(db.String(120), nullable=False)
+    
+    # 정산 기간 및 금액
+    total_sales = db.Column(db.Integer, default=0)       # 총 판매금액
+    delivery_fee_sum = db.Column(db.Integer, default=0)  # 발생한 총 배송비 (공제용)
+    settlement_amount = db.Column(db.Integer, default=0) # 최종 정산(지급) 금액
+    
+    status = db.Column(db.String(20), default='정산대기')  # 정산대기, 정산완료, 보류
+    requested_at = db.Column(db.DateTime, default=datetime.now)
+    completed_at = db.Column(db.DateTime, nullable=True)
 class User(db.Model, UserMixin):
     """사용자 정보 모델"""
     id = db.Column(db.Integer, primary_key=True)
@@ -145,6 +159,7 @@ class Order(db.Model):
 class Review(db.Model):
     """사진 리뷰 모델"""
     id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, unique=True)
     user_id = db.Column(db.Integer)
     user_name = db.Column(db.String(50))
     product_id = db.Column(db.Integer) 
@@ -1867,21 +1882,43 @@ def update_address():
         print(f"Error: {e}")
 
     return redirect(url_for('mypage'))
+
 @app.route('/mypage')
 @login_required
 def mypage():
-    """마이페이지 (디자인 정밀 최적화 및 전체 기능 통합본)"""
+    """마이페이지 (최종 완성본: 품목별 금액 출력 추가)"""
     db.session.refresh(current_user)
     orders = Order.query.filter_by(user_id=current_user.id).order_by(Order.created_at.desc()).all()
     
+    # ✅ [고도화] 품목별 금액을 포함한 상세 텍스트 생성 로직 추가
+    # 자바스크립트로 넘기기 전에 서버에서 품목별 가격이 포함된 리스트를 미리 계산합니다.
+    enhanced_orders = []
+    for o in orders:
+        details_with_price = []
+        parts = o.product_details.split(' | ')
+        for part in parts:
+            # [카테고리] 상품명(수량) 패턴 추출
+            match = re.search(r'\[(.*?)\] (.*?)\((\d+)\)', part)
+            if match:
+                cat_n, p_name, qty = match.groups()
+                p_obj = Product.query.filter_by(name=p_name.strip()).first()
+                price = p_obj.price if p_obj else 0
+                line_total = price * int(qty)
+                details_with_price.append(f"{p_name.strip()}({qty}개) --- {line_total:,}원")
+            else:
+                details_with_price.append(part)
+        
+        o.enhanced_details = "\\n".join(details_with_price)
+        enhanced_orders.append(o)
+
     content = """
     <div class="max-w-4xl mx-auto py-8 md:py-12 px-4 font-bold text-left">
-        <div class="flex justify-between items-center mb-6 px-1">
+        <div class="flex justify-between items-center mb-10 px-1">
             <a href="/" class="text-gray-400 hover:text-green-600 transition flex items-center gap-1.5 text-sm">
                 <i class="fas fa-home"></i> 홈으로
             </a>
-            <a href="/logout" class="text-gray-400 hover:text-red-500 transition text-sm">
-                로그아웃 <i class="fas fa-sign-out-alt ml-1"></i>
+            <a href="/logout" class="text-gray-400 hover:text-red-500 transition flex items-center gap-1.5 text-sm font-black">
+                로그아웃 <i class="fas fa-sign-out-alt"></i>
             </a>
         </div>
 
@@ -1889,7 +1926,7 @@ def mypage():
             <div class="p-8 md:p-12">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10">
                     <div class="text-left">
-                        <span class="bg-green-100 text-green-700 text-[9px] px-2.5 py-1 rounded-lg tracking-widest uppercase mb-3 inline-block font-black">Premium</span>
+                        <span class="bg-green-100 text-green-700 text-[9px] px-2.5 py-1 rounded-lg tracking-widest uppercase mb-3 inline-block font-black">Premium Member</span>
                         <h2 class="text-2xl md:text-3xl font-black text-gray-800 leading-tight">
                             {{ current_user.name }} <span class="text-gray-400 font-medium text-lg">님</span>
                         </h2>
@@ -1903,15 +1940,15 @@ def mypage():
                 <div class="pt-8 border-t border-gray-50 text-left">
                     <div id="address-display" class="grid md:grid-cols-2 gap-4 text-left">
                         <div class="bg-gray-50/50 p-6 rounded-3xl border border-gray-50">
-                            <p class="text-[9px] text-gray-400 uppercase mb-2 tracking-widest">Address</p>
+                            <p class="text-[9px] text-gray-400 uppercase mb-2 tracking-widest">Default Address</p>
                             <p class="text-gray-700 text-sm md:text-base leading-snug">
                                 {{ current_user.address or '정보 없음' }}<br>
                                 <span class="text-gray-400 text-xs">{{ current_user.address_detail or '' }}</span>
                             </p>
                         </div>
                         <div class="bg-orange-50/30 p-6 rounded-3xl border border-orange-50">
-                            <p class="text-[9px] text-orange-400 uppercase mb-2 tracking-widest">Gate Access</p>
-                            <p class="text-orange-600 text-base md:text-lg flex items-center gap-2">
+                            <p class="text-[9px] text-orange-400 uppercase mb-2 tracking-widest">Security Code</p>
+                            <p class="text-orange-600 text-base md:text-lg flex items-center gap-2 font-black">
                                 <span class="text-xl">🔑</span> {{ current_user.entrance_pw or '미등록' }}
                             </p>
                         </div>
@@ -1919,18 +1956,18 @@ def mypage():
 
                     <form id="address-edit-form" action="/mypage/update_address" method="POST" class="hidden space-y-4">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="space-y-3 text-left">
+                            <div class="space-y-3">
                                 <div class="flex gap-2">
                                     <input id="address" name="address" value="{{ current_user.address or '' }}" class="flex-1 p-4 bg-gray-50 rounded-2xl text-xs font-bold border-none" readonly onclick="execDaumPostcode()" placeholder="주소 검색">
                                     <button type="button" onclick="execDaumPostcode()" class="bg-gray-800 text-white px-4 rounded-2xl text-[10px] font-black">검색</button>
                                 </div>
                                 <input name="address_detail" value="{{ current_user.address_detail or '' }}" class="w-full p-4 bg-gray-50 rounded-2xl text-xs font-bold border-none" required placeholder="상세주소">
                             </div>
-                            <div class="space-y-3 text-left">
+                            <div class="space-y-3">
                                 <input name="entrance_pw" value="{{ current_user.entrance_pw or '' }}" class="w-full p-4 bg-orange-50 rounded-2xl text-xs font-bold border-none" required placeholder="공동현관 비밀번호">
                                 <div class="flex gap-2">
                                     <button type="button" onclick="toggleAddressEdit()" class="flex-1 py-4 bg-gray-100 text-gray-400 rounded-2xl text-xs font-black">취소</button>
-                                    <button type="submit" class="flex-[2] py-4 bg-green-600 text-white rounded-2xl text-xs font-black shadow-lg">저장하기</button>
+                                    <button type="submit" class="flex-[2] py-4 bg-green-600 text-white rounded-2xl text-xs font-black shadow-lg">저장</button>
                                 </div>
                             </div>
                         </div>
@@ -1940,7 +1977,7 @@ def mypage():
         </div>
 
         <h3 class="text-lg md:text-xl font-black text-gray-800 mb-6 flex items-center gap-2 px-1">
-            <span class="w-1.5 h-6 bg-green-500 rounded-full"></span> 주문/배송 내역
+            <span class="w-1.5 h-6 bg-green-500 rounded-full"></span> 최근 주문 내역
         </h3>
 
         <div class="space-y-4 text-left">
@@ -1957,9 +1994,15 @@ def mypage():
                     <div class="flex items-center justify-between w-full md:w-auto gap-6">
                         <span class="text-base font-black text-gray-800">{{ "{:,}".format(o.total_price) }}원</span>
                         <div class="flex gap-2">
-                            <button onclick='openReceiptModal({{ o.id }}, "{{ o.product_details }}", "{{ o.total_price }}", "{{ o.delivery_address }}")' class="text-[10px] font-black text-gray-400 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100">영수증</button>
+                            <button onclick='openReceiptModal({{ o.id }}, "{{ o.enhanced_details }}", "{{ o.total_price }}", "{{ o.delivery_address }}", "{{ o.order_id }}", "{{ o.delivery_fee }}")' class="text-[10px] font-black text-gray-400 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100">영수증</button>
+                            
                             {% if o.status == '결제완료' %}
-                            <button onclick='openReviewModal({{ o.id }}, "{{ o.product_details.split("(")[0] }}")' class="text-[10px] font-black text-orange-500 bg-orange-50 px-3 py-2 rounded-lg border border-orange-100">후기</button>
+                                {% set existing_review = Review.query.filter_by(order_id=o.id).first() %}
+                                {% if existing_review %}
+                                    <button class="text-[10px] font-black text-gray-300 bg-gray-50 px-3 py-2 rounded-lg border border-gray-100 cursor-not-allowed" disabled>후기 작성완료</button>
+                                {% else %}
+                                    <button onclick='openReviewModal({{ o.id }}, "{{ o.product_details.split("(")[0] }}")' class="text-[10px] font-black text-orange-500 bg-orange-50 px-3 py-2 rounded-lg border border-orange-100">후기</button>
+                                {% endif %}
                             {% endif %}
                         </div>
                     </div>
@@ -1974,20 +2017,45 @@ def mypage():
     </div>
 
     <div id="receipt-modal" class="fixed inset-0 bg-black/60 z-[6000] hidden flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-sm rounded-[2rem] overflow-hidden shadow-2xl animate-in zoom-in duration-200">
-            <div class="p-6 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
-                <h4 class="text-sm font-black uppercase tracking-widest text-gray-500">Order Receipt</h4>
+        <div id="printable-receipt" class="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl animate-in zoom-in duration-200 flex flex-col">
+            <div class="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center no-print">
+                <h4 class="text-[10px] font-black uppercase tracking-widest text-gray-500">Credit Card Receipt</h4>
                 <button onclick="closeReceiptModal()" class="text-gray-300 text-lg">✕</button>
             </div>
-            <div class="p-8 space-y-5 text-left">
-                <div><p class="text-[9px] text-gray-400 uppercase font-black mb-1">Items</p><p id="modal-items" class="text-gray-800 font-bold text-xs leading-relaxed"></p></div>
-                <div><p class="text-[9px] text-gray-400 uppercase font-black mb-1">Destination</p><p id="modal-address" class="text-gray-800 font-bold text-xs"></p></div>
-                <div class="pt-5 border-t border-dashed border-gray-100 flex justify-between items-center">
-                    <span class="text-xs font-black text-gray-400">Total</span>
-                    <span id="modal-total" class="text-xl font-black text-green-600"></span>
+            
+            <div class="p-8 space-y-6 text-left bg-white">
+                <div class="text-center border-b border-gray-200 pb-4">
+                    <h3 class="text-xl font-black text-gray-800 mb-2 italic">바구니삼촌 (BASAM)</h3>
+                    <div class="text-[9px] text-gray-500 font-bold space-y-0.5">
+                        <p>사업자번호: 472-93-02262</p>
+                        <p>대표: 금창권 | TEL: 1666-8320</p>
+                        <p>주소: 인천광역시 연수구 하모니로158, D동 317호</p>
+                    </div>
                 </div>
+
+                <div class="space-y-4">
+                    <div class="flex justify-between text-[10px]"><span class="text-gray-400 font-bold">주문번호</span><span id="modal-order-id" class="font-black text-gray-700"></span></div>
+                    <div>
+                        <p class="text-[9px] text-gray-400 uppercase font-black mb-1">Items (구매내역 및 단가)</p>
+                        <p id="modal-items" class="text-gray-800 font-bold text-[11px] leading-relaxed whitespace-pre-wrap border-y border-gray-50 py-2"></p>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-gray-400 uppercase font-black mb-1">Shipping (배송지)</p>
+                        <p id="modal-address" class="text-gray-800 font-bold text-[10px]"></p>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t-2 border-dashed border-gray-200 flex justify-between items-center">
+                    <span class="text-sm font-black text-gray-800">최종 결제 금액</span>
+                    <span id="modal-total" class="text-2xl font-black text-green-600 italic"></span>
+                </div>
+                <div class="text-center opacity-30 pt-4"><p class="text-[8px] font-bold uppercase tracking-[0.3em]">Thank you for your business</p></div>
             </div>
-            <div class="p-6"><button onclick="closeReceiptModal()" class="w-full py-4 bg-gray-800 text-white rounded-xl text-xs font-black">확인</button></div>
+
+            <div class="p-6 bg-gray-50 flex gap-2 no-print">
+                <button onclick="closeReceiptModal()" class="flex-1 py-4 bg-gray-200 text-gray-500 rounded-xl text-xs font-black">닫기</button>
+                <button onclick="printReceipt()" class="flex-[2] py-4 bg-gray-800 text-white rounded-xl text-xs font-black shadow-lg">전표 인쇄하기</button>
+            </div>
         </div>
     </div>
 
@@ -2000,14 +2068,12 @@ def mypage():
             <form action="/review/add" method="POST" enctype="multipart/form-data" class="p-6 space-y-5 text-left">
                 <input type="hidden" name="order_id" id="review-order-id">
                 <input type="hidden" name="rating" id="review-rating-value" value="5">
-                
                 <div>
                     <p id="review-product-name" class="text-gray-800 font-black text-xs mb-3"></p>
                     <div class="flex gap-1.5 text-2xl text-gray-200" id="star-rating-container">
                         {% for i in range(1, 6) %}<i class="fas fa-star cursor-pointer transition-colors" data-value="{{i}}"></i>{% endfor %}
                     </div>
                 </div>
-
                 <input type="file" name="review_image" class="w-full text-[10px] p-3 bg-gray-50 rounded-xl border border-dashed border-gray-200" required accept="image/*">
                 <textarea name="content" class="w-full p-4 h-24 bg-gray-50 rounded-xl border-none text-xs font-bold" placeholder="맛과 신선함은 어땠나요? 😊" required></textarea>
                 <button type="submit" class="w-full py-4 bg-green-600 text-white rounded-xl text-sm font-black shadow-lg">작성 완료</button>
@@ -2015,8 +2081,16 @@ def mypage():
         </div>
     </div>
 
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body * { visibility: hidden; }
+            #printable-receipt, #printable-receipt * { visibility: visible; }
+            #printable-receipt { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none; border: none; }
+        }
+    </style>
+
     <script>
-        // 주소 수정 토글
         function toggleAddressEdit() {
             const f = document.getElementById('address-edit-form');
             const d = document.getElementById('address-display');
@@ -2027,19 +2101,27 @@ def mypage():
             b.innerHTML = isHidden ? '<i class="fas fa-times"></i> 닫기' : '<i class="fas fa-edit mr-1"></i> 주소 수정';
         }
 
-        // 영수증 모달
-        function openReceiptModal(id, items, total, address) {
-            document.getElementById('modal-items').innerText = items.replace(/\|/g, '\\n');
+        function openReceiptModal(id, items, total, address, orderFullId, deliveryFee) {
+            document.getElementById('modal-order-id').innerText = orderFullId || ('ORD-' + id);
+            
+            // 서버에서 넘어온 줄바꿈 문자(\\n)를 자바스크립트 줄바꿈으로 변환
+            let itemText = items.replace(/\\\\n/g, '\\n');
+            
+            const fee = parseInt(deliveryFee) || 0;
+            if (fee > 0) { itemText += "\\n[서비스] 배송료 --- " + fee.toLocaleString() + "원"; }
+            else { itemText += "\\n[서비스] 배송료 --- 0원 (무료)"; }
+            
+            document.getElementById('modal-items').innerText = itemText;
             document.getElementById('modal-address').innerText = address;
             document.getElementById('modal-total').innerText = Number(total).toLocaleString() + '원';
             document.getElementById('receipt-modal').classList.remove('hidden');
         }
-        function closeReceiptModal() { document.getElementById('receipt-modal').classList.add('hidden'); }
 
-        // 리뷰 & 별점 엔진
+        function closeReceiptModal() { document.getElementById('receipt-modal').classList.add('hidden'); }
+        function printReceipt() { window.print(); }
+
         const stars = document.querySelectorAll('#star-rating-container i');
         const ratingInput = document.getElementById('review-rating-value');
-
         stars.forEach(star => {
             star.addEventListener('click', function() {
                 ratingInput.value = this.dataset.value;
@@ -2048,7 +2130,6 @@ def mypage():
             star.addEventListener('mouseover', function() { updateStars(this.dataset.value); });
             star.addEventListener('mouseleave', function() { updateStars(ratingInput.value); });
         });
-
         function updateStars(value) {
             stars.forEach(s => {
                 const active = parseInt(s.dataset.value) <= parseInt(value);
@@ -2066,8 +2147,7 @@ def mypage():
         function closeReviewModal() { document.getElementById('review-modal').classList.add('hidden'); }
     </script>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, orders=orders)
-
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, orders=enhanced_orders, Review=Review)
 @app.route('/order/cancel/<int:oid>', methods=['POST'])
 @login_required
 def order_cancel(oid):
@@ -2099,16 +2179,25 @@ def order_cancel(oid):
 @app.route('/review/add', methods=['POST'])
 @login_required
 def review_add():
-    """사진 리뷰 등록"""
-    oid, content = request.form.get('order_id'), request.form.get('content')
+    """사진 리뷰 등록 (주문당 1개 제한 로직 적용)"""
+    oid = request.form.get('order_id')
+    content = request.form.get('content')
+    
+    # 1. [검증] 해당 주문에 이미 작성된 후기가 있는지 체크
+    existing_review = Review.query.filter_by(order_id=oid).first()
+    if existing_review:
+        flash("이미 후기를 작성하신 주문입니다. 😊")
+        return redirect('/mypage')
+        
     order = Order.query.get(oid)
-    if not order or order.user_id != current_user.id: return redirect('/mypage')
+    if not order or order.user_id != current_user.id: 
+        return redirect('/mypage')
     
     img_path = save_uploaded_file(request.files.get('review_image'))
     if not img_path: 
         flash("후기 사진 등록은 필수입니다."); return redirect('/mypage')
     
-    # 리뷰 대상 상품 ID 추출 (첫 번째 상품 기준)
+    # 리뷰 대상 상품 정보 파싱
     p_name = order.product_details.split('(')[0].split(']')[-1].strip()
     match = re.search(r'\[(.*?)\] (.*?)\(', order.product_details)
     p_id = 0
@@ -2116,10 +2205,19 @@ def review_add():
         first_p = Product.query.filter_by(name=match.group(2).strip()).first()
         if first_p: p_id = first_p.id
 
-    new_review = Review(user_id=current_user.id, user_name=current_user.name, product_id=p_id, product_name=p_name, content=content, image_url=img_path)
+    # 2. [저장] Review 생성 시 order_id를 함께 기록 (필수)
+    new_review = Review(
+        user_id=current_user.id, 
+        user_name=current_user.name, 
+        product_id=p_id, 
+        product_name=p_name, 
+        content=content, 
+        image_url=img_path,
+        order_id=oid # 어떤 주문에 대한 후기인지 저장
+    )
     db.session.add(new_review)
     db.session.commit()
-    flash("작성해주신 소중한 후기가 등록되었습니다. 감사합니다!"); 
+    flash("소중한 후기가 등록되었습니다. 감사합니다!"); 
     return redirect('/mypage')
 
 @app.route('/cart/add/<int:pid>', methods=['POST'])
@@ -2308,12 +2406,16 @@ def admin_dashboard():
      
     elif tab == 'orders':
         try:
+            # 날짜 파싱 시도
             start_dt = datetime.strptime(start_date_str, '%Y-%m-%d %H:%M')
             end_dt = datetime.strptime(end_date_str, '%Y-%m-%d %H:%M')
-        except:
+        except Exception as e:
+            # 파싱 실패 시 기본값 (오늘 00:00 ~ 23:59)
+            print(f"Date parsing error: {e}")
             start_dt = now.replace(hour=0, minute=0, second=0)
             end_dt = now.replace(hour=23, minute=59, second=59)
 
+        # 결제취소 제외 주문 필터링
         all_orders = Order.query.filter(
             Order.created_at >= start_dt, 
             Order.created_at <= end_dt,
@@ -2326,28 +2428,36 @@ def admin_dashboard():
                 daily_stats[order_date] = {"sales": 0, "count": 0}
 
             order_show_flag = False
-            current_order_sales = 0
+            current_order_sales = 0  # 매니저별 정산 대상 금액 변수
+            
+            # 주문 상세 텍스트 파싱
             parts = o.product_details.split(' | ')
             for part in parts:
                 match = re.search(r'\[(.*?)\] (.*)', part)
                 if match:
                     cat_n = match.group(1).strip()
                     items_str = match.group(2).strip()
-                    if (is_master or cat_n in my_categories) and (sel_order_cat == '전체' or cat_n == sel_order_cat):
+                    
+                    # 권한 확인 (마스터 혹은 해당 카테고리 매니저)
+                    if is_master or cat_n in my_categories:
                         order_show_flag = True
                         if cat_n not in summary: 
                             summary[cat_n] = {"product_list": {}, "subtotal": 0}
+                        
                         for item in items_str.split(', '):
                             it_match = re.search(r'(.*?)\((\d+)\)', item)
                             if it_match:
                                 pn = it_match.group(1).strip()
                                 qt = int(it_match.group(2))
+                                # 상품 단가 조회하여 정산금 계산
                                 p_obj = Product.query.filter_by(name=pn).first()
                                 if p_obj:
                                     item_price = p_obj.price * qt
                                     summary[cat_n]["subtotal"] += item_price
                                     summary[cat_n]["product_list"][pn] = summary[cat_n]["product_list"].get(pn, 0) + qt
                                     current_order_sales += item_price
+
+            # 권한이 있는 주문 데이터만 통계에 반영
             if order_show_flag:
                 filtered_orders.append(o)
                 stats["sales"] += current_order_sales
@@ -2360,6 +2470,7 @@ def admin_dashboard():
         stats["grand_total"] = stats["sales"] + stats["delivery"]
             
     elif tab == 'reviews':
+        # 리뷰 탭은 예외 처리 없이 단순 조회
         reviews = Review.query.order_by(Review.created_at.desc()).all()
 
     # 3. HTML 템플릿 코드
@@ -3221,11 +3332,35 @@ def init_db():
         db.create_all()
         # 누락된 컬럼 수동 추가 (ALTER TABLE 로직)
         cols = [
-            ("product", "description", "VARCHAR(200)"), ("product", "detail_image_url", "TEXT"), ("user", "request_memo", "VARCHAR(500)"), ("order", "delivery_fee", "INTEGER DEFAULT 0"), ("product", "badge", "VARCHAR(50)"), ("category", "seller_name", "VARCHAR(100)"), ("category", "seller_inquiry_link", "VARCHAR(500)"), ("category", "order", "INTEGER DEFAULT 0"), ("category", "description", "VARCHAR(200)"), ("category", "biz_name", "VARCHAR(100)"), ("category", "biz_representative", "VARCHAR(50)"), ("category", "biz_reg_number", "VARCHAR(50)"), ("category", "biz_address", "VARCHAR(200)"), ("category", "biz_contact", "VARCHAR(50)"), ("order", "status", "VARCHAR(20) DEFAULT '결제완료'"), ("review", "user_name", "VARCHAR(50)"), ("review", "product_name", "VARCHAR(100)")
+            ("product", "description", "VARCHAR(200)"), 
+            ("product", "detail_image_url", "TEXT"), 
+            ("user", "request_memo", "VARCHAR(500)"), 
+            ("order", "delivery_fee", "INTEGER DEFAULT 0"), 
+            ("product", "badge", "VARCHAR(50)"), 
+            ("category", "seller_name", "VARCHAR(100)"), 
+            ("category", "seller_inquiry_link", "VARCHAR(500)"), 
+            ("category", "order", "INTEGER DEFAULT 0"), 
+            ("category", "description", "VARCHAR(200)"), 
+            ("category", "biz_name", "VARCHAR(100)"), 
+            ("category", "biz_representative", "VARCHAR(50)"), 
+            ("category", "biz_reg_number", "VARCHAR(50)"), 
+            ("category", "biz_address", "VARCHAR(200)"), 
+            ("category", "biz_contact", "VARCHAR(50)"), 
+            ("order", "status", "VARCHAR(20) DEFAULT '결제완료'"), 
+            ("review", "user_name", "VARCHAR(50)"), 
+            ("review", "product_name", "VARCHAR(100)"),
+            # 🚨 아래 줄이 반드시 추가되어야 합니다!
+            ("review", "order_id", "INTEGER") 
         ]
         for t, c, ct in cols:
-            try: db.session.execute(text(f"ALTER TABLE \"{t}\" ADD COLUMN \"{c}\" {ct}")); db.session.commit()
-            except: db.session.rollback()
+            try: 
+                # 해당 테이블에 컬럼이 이미 있는지 확인하고 없으면 추가함
+                db.session.execute(text(f"ALTER TABLE \"{t}\" ADD COLUMN \"{c}\" {ct}"))
+                db.session.commit()
+                print(f"Column {c} added to {t} table.")
+            except Exception as e: 
+                # 이미 컬럼이 있는 경우 에러가 나므로 무시하고 넘어감
+                db.session.rollback()
             
         # 기초 데이터 (관리자 및 샘플 카테고리)
         if not User.query.filter_by(email="admin@uncle.com").first():
