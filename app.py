@@ -545,10 +545,21 @@ FOOTER_HTML = """
         }
 
         const UNCLE_TERMS = {
-            'terms': {
-                'title': '바구니삼촌 이용약관',
-                'content': `<b>제1조 (목적)</b><br>본 약관은 바구니삼촌이 제공하는 통합 유통 및 배송 서비스의 이용 조건을 규정합니다.<br><br><b>제2조 (서비스 정의)</b><br>바구니삼촌은 물류 기획, 상품 소싱, 배송 인프라를 통합하여 제공하는 6PL 지향 물류 전문 서비스입니다.<br><br><b>제3조 (가격 정책)</b><br>상품 가격은 실제 구매 원가를 기준으로 투명하게 운영되며, 별도의 불투명한 중개 수수료를 소비자에게 부과하지 않습니다.`
-            },
+    'terms': {
+        'title': '바구니삼촌 서비스 이용약관',
+        'content': `
+            <b>제1조 (목적)</b><br>
+            본 약관은 바구니삼촌(이하 “회사”)이 제공하는 구매대행 및 물류·배송 관리 서비스의 이용과 관련하여 회사와 이용자 간의 권리, 의무 및 책임사항을 규정함을 목적으로 합니다.<br><br>
+            <b>제2조 (서비스의 성격 및 정의)</b><br>
+            ① 회사는 이용자의 요청에 따라 상품을 대신 구매하고, 결제, 배송 관리, 고객 응대, 환불 처리 등 거래 전반을 회사가 직접 관리·운영하는 구매대행 서비스를 제공합니다.<br>
+            ② 본 서비스는 <b>통신판매중개업(오픈마켓)이 아니며</b>, 회사가 거래 및 운영의 주체로서 서비스를 제공합니다.<br><br>
+            <b>제4조 (회사의 역할 및 책임)</b><br>
+            회사는 구매대행 과정에서 발생하는 주문, 결제, 배송, 환불 등 거래 전반에 대해 관계 법령에 따라 책임을 부담합니다.`
+    },
+    'privacy': {
+        'title': '개인정보처리방침',
+        'content': '<b>개인정보 수집 및 이용</b><br>수집항목: 이름, 연락처, 주소, 결제정보<br>이용목적: 상품 구매대행 및 송도 지역 직영 배송 서비스 제공<br>보관기간: 관련 법령에 따른 보존 기간 종료 후 즉시 파기'
+    },
             'privacy': {
                 'title': '개인정보처리방침',
                 'content': '<b>개인정보의 수집 및 이용</b><br>바구니삼촌은 주문 처리, 상품 배송, 고객 상담을 위해 필수적인 개인정보를 수집하며, 관계 법령에 따라 안전하게 보호합니다.'
@@ -1079,14 +1090,35 @@ def index():
     content = """
 <div class="bg-gray-900 text-white py-20 md:py-32 px-4 shadow-inner relative overflow-hidden text-center">
     <div class="max-w-7xl mx-auto relative z-10 font-black text-center">
-        <span class="text-green-400 text-[10px] md:text-sm font-black mb-6 inline-block uppercase tracking-[0.3em]">Direct Delivery Service</span>
-        <h1 class="hero-title text-3xl md:text-7xl font-black mb-8 leading-tight tracking-tighter"> 상품을 판매하지 않습니다.<br><span class="text-green-500 uppercase">Premium Service</span></h1>
+        
+        <span class="text-green-400 text-[10px] md:text-sm font-black mb-6 inline-block uppercase tracking-[0.3em]">
+            Direct Delivery & Agency Service
+        </span>
+
+        <h1 class="hero-title text-3xl md:text-7xl font-black mb-8 leading-tight tracking-tighter break-keep">
+            우리는 상품을 직접 팔지 않습니다.<br>
+            <span class="text-green-500 uppercase">Premium 6PL Service</span>
+        </h1>
+
         <div class="w-12 h-1 bg-white/20 mx-auto mb-8"></div>
-        <p class="hero-desc text-gray-400 text-sm md:text-2xl font-bold max-w-2xl mx-auto mb-12">판매가 아닌, <span class="text-white underline decoration-green-500 decoration-4 underline-offset-8">배송 서비스</span> 입니다.</p>
+
+        <p class="hero-desc text-gray-400 text-sm md:text-2xl font-bold max-w-3xl mx-auto mb-12 leading-relaxed md:leading-normal break-keep px-4">
+            바구니삼촌은 재고를 쌓아두는 판매처가 아닌, <br class="hidden md:block">
+            이용자의 요청에 따라 <span class="text-white underline decoration-green-500 decoration-2 md:decoration-4 underline-offset-8">구매와 배송을 책임 대행</span>하는 물류 인프라입니다.
+        </p>
+
         <div class="flex flex-col md:flex-row justify-center items-center gap-6">
-            <a href="#products" class="bg-green-600 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95">쇼핑하러 가기</a>
-            <a href="/about" class="text-white/60 hover:text-white font-bold border-b border-white/20 pb-1 transition text-xs md:text-base">바구니삼촌이란? <i class="fas fa-arrow-right ml-2"></i></a>
+            <a href="#products"
+               class="bg-green-600 text-white px-10 py-4 md:px-12 md:py-5 rounded-full font-black shadow-2xl hover:bg-green-700 transition active:scale-95">
+                대행 서비스 이용하기
+            </a>
+
+            <a href="/about"
+               class="text-white/60 hover:text-white font-bold border-b border-white/20 pb-1 transition text-xs md:text-base">
+                6PL 구매대행이란? <i class="fas fa-arrow-right ml-2"></i>
+            </a>
         </div>
+
     </div>
     <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] opacity-30"></div>
 </div>
@@ -1539,47 +1571,36 @@ def about_page():
 
     <div class="about-body">
         <div class="about-container">
-            <h1>바구니 삼촌몰</h1>
-            <p>
-                바구니 삼촌몰은 단순한 판매 플랫폼이 아닌,  
-                <span class="about-highlight">물류 전문가가 설계한 신개념 유통·배송 서비스</span>입니다.
-            </p>
-            <p>
-                기존 유통 구조에서 분리되어 있던 <b>상품 소싱 · 물류 운영 · 플랫폼 개발</b>을  
-                하나의 체계로 통합하여, 불필요한 유통 단계를 대폭 축소했습니다.
-            </p>
-            <p>
-                우리는 기존 4PL(제4자 물류)의 개념을 확장해,  
-                상품 소싱과 자체 플랫폼 개발까지 포함한  
-                <span class="about-highlight">‘확장형 물류 서비스(일명 6PL)’</span>에 가까운  
-                새로운 형태의 유통 모델을 지향합니다.
-            </p>
-            <p>
-                직접 구축한 물류 인프라와 배송 네트워크를 기반으로  
-                중간 유통 마진, 광고비, 플랫폼 수수료를 최소화하고  
-                그 절감된 비용을 <b>상품 원가와 배송비에 그대로 반영</b>합니다.
-            </p>
-            <p>
-                소비자에게는 합리적인 가격을,  
-                판매자에게는 <b>수수료 부담 없는 환경</b>을 제공합니다.
-            </p>
+    <h1>바구니 삼촌몰</h1>
+    <p>
+        바구니 삼촌몰은 <span class="about-highlight">물류 인프라를 직접 운영하며 주문 전 과정을 책임지는 구매대행 서비스</span>입니다.
+    </p>
+    <p>
+        우리는 기존 유통의 불필요한 단계를 제거하기 위해 <b>상품 대리 구매 · 직영 물류 · 라스트마일 배송</b>을 하나의 시스템으로 통합했습니다.
+    </p>
+    <p>
+        단순히 판매자와 구매자를 연결하는 중개 플랫폼이 아니라, 이용자의 요청을 받아 <span class="about-highlight">삼촌이 직접 검수하고 구매하여 문 앞까지 배송</span>하는 책임 대행 모델을 지향합니다.
+    </p>
+    <p>
+        직구/구매대행 방식의 효율적인 물류 시스템을 통해 광고비와 유통 거품을 뺐으며, 그 혜택을 <b>상품의 실제 조달 원가와 합리적인 배송비</b>에 그대로 반영합니다.
+    </p>
 
-            <h2>Our Core Value</h2>
-            <div class="core-values">
-                <div class="value-box">
-                    <span>중간 유통 수수료</span>
-                    <strong>0원</strong>
-                </div>
-                <div class="value-box">
-                    <span>플랫폼 입점 비용</span>
-                    <strong>0원</strong>
-                </div>
-            </div>
+    <h2>Our Core Value</h2>
+    <div class="core-values">
+        <div class="value-box">
+            <span>불필요 유통 마진</span>
+            <strong>ZERO</strong>
+        </div>
+        <div class="value-box">
+            <span>배송 책임 서비스</span>
+            <strong>DIRECT</strong>
+        </div>
+    </div>
 
-            <p style="margin-top: 60px; font-size: 19px; font-weight: 700; border-left: 4px solid #10b981; padding-left: 20px;">
-                바구니 삼촌은 ‘상품을 파는 쇼핑몰’이 아니라,  
-                <span class="about-highlight">‘물류 구조를 설계하고 배송을 완성하는 서비스’</span>입니다.
-            </p>
+    <p style="margin-top: 60px; font-size: 19px; font-weight: 700; border-left: 4px solid #10b981; padding-left: 20px;">
+        바구니 삼촌은 중개만 하는 장터가 아니라, <br>
+        <span class="about-highlight">‘구매부터 배송까지 당사가 직접 책임지고 완료하는 대행 플랫폼’</span>입니다.
+    </p>
 
             <div class="premium-section">
                 <h2>Premium 6PL Model</h2>
@@ -1923,13 +1944,19 @@ def product_detail(pid):
                     </div>
                 </div>
 
-                <div class="hidden md:block">
-                    {% if p.stock > 0 and not is_expired %}
-                    <button onclick="addToCart('{{p.id}}')" class="w-full bg-green-600 text-white py-7 rounded-[2rem] font-black text-2xl shadow-2xl hover:bg-green-700 transition active:scale-95">장바구니 담기</button>
-                    {% else %}
-                    <button class="w-full bg-gray-200 text-gray-400 py-7 rounded-[2rem] font-black text-2xl cursor-not-allowed italic" disabled>판매가 마감되었습니다</button>
-                    {% endif %}
-                </div>
+             
+<div class="hidden md:block">
+    <div class="bg-gray-50 p-4 rounded-2xl mb-6 border border-gray-100">
+        <p class="text-[11px] text-gray-500 leading-relaxed font-bold">
+            <i class="fas fa-info-circle mr-1"></i> 바구니삼촌은 구매대행형 서비스로서 본 상품의 실제 판매처와 고객을 연결하고 결제 및 배송 전반을 책임 관리합니다.
+        </p>
+    </div>
+    {% if p.stock > 0 and not is_expired %}
+    <button onclick="addToCart('{{p.id}}')" class="w-full bg-green-600 text-white py-7 rounded-[2rem] font-black text-2xl shadow-2xl hover:bg-green-700 transition active:scale-95">장바구니 담기</button>
+    {% else %}
+    <button class="w-full bg-gray-200 text-gray-400 py-7 rounded-[2rem] font-black text-2xl cursor-not-allowed italic" disabled>판매가 마감되었습니다</button>
+    {% endif %}
+</div>
             </div>
         </div>
 
@@ -2211,8 +2238,9 @@ def register():
             
             <div class="p-5 bg-gray-50 rounded-2xl border border-gray-100 text-[10px] space-y-3 mt-6 text-left">
                 <label class="flex items-start gap-3 cursor-pointer group text-left text-left">
-                    <input type="checkbox" name="consent_e_commerce" class="mt-0.5 w-4 h-4 rounded-full border-gray-300 text-green-600 focus:ring-green-500 text-left" required>
-                    <span class="group-hover:text-gray-800 transition leading-tight text-left text-left">[필수] <a href="javascript:void(0)" onclick="openUncleModal('e_commerce')" class="underline decoration-green-300 text-left">전자상거래 이용자 유의사항</a> 및 서비스 이용 약관에 동의합니다.</span>
+                    <span class="group-hover:text-gray-800 transition leading-normal md:leading-relaxed break-keep text-[11px] md:text-sm">
+    [필수] 본 서비스는 <b>구매대행형 통합 물류 서비스</b>이며, 이용자의 주문 요청에 따라 당사가 상품을 구매 및 배송함을 확인하고 이에 동의합니다.
+</span>
                 </label>
             </div>
 
