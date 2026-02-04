@@ -989,7 +989,7 @@ def inject_globals():
 
 @app.route('/search')
 def search_view():
-    """검색 결과 전용 페이지 (요구사항: 카테고리별 표시 + 메인 이동 + 추천상품)"""
+    """검색 결과 전용 페이지 (Jinja2 태그 누락 수정본)"""
     query = request.args.get('q', '').strip()
     if not query:
         return redirect(url_for('index'))
@@ -1001,8 +1001,7 @@ def search_view():
         if p.category not in grouped_search: grouped_search[p.category] = []
         grouped_search[p.category].append(p)
 
-    # 2. 하단 노출용: 최신 상품 10개 & 추천 카테고리 3개
-    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(10).all()
+    # 2. 하단 노출용 데이터
     recommend_cats = Category.query.order_by(Category.order.asc()).limit(3).all()
     cat_previews = {cat: Product.query.filter_by(category=cat.name, is_active=True).limit(4).all() for cat in recommend_cats}
 
@@ -1020,50 +1019,46 @@ def search_view():
                 </h3>
                 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                     {% for p in products %}
-                   <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col w-[calc((100%-24px)/3)] md:w-[calc((100%-48px)/5)] transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %} text-left">
-                {% if p.description %}
-                <div class="absolute top-3 left-0 z-20">
-                    <span class="px-2.5 py-1 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full 
-                        {% if '당일' in p.description %} bg-red-600 
-                        {% elif '+1' in p.description %} bg-blue-600 
-                        {% elif '+2' in p.description %} bg-emerald-600 
-                        {% else %} bg-gray-600 {% endif %}">
-                        <i class="fas fa-truck-fast mr-1"></i> {{ p.description }}
-                    </span>
-                </div>
-                {% endif %}
-
-                <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden text-left">
-                    <img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover p-2 md:p-6 text-left">
-                </a>
-                <div class="p-3 md:p-8 flex flex-col flex-1 text-left">
-    <h3 class="font-black text-gray-800 text-[11px] md:text-base mb-1 truncate text-left">
-        {{ p.name }}
-        {% if p.badge %}
-        <span class="text-[9px] md:text-[11px] text-orange-500 font-bold ml-1">| {{ p.badge }}</span>
-        {% endif %}
-    </h3>
-    
-    <div class="flex items-center gap-1.5 mb-3 text-left">
-        <span class="text-[8px] md:text-[10px] text-gray-400 font-bold bg-gray-100 px-1.5 py-0.5 rounded">{{ p.spec or '일반' }}</span>
-        </div>
-
-    <div class="mt-auto flex justify-between items-end text-left">
-        <span class="text-[13px] md:text-2xl font-black text-green-600 text-left">{{ "{:,}".format(p.price) }}원</span>
-                        <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-8 h-8 md:w-14 md:h-14 rounded-xl md:rounded-[1.5rem] text-white shadow-xl hover:bg-green-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button>
+                    <div class="product-card bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %}">
+                        <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
+                            <img src="{{ p.image_url }}" loading="lazy" class="w-full h-full object-cover p-2 md:p-6">
+                        </a>
+                        <div class="p-3 md:p-8 flex flex-col flex-1">
+                            <h3 class="font-black text-gray-800 text-[11px] md:text-base mb-1 truncate">{{ p.name }}</h3>
+                            <div class="mt-auto flex justify-between items-end">
+                                <span class="text-[13px] md:text-2xl font-black text-green-600">{{ "{:,}".format(p.price) }}원</span>
+                                <button onclick="addToCart('{{p.id}}')" class="bg-green-600 w-8 h-8 md:w-14 md:h-14 rounded-xl text-white flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button>
+                            </div>
+                        </div>
                     </div>
+                    {% endfor %}
                 </div>
+            </section>
+            {% endfor %}
+        {% else %}
+            <div class="py-20 text-center bg-gray-50 rounded-[3rem] border-2 border-dashed border-gray-200 mb-20">
+                <p class="text-gray-400 font-black text-lg">찾으시는 상품이 없습니다. 😥</p>
             </div>
+        {% endif %}
 
+        <hr class="border-gray-100 mb-20">
+        
+        <h3 class="text-xl md:text-3xl font-black text-gray-800 mb-10 italic">이런 상품은 어떠세요?</h3>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
             {% for cat, prods in cat_previews.items() %}
             <div class="bg-gray-50 p-8 rounded-[3rem] border border-gray-100 shadow-inner">
                 <h3 class="text-xl font-black mb-6">{{ cat.name }} <a href="/category/{{ cat.name }}" class="text-xs text-gray-400 ml-2">더보기 ></a></h3>
                 <div class="grid grid-cols-2 gap-4">
-                    {% for cp in prods %}<a href="/product/{{ cp.id }}" class="bg-white p-3 rounded-2xl shadow-sm"><img src="{{ cp.image_url }}" class="w-full aspect-square object-contain"></a>{% endfor %}
+                    {% for cp in prods %}
+                    <a href="/product/{{ cp.id }}" class="bg-white p-3 rounded-2xl shadow-sm hover:scale-105 transition"><img src="{{ cp.image_url }}" class="w-full aspect-square object-contain"></a>
+                    {% endfor %}
                 </div>
             </div>
             {% endfor %}
+        </div>
+        
+        <div class="mt-20 text-center">
+            <a href="/" class="inline-block bg-gray-800 text-white px-12 py-5 rounded-full font-black shadow-xl hover:bg-black transition">메인으로 이동</a>
         </div>
     </div>
     """
@@ -4465,14 +4460,6 @@ def init_db():
 
 import subprocess
 
-# --- 수정 전 기존 코드 ---
-# if __name__ == "__main__":
-#     init_db()
-#     if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
-#         subprocess.Popen(["python", delivery_script])
-#     app.run(host="0.0.0.0", port=5000, debug=True)
-
-# --- 수정 후 (이 부분으로 교체하세요) ---
 if __name__ == "__main__":
     with app.app_context():
         # 쇼핑몰 테이블과 배송 테이블을 각각의 DB 파일에 생성합니다.
