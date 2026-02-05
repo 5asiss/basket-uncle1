@@ -4460,6 +4460,14 @@ def init_db():
 
 import subprocess
 
+# --- 수정 전 기존 코드 ---
+# if __name__ == "__main__":
+#     init_db()
+#     if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+#         subprocess.Popen(["python", delivery_script])
+#     app.run(host="0.0.0.0", port=5000, debug=True)
+
+# --- 수정 후 (이 부분으로 교체하세요) ---
 if __name__ == "__main__":
     with app.app_context():
         # 쇼핑몰 테이블과 배송 테이블을 각각의 DB 파일에 생성합니다.

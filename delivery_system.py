@@ -14,12 +14,34 @@ from sqlalchemy import text, UniqueConstraint
 
 # [핵심] Blueprint 정의 (이름: logi, 주소 접두어: /logi)
 # 이 설정으로 인해 이제 모든 주소는 basam.co.kr/logi/... 가 됩니다.
+
 logi_bp = Blueprint('logi', __name__, url_prefix='/logi')
 db_delivery = SQLAlchemy()
 
 # --------------------------------------------------------------------------------
 # 3. 데이터베이스 모델 (기존 기능 100% 보존)
 # --------------------------------------------------------------------------------
+# 모든 관리자 페이지에서 공통으로 사용할 상단바 설계도입니다.
+def get_admin_nav():
+    return """
+    <nav class="bg-white border-b h-16 flex items-center justify-between px-6 sticky top-0 z-50 shadow-sm">
+        <div class="flex items-center gap-8">
+            <h1 class="text-xl font-black text-green-600 italic">B.UNCLE</h1>
+            <div class="flex gap-6 font-bold text-slate-400 text-[11px]">
+                <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="{% if request.path == '/logi/' %}text-green-600 border-b-2 border-green-600{% else %}hover:text-green-600{% endif %} pb-1 transition">배송관제</a>
+                <a href="{{ url_for('logi.logi_driver_mgmt') }}" class="{% if '/drivers' in request.path %}text-green-600 border-b-2 border-green-600{% else %}hover:text-green-600{% endif %} pb-1 transition">기사관리</a>
+                <a href="{{ url_for('logi.logi_driver_path_map') }}" class="{% if '/map' in request.path %}text-blue-500 border-b-2 border-blue-500{% else %}hover:text-blue-500{% endif %} pb-1 transition">배송지도</a>
+                {% if session['admin_username'] == 'admin' %}
+                <a href="{{ url_for('logi.logi_admin_users_mgmt') }}" class="{% if '/users' in request.path %}text-red-500 border-b-2 border-red-500{% else %}hover:text-red-500{% endif %} pb-1 transition">설정</a>
+                {% endif %}
+            </div>
+        </div>
+        <div class="flex items-center gap-4">
+            <button onclick="syncNow()" id="sync-btn" class="bg-red-600 text-white px-5 py-2 rounded-xl font-black text-[11px] shadow-lg hover:bg-red-700 transition ring-2 ring-red-300 ring-offset-2">신규 주문 가져오기</button>
+            <a href="{{ url_for('logi.logi_admin_logout') }}" class="text-slate-300 font-bold hover:text-red-500"><i class="fas fa-sign-out-alt"></i></a>
+        </div>
+    </nav>
+    """
 def get_kst():
     """한국 표준시(UTC+9) 반환 함수"""
     return datetime.utcnow() + timedelta(hours=9)
@@ -1035,47 +1057,62 @@ def logi_driver_mgmt():
     return render_template_string("""
                                   
     <script src="https://cdn.tailwindcss.com"></script>
-    <body class="bg-slate-50 p-6">
-        <div class="max-w-md mx-auto">
-            <nav class="mb-8"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i>돌아가기</a></nav>
-            <h2 class="font-black mb-8 text-2xl text-slate-800 italic uppercase">Driver Management</h2>
-            <form action="{{ url_for('logi.logi_add_driver') }}" method="POST" class="bg-white p-8 rounded-[2.5rem] shadow-xl border mb-10 space-y-5">
-                <input name="name" placeholder="기사님 성함" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm" required>
-                <input name="phone" placeholder="전화번호 (인증용)" class="w-full border-none p-5 rounded-2xl bg-slate-50 font-black text-sm" required>
-                <button class="w-full bg-green-600 text-white py-5 rounded-2xl font-black text-lg shadow-lg hover:bg-green-700 transition active:scale-95">신규 기사 생성</button>
-            </form>
-            <div class="space-y-4">
-                {% for d in drivers %}
-<div class="bg-white p-6 rounded-[2rem] border flex justify-between items-center shadow-md border-slate-100">
-        <div>
-            <p class="font-black text-slate-800 text-lg">{{ d.name }}</p>
-            <p class="text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
-        </div>
-        <div class="flex gap-2">
-            <button onclick="copyUrl()" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-black text-[10px] border border-blue-100">접속주소 복사</button>
-            <button onclick="secureDelete({{d.id}})" class="text-red-300 hover:text-red-500 transition p-3"><i class="fas fa-trash-alt"></i></button>
-        </div>
-    </div>
-<div class="flex justify-around py-6 bg-slate-900 text-white rounded-b-[2rem] shadow-lg mb-4">
-    <div class="text-center">
-        <div class="text-[10px] text-slate-400 mb-1">배정 중</div>
-        <div class="text-xl font-black text-blue-400">{{ assigned_count }}<span class="text-xs ml-0.5">건</span></div>
-        <div class="text-sm font-bold">배정</div>
-    </div>
-    <div class="text-center border-x border-slate-800 px-8">
-        <div class="text-[10px] text-slate-400 mb-1">픽업 대기</div>
-        <div class="text-xl font-black text-yellow-400">{{ picking_count }}<span class="text-xs ml-0.5">건</span></div>
-        <div class="text-sm font-bold">픽업</div>
-    </div>
-    <div class="text-center">
-        <div class="text-[10px] text-slate-400 mb-1">오늘 성공</div>
-        <div class="text-xl font-black text-green-400">{{ complete_today }}<span class="text-xs ml-0.5">건</span></div>
-        <div class="text-sm font-bold">완료</div>
-    </div>
-</div>
+   <body class="bg-slate-50 p-4 sm:p-10">
+    <div class="max-w-md mx-auto">
+        <nav class="mb-6 sm:mb-8">
+            <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black text-sm">
+                <i class="fas fa-arrow-left mr-2"></i>돌아가기
+            </a>
+        </nav>
+
+        <h2 class="font-black mb-6 sm:mb-8 text-xl sm:text-2xl text-slate-800 italic uppercase tracking-tighter">
+            Driver Management
+        </h2>
+
+        <form action="{{ url_for('logi.logi_add_driver') }}" method="POST" class="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-xl border mb-8 space-y-4">
+            <input name="name" placeholder="기사님 성함" class="w-full border-none p-4 sm:p-5 rounded-2xl bg-slate-50 font-black text-xs sm:text-sm focus:ring-2 focus:ring-green-500 outline-none" required>
+            <input name="phone" placeholder="전화번호 (인증용)" class="w-full border-none p-4 sm:p-5 rounded-2xl bg-slate-50 font-black text-xs sm:text-sm focus:ring-2 focus:ring-green-500 outline-none" required>
+            <button class="w-full bg-green-600 text-white py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg shadow-lg hover:bg-green-700 transition active:scale-95">
+                신규 기사 생성
+            </button>
+        </form>
+
+        <div class="space-y-6">
+            {% for d in drivers %}
+            <div class="driver-card">
+                <div class="bg-white p-5 sm:p-6 rounded-t-[2rem] border border-b-0 flex justify-between items-center shadow-sm border-slate-100">
+                    <div>
+                        <p class="font-black text-slate-800 text-base sm:text-lg">{{ d.name }}</p>
+                        <p class="text-[10px] sm:text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="copyUrl()" class="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-xl font-black text-[9px] sm:text-[10px] border border-blue-100 hover:bg-blue-100 transition">주소복사</button>
+                        <button onclick="secureDelete({{d.id}})" class="text-red-200 hover:text-red-500 transition p-2"><i class="fas fa-trash-alt text-sm"></i></button>
+                    </div>
                 </div>
-                {% endfor %}
+
+                <div class="flex justify-around py-4 sm:py-5 bg-slate-900 text-white rounded-b-[2rem] shadow-lg mb-4">
+                    <div class="text-center">
+                        <div class="text-[9px] sm:text-[10px] text-slate-500 mb-0.5">배정 중</div>
+                        <div class="text-lg sm:text-xl font-black text-blue-400">{{ assigned_count }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
+                        <div class="text-[10px] sm:text-xs font-bold opacity-70">배정</div>
+                    </div>
+                    <div class="text-center border-x border-slate-800 px-6 sm:px-8">
+                        <div class="text-[9px] sm:text-[10px] text-slate-500 mb-0.5">픽업 대기</div>
+                        <div class="text-lg sm:text-xl font-black text-yellow-400">{{ picking_count }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
+                        <div class="text-[10px] sm:text-xs font-bold opacity-70">픽업</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-[9px] sm:text-[10px] text-slate-500 mb-0.5">오늘 성공</div>
+                        <div class="text-lg sm:text-xl font-black text-green-400">{{ complete_today }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
+                        <div class="text-[10px] sm:text-xs font-bold opacity-70">완료</div>
+                    </div>
+                </div>
             </div>
+            {% endfor %}
+        </div>
+    </div>
+</body>
         </div>
 <script>
         function copyUrl() {
