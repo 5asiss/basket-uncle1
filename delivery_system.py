@@ -23,6 +23,7 @@ db_delivery = SQLAlchemy()
 # --------------------------------------------------------------------------------
 # 모든 관리자 페이지에서 공통으로 사용할 상단바 설계도입니다.
 def get_admin_nav():
+    # request.path를 확인해서 현재 위치한 메뉴에 초록색 밑줄을 그어줍니다.
     return """
     <nav class="bg-white border-b h-16 flex items-center justify-between px-6 sticky top-0 z-50 shadow-sm">
         <div class="flex items-center gap-8">
