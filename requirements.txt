@@ -6,6 +6,7 @@ python-dotenv
 requests
 pandas
 openpyxl
+Pillow
 pywebpush
 py-vapid
 gunicorn
