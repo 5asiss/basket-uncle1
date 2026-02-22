@@ -3754,6 +3754,48 @@ def auth_kakao_callback():
     return resp
 
 
+def _auth_status_json():
+    """통합 로그인 설정 점검 JSON (관리자 확인 후 반환)."""
+    base = request.url_root.rstrip('/')
+    return jsonify({
+        "flask_secret_set": bool(os.getenv("FLASK_SECRET_KEY")),
+        "naver": {
+            "client_id_set": bool(os.getenv("NAVER_CLIENT_ID")),
+            "client_secret_set": bool(os.getenv("NAVER_CLIENT_SECRET")),
+            "redirect_uri": base + "/auth/naver/callback",
+        },
+        "google": {
+            "client_id_set": bool(os.getenv("GOOGLE_CLIENT_ID")),
+            "client_secret_set": bool(os.getenv("GOOGLE_CLIENT_SECRET")),
+            "redirect_uri": base + "/auth/google/callback",
+        },
+        "kakao": {
+            "rest_api_key_set": bool(os.getenv("KAKAO_REST_API_KEY") or os.getenv("KAKAO_CLIENT_ID")),
+            "client_secret_set": bool(os.getenv("KAKAO_CLIENT_SECRET")),
+            "redirect_uri": base + "/auth/kakao/callback",
+        },
+        "hint": "각 redirect_uri를 해당 개발자 콘솔에 동일하게 등록해야 합니다. FLASK_SECRET_KEY가 없으면 세션이 유지되지 않아 콜백 시 오류가 납니다.",
+    })
+
+
+@app.route('/admin/auth-status')
+@login_required
+def admin_auth_status():
+    """통합 로그인 설정 점검 (관리자 전용)."""
+    if not getattr(current_user, 'is_admin', False):
+        return jsonify({"error": "권한 없음"}), 403
+    return _auth_status_json()
+
+
+@app.route('/auth/status')
+@login_required
+def auth_status():
+    """통합 로그인 설정 점검 (관리자 전용). /admin/auth-status 가 404일 때 이 URL 사용."""
+    if not getattr(current_user, 'is_admin', False):
+        return jsonify({"error": "권한 없음"}), 403
+    return _auth_status_json()
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """로그인 라우트"""
@@ -4626,10 +4668,24 @@ def cart():
 @app.route('/order/confirm')
 @login_required
 def order_confirm():
-    """결제 전 최종 확인 (한글화 및 폰트 최적화 버전)"""
+    """결제 전 확인. 1차 주소 확인(일반 구역) 통과 시 바로 결제 페이지로, 미통과 시 2차 퀵 구역 확인 후 추가배송료 적용."""
     items = Cart.query.filter_by(user_id=current_user.id).all()
     if not items: return redirect('/')
     
+    # 1차: 주소(배송 구역) 확인
+    zone_type = get_delivery_zone_type(current_user.address or "")
+    
+    # 1차 통과(일반 구역) → 바로 결제 모듈 호출: session 세팅 후 결제 페이지로 리다이렉트
+    if zone_type == 'normal':
+        session['order_address'] = current_user.address or ""
+        session['order_address_detail'] = current_user.address_detail or ""
+        session['order_entrance_pw'] = current_user.entrance_pw or ""
+        session['save_address_to_profile'] = False
+        session['points_used'] = 0
+        session['quick_extra_fee'] = 0
+        return redirect(url_for('order_payment'))
+    
+    # 1차 미통과: 퀵 구역 또는 배송 불가. 퀵이면 2차 추가배송료 적용 후 결제 가능
     cat_price_sums = {}
     for i in items: 
         cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
@@ -4641,8 +4697,6 @@ def order_confirm():
     can_use_points = total >= min_order_to_use and user_points > 0
     max_use = min(user_points, max_points_per_order, total) if can_use_points else 0
     
-    # 배송구역: 일반폴리곤=배송가능, 퀵폴리곤=추가료 동의 시 주문, 그 외=배송불가
-    zone_type = get_delivery_zone_type(current_user.address or "")
     quick_extra_fee, quick_extra_message = get_quick_extra_config()
     is_songdo = zone_type in ('normal', 'quick')
     is_quick_zone = (zone_type == 'quick')
@@ -4651,13 +4705,17 @@ def order_confirm():
     content = f"""
     <div class="max-w-xl mx-auto py-12 md:py-20 px-4 md:px-6 font-black text-left">
         <h2 class="text-2xl md:text-3xl font-black mb-10 border-b-4 border-teal-600 pb-4 text-center uppercase italic">
-            주문 확인
+            주문 확인 (2차: 퀵 구역 확인)
         </h2>
         
         <div class="bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border border-gray-50 space-y-10 text-left">
+            <div class="p-4 rounded-2xl bg-gray-100 border border-gray-200 text-[11px] text-gray-600 font-bold">
+                <p class="mb-1">1차: 일반 배송 구역이 아닙니다.</p>
+                <p class="text-amber-700 font-black">2차: 퀵 지정 구역 적용 여부를 확인해 주세요.</p>
+            </div>
             
-            <div class="p-6 md:p-8 {'bg-teal-50 border-teal-100' if zone_type == 'normal' else 'bg-amber-50 border-amber-200' if zone_type == 'quick' else 'bg-red-50 border-red-100'} rounded-3xl border relative overflow-hidden">
-                <span class="{'text-teal-600' if zone_type == 'normal' else 'text-amber-700' if zone_type == 'quick' else 'text-red-600'} text-[10px] block uppercase font-black mb-3 tracking-widest">
+            <div class="p-6 md:p-8 {'bg-amber-50 border-amber-200' if zone_type == 'quick' else 'bg-red-50 border-red-100'} rounded-3xl border relative overflow-hidden">
+                <span class="{'text-amber-700' if zone_type == 'quick' else 'text-red-600'} text-[10px] block uppercase font-black mb-3 tracking-widest">
                     배송지 정보
                 </span>
                 <p class="text-sm text-gray-500 mb-3 font-bold leading-relaxed">배송주소는 변경 가능하며, 변경한 주소를 회원정보(기본 배송지)에 저장할 수 있습니다.</p>
@@ -4684,12 +4742,13 @@ def order_confirm():
                     <button type="button" id="btn-apply-address" class="block w-full py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black">적용</button>
                 </div>
                 <p class="mt-4 font-black text-sm" id="zone-status-msg">
-                    {'<span class="text-teal-600 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송 가능 지역입니다.</span>' if zone_type == 'normal' else '<span class="text-amber-700 flex items-center gap-2"><i class="fas fa-truck-fast"></i> 퀵 배송 지역입니다. 추가 배송료 동의 시 주문 가능.</span>' if zone_type == 'quick' else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 배송가능주소 아닙니다.</span>'}
+                    {'<span class="text-amber-700 flex items-center gap-2"><i class="fas fa-truck-fast"></i> 2차 확인: 퀵 지정 구역입니다. 추가 배송료 동의 시 주문 가능.</span>' if zone_type == 'quick' else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 2차: 퀵 지정 구역도 아닙니다. 배송 불가.</span>'}
                 </p>
             </div>
 
-            {f'<div class="p-6 bg-red-100 rounded-2xl text-red-700 text-xs md:text-sm font-bold leading-relaxed">⚠️ 배송가능주소 아닙니다. 주소를 수정해 주세요.</div>' if zone_type == 'unavailable' else ''}
+            {f'<div class="p-6 bg-red-100 rounded-2xl text-red-700 text-xs md:text-sm font-bold leading-relaxed">⚠️ 1차·2차 모두 해당 구역이 없습니다. 배송 가능 주소로 수정해 주세요.</div>' if zone_type == 'unavailable' else ''}
             {f'''<div class="p-6 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs md:text-sm font-bold leading-relaxed">
+                <p class="mb-2 font-black">2차: 퀵 지정 구역 — 추가 배송료 적용</p>
                 <p class="mb-3">{ quick_extra_message }</p>
                 <p class="mb-3">퀵 추가 배송료: <strong>{ "{:,}".format(quick_extra_fee) }원</strong></p>
                 <label class="flex items-start gap-3 cursor-pointer mt-4">
