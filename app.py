@@ -55,9 +55,12 @@ def admin_logi_redirect():
     """/admin/logi 접속 시 배송(로지) 시스템(/logi)으로 리다이렉트"""
     return redirect('/logi')
 
-# 결제 연동 키 (Toss Payments)
-TOSS_CLIENT_KEY = os.getenv("TOSS_CLIENT_KEY")
-TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY")
+# 결제 연동 키 (Toss Payments). 비어 있으면 아래 테스트 키 사용.
+# - 고객 취소: 마이페이지 → [품목 취소] 또는 [전체 주문 취소] → 확인 → POST /order/cancel_item 또는 /order/cancel → 토스 취소 API 호출 후 DB 반영.
+# - 직접(관리자) 취소: 관리자 주문/품목에서 상태를 '품절취소' 등으로 변경 시 동일 토스 부분취소 API 호출.
+TOSS_CLIENT_KEY = (os.getenv("TOSS_CLIENT_KEY") or "").strip() or "test_ck_DpexMgkW36zB9qm5m4yd3GbR5ozO"
+TOSS_SECRET_KEY = (os.getenv("TOSS_SECRET_KEY") or "").strip() or "test_sk_0RnYX2w532E5k7JYaJye8NeyqApQ"
+TOSS_CONFIRM_KEY = (os.getenv("TOSS_CONFIRM_KEY") or "").strip() or "f888f57918e6b0de7463b6d5ac1edd05adf1cde50a28b2c8699983fa88541dda"  # 웹훅 서명 검증 등 보안키
 
 # 카카오맵(다음지도) JavaScript 키 - 배송구역 관리 탭에서 사용. 없으면 Leaflet(OSM) 사용
 KAKAO_MAP_APP_KEY = os.getenv("KAKAO_MAP_APP_KEY", "").strip()
@@ -1151,15 +1154,20 @@ FOOTER_HTML = """
         </div>
     </footer>
 
-    <!-- 모바일 전용: 홈 화면에 추가(바로가기) 안내. 아이폰/Android 구분 -->
+    <!-- 모바일 전용: 홈 화면에 추가(바로가기). 버튼 클릭 시 즉시 추가 시도, 설명은 그다음 -->
     <div id="pwa-add-home-banner" class="fixed bottom-0 left-0 right-0 z-40 hidden bg-teal-700 text-white shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
         <div class="max-w-lg mx-auto px-4 py-4 flex items-start gap-3">
             <div class="flex-1 min-w-0">
-                <p class="font-black text-sm mb-0.5" id="pwa-banner-title">📱 상품·배송 알림, 한 번에 받으세요</p>
+                <button type="button" id="pwa-add-home-btn" class="w-full py-3.5 px-4 rounded-xl bg-white text-teal-700 font-black text-sm shadow-lg hover:bg-teal-50 transition active:scale-[0.98] flex items-center justify-center gap-2">
+                    <i class="fas fa-plus-circle text-base"></i> 바로가기 추가
+                </button>
+                <p class="font-black text-sm mt-3 mb-0.5" id="pwa-banner-title">📱 상품·배송 알림, 한 번에 받으세요</p>
                 <p class="text-[11px] text-teal-200 font-bold mb-1" id="pwa-banner-desc">바로가기 추가하면 신상품·주문·배송 정보를 놓치지 않아요</p>
-                <p id="pwa-add-home-text-android" class="text-xs text-teal-100 leading-relaxed hidden">Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong> 또는 <strong>앱 설치</strong></p>
-                <p id="pwa-add-home-text-ios" class="text-xs text-teal-100 leading-relaxed hidden">아이폰: Safari <strong>하단 [공유]</strong> → <strong>홈 화면에 추가</strong></p>
-                <button type="button" id="pwa-install-guide-btn" class="mt-2 text-xs font-black text-teal-200 underline hover:text-white transition">설치방법</button>
+                <div id="pwa-explain-after" class="hidden mt-2 space-y-1">
+                    <p id="pwa-add-home-text-android" class="text-xs text-teal-100 leading-relaxed hidden">Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong> 또는 <strong>앱 설치</strong></p>
+                    <p id="pwa-add-home-text-ios" class="text-xs text-teal-100 leading-relaxed hidden">아이폰: Safari <strong>하단 [공유]</strong> → <strong>홈 화면에 추가</strong></p>
+                    <button type="button" id="pwa-install-guide-btn" class="text-xs font-black text-teal-200 underline hover:text-white transition">자세한 설치방법</button>
+                </div>
             </div>
             <button type="button" id="pwa-add-home-close" class="flex-shrink-0 w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg leading-none" aria-label="닫기">×</button>
         </div>
@@ -1209,13 +1217,27 @@ FOOTER_HTML = """
         if (!isMobile) { banner.remove(); return; }
         var textAndroid = document.getElementById('pwa-add-home-text-android');
         var textIos = document.getElementById('pwa-add-home-text-ios');
-        if (isIOS) { if (textIos) textIos.classList.remove('hidden'); }
-        else { if (textAndroid) textAndroid.classList.remove('hidden'); }
+        var explainAfter = document.getElementById('pwa-explain-after');
+        if (isIOS && textIos) textIos.classList.remove('hidden'); else if (textAndroid) textAndroid.classList.remove('hidden');
+        if (isIOS && textAndroid) textAndroid.classList.add('hidden');
+        if (!isIOS && textIos) textIos.classList.add('hidden');
         banner.classList.remove('hidden');
         banner.classList.add('flex');
         closeBtn.addEventListener('click', function() { sessionStorage.setItem('pwa_add_home_dismissed', '1'); banner.remove(); });
         var p=window.location.pathname; var title=document.getElementById('pwa-banner-title'); var desc=document.getElementById('pwa-banner-desc');
         if(p.indexOf('/admin')===0&&title&&desc){ title.textContent='📱 바삼관리자, 홈에서 바로 열기'; desc.textContent='바로가기 추가하면 홈 화면에 바삼관리자로 뜹니다'; }
+        var deferredPrompt = null;
+        window.addEventListener('beforeinstallprompt', function(e) { e.preventDefault(); deferredPrompt = e; });
+        var addHomeBtn = document.getElementById('pwa-add-home-btn');
+        if (addHomeBtn) {
+            addHomeBtn.addEventListener('click', function() {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    deferredPrompt.userChoice.then(function(r) { if (r.outcome === 'accepted') deferredPrompt = null; });
+                }
+                if (explainAfter) explainAfter.classList.remove('hidden');
+            });
+        }
         var guideBtn = document.getElementById('pwa-install-guide-btn');
         var guideModal = document.getElementById('pwa-install-guide-modal');
         var guideClose = document.getElementById('pwa-install-guide-close');
@@ -3753,23 +3775,24 @@ def login():
         <div class="mb-8">
             <p class="text-[10px] text-gray-400 font-black uppercase tracking-widest text-center mb-4">네이버 · 구글 · 카카오 통합 로그인</p>
             <div class="flex flex-col gap-3">
-                <div class="relative">
-                    {% if recent_login == 'naver' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">→</span></p>{% endif %}
-                    <a href="/auth/naver{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#03C75A] text-white hover:opacity-90 transition shadow-sm"><span class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">N</span> 네이버로 로그인</a>
+                <div class="relative" id="login-option-naver">
+                    {% if recent_login == 'naver' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center justify-center gap-1.5"><span class="inline-block">최근 로그인 (네이버)</span><span class="inline-block text-teal-500 text-sm" aria-hidden="true">↓</span></p>{% endif %}
+                    <a href="/auth/naver{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#03C75A] text-white hover:opacity-90 transition shadow-sm{% if recent_login == 'naver' %} ring-2 ring-teal-400 ring-offset-2{% endif %}"><span class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">N</span> 네이버로 로그인</a>
                 </div>
-                <div class="relative">
-                    {% if recent_login == 'google' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">↓</span></p>{% endif %}
-                    <a href="/auth/google{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-white border-2 border-gray-200 text-gray-700 hover:bg-gray-50 transition"><span class="w-5 h-5 rounded-full bg-[#4285F4] flex items-center justify-center text-white text-[10px]">G</span> 구글로 로그인</a>
+                <div class="relative" id="login-option-google">
+                    {% if recent_login == 'google' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center justify-center gap-1.5"><span class="inline-block">최근 로그인 (구글)</span><span class="inline-block text-teal-500 text-sm" aria-hidden="true">↓</span></p>{% endif %}
+                    <a href="/auth/google{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-white border-2 border-gray-200 text-gray-700 hover:bg-gray-50 transition{% if recent_login == 'google' %} ring-2 ring-teal-400 ring-offset-2{% endif %}"><span class="w-5 h-5 rounded-full bg-[#4285F4] flex items-center justify-center text-white text-[10px]">G</span> 구글로 로그인</a>
                 </div>
-                <div class="relative">
-                    {% if recent_login == 'kakao' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">↓</span></p>{% endif %}
-                    <a href="/auth/kakao{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#FEE500] text-[#191919] hover:opacity-90 transition"><span class="w-5 h-5 rounded-full bg-[#191919] flex items-center justify-center text-[#FEE500] text-[10px]">K</span> 카카오로 로그인</a>
+                <div class="relative" id="login-option-kakao">
+                    {% if recent_login == 'kakao' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center justify-center gap-1.5"><span class="inline-block">최근 로그인 (카카오)</span><span class="inline-block text-teal-500 text-sm" aria-hidden="true">↓</span></p>{% endif %}
+                    <a href="/auth/kakao{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#FEE500] text-[#191919] hover:opacity-90 transition{% if recent_login == 'kakao' %} ring-2 ring-teal-400 ring-offset-2{% endif %}"><span class="w-5 h-5 rounded-full bg-[#191919] flex items-center justify-center text-[#FEE500] text-[10px]">K</span> 카카오로 로그인</a>
                 </div>
             </div>
         </div>
-        <div class="pt-8 border-t border-gray-100">
+        <div class="pt-8 border-t border-gray-100" id="login-option-email">
             <p class="text-[10px] text-gray-400 font-black uppercase tracking-widest text-center mb-4">이메일 로그인</p>
-            <div class="relative">{% if recent_login == 'email' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">↓</span></p>{% endif %}
+            {% if recent_login == 'email' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center justify-center gap-1.5"><span class="inline-block">최근 로그인 (이메일)</span><span class="inline-block text-teal-500 text-sm" aria-hidden="true">↓</span></p>{% endif %}
+            <div class="relative{% if recent_login == 'email' %} rounded-2xl ring-2 ring-teal-400 p-1{% endif %}">
             <form method="POST" class="space-y-8 text-left">
                 <div class="space-y-2 text-left">
                     <label class="text-[10px] text-gray-300 font-black uppercase tracking-widest ml-4 text-left">ID (Email)</label>
@@ -4589,6 +4612,7 @@ def cart():
                 <p class="text-[10px] md:text-xs text-gray-400 mt-6 leading-relaxed font-medium">
                     ※ 배송비: 카테고리별 1,900원. 카테고리별 합계금액이 50,000원 이상이면 해당 카테고리에 1,900원 추가 (카테고리마다 따로 계산).
                 </p>
+                <p class="text-[10px] md:text-xs text-teal-600 mt-2 font-bold">💡 다음 단계에서 배송지 확인·변경이 가능하며, 변경 주소를 회원정보에 저장할 수 있습니다.</p>
             </div>
             
             <a href="/order/confirm" class="block text-center bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 mt-12 hover:bg-teal-700 hover:-translate-y-1 transition active:scale-95">
@@ -4636,11 +4660,30 @@ def order_confirm():
                 <span class="{'text-teal-600' if zone_type == 'normal' else 'text-amber-700' if zone_type == 'quick' else 'text-red-600'} text-[10px] block uppercase font-black mb-3 tracking-widest">
                     배송지 정보
                 </span>
-                <p class="text-lg md:text-xl text-gray-800 font-black leading-snug">
-                    { current_user.address or '정보 없음' }<br>
-                    <span class="text-gray-500">{ current_user.address_detail or '' }</span>
-                </p>
-                <p class="mt-4 font-black text-sm">
+                <p class="text-sm text-gray-500 mb-3 font-bold leading-relaxed">배송주소는 변경 가능하며, 변경한 주소를 회원정보(기본 배송지)에 저장할 수 있습니다.</p>
+                <div id="address-display-block">
+                    <p class="text-lg md:text-xl text-gray-800 font-black leading-snug" id="display-address-text">
+                        { (current_user.address or '정보 없음').replace('<', '&lt;').replace('>', '&gt;') }<br>
+                        <span class="text-gray-500">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
+                    </p>
+                    <button type="button" id="btn-toggle-address" class="mt-4 text-teal-600 hover:text-teal-700 text-sm font-black underline">
+                        <i class="fas fa-edit mr-1"></i> 주소 변경
+                    </button>
+                </div>
+                <div id="address-edit-block" class="hidden space-y-3 mt-2">
+                    <div class="flex gap-2">
+                        <input type="text" id="edit_address" class="flex-1 p-3 bg-white rounded-xl text-sm font-black border border-gray-200" readonly placeholder="주소 검색" onclick="execDaumPostcodeOrder()">
+                        <button type="button" onclick="execDaumPostcodeOrder()" class="bg-gray-700 text-white px-4 rounded-xl text-xs font-black">검색</button>
+                    </div>
+                    <input type="text" id="edit_address_detail" class="w-full p-3 bg-white rounded-xl text-sm font-black border border-gray-200" placeholder="상세주소 (동/호수)">
+                    <input type="text" id="edit_entrance_pw" class="w-full p-3 bg-white rounded-xl text-sm font-black border border-gray-200" placeholder="공동현관 비밀번호 (선택)">
+                    <label class="flex items-start gap-2 cursor-pointer text-sm font-bold text-gray-700">
+                        <input type="checkbox" id="edit_save_to_profile" class="mt-1 w-4 h-4 rounded border-teal-300 text-teal-600">
+                        <span>변경한 주소를 기본 배송지(회원정보)에 저장</span>
+                    </label>
+                    <button type="button" id="btn-apply-address" class="block w-full py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black">적용</button>
+                </div>
+                <p class="mt-4 font-black text-sm" id="zone-status-msg">
                     {'<span class="text-teal-600 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송 가능 지역입니다.</span>' if zone_type == 'normal' else '<span class="text-amber-700 flex items-center gap-2"><i class="fas fa-truck-fast"></i> 퀵 배송 지역입니다. 추가 배송료 동의 시 주문 가능.</span>' if zone_type == 'quick' else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 배송가능주소 아닙니다.</span>'}
                 </p>
             </div>
@@ -4696,6 +4739,10 @@ def order_confirm():
             <form id="payForm" action="/order/payment" method="POST" class="mt-4">
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
                 <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
+                <input type="hidden" name="order_address" id="order_address_hidden" value="{ (current_user.address or '').replace('&', '&amp;').replace('"', '&quot;') }">
+                <input type="hidden" name="order_address_detail" id="order_address_detail_hidden" value="{ (current_user.address_detail or '').replace('&', '&amp;').replace('"', '&quot;') }">
+                <input type="hidden" name="order_entrance_pw" id="order_entrance_pw_hidden" value="{ (current_user.entrance_pw or '').replace('&', '&amp;').replace('"', '&quot;') }">
+                <input type="hidden" name="save_address_to_profile" id="save_address_to_profile_hidden" value="0">
                 {f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 hover:bg-teal-700 transition active:scale-95">안전 결제하기</button>' if zone_type == 'normal' else f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-amber-500 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl hover:bg-amber-600 transition active:scale-95">퀵 추가료 동의 후 결제하기</button>' if zone_type == 'quick' else '<button type="button" class="w-full bg-gray-300 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl cursor-not-allowed" disabled>배송지를 확인해 주세요</button>'}
             </form>
         </div>
@@ -4706,9 +4753,52 @@ def order_confirm():
     var quickExtraFee = { quick_extra_fee };
     var isQuickZone = { 'true' if is_quick_zone else 'false' };
     var totalWithQuick = { total_with_quick };
+    function execDaumPostcodeOrder() {{
+        if (typeof daum === 'undefined' || !daum.Postcode) {{ alert("주소 검색 서비스를 불러오는 중입니다. 잠시 후 다시 시도해 주세요."); return; }}
+        new daum.Postcode({{
+            oncomplete: function(data) {{ document.getElementById('edit_address').value = data.address; document.getElementById('edit_address_detail').focus(); }}
+        }}).open();
+    }}
+    document.getElementById('btn-toggle-address').addEventListener('click', function() {{
+        var block = document.getElementById('address-edit-block');
+        var display = document.getElementById('address-display-block');
+        if (block.classList.contains('hidden')) {{
+            block.classList.remove('hidden');
+            document.getElementById('edit_address').value = document.getElementById('order_address_hidden').value;
+            document.getElementById('edit_address_detail').value = document.getElementById('order_address_detail_hidden').value;
+            document.getElementById('edit_entrance_pw').value = document.getElementById('order_entrance_pw_hidden').value;
+            this.innerHTML = '<i class="fas fa-times mr-1"></i> 취소';
+        }} else {{
+            block.classList.add('hidden');
+            this.innerHTML = '<i class="fas fa-edit mr-1"></i> 주소 변경';
+        }}
+    }});
+    document.getElementById('btn-apply-address').addEventListener('click', function() {{
+        var addr = document.getElementById('edit_address').value.trim();
+        var addrD = document.getElementById('edit_address_detail').value.trim();
+        if (!addr) {{ alert("주소를 검색해 주세요."); return; }}
+        document.getElementById('order_address_hidden').value = addr;
+        document.getElementById('order_address_detail_hidden').value = addrD;
+        document.getElementById('order_entrance_pw_hidden').value = document.getElementById('edit_entrance_pw').value.trim();
+        document.getElementById('save_address_to_profile_hidden').value = document.getElementById('edit_save_to_profile').checked ? '1' : '0';
+        function esc(s) {{ return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }}
+        document.getElementById('display-address-text').innerHTML = esc(addr) + (addrD ? '<br><span class="text-gray-500">' + esc(addrD) + '</span>' : '');
+        document.getElementById('address-edit-block').classList.add('hidden');
+        document.getElementById('btn-toggle-address').innerHTML = '<i class="fas fa-edit mr-1"></i> 주소 변경';
+    }});
     function startPayment() {{
         if(!document.getElementById('consent_agency').checked) {{ alert("구매 대행 서비스 이용 동의가 필요합니다."); return; }}
         if(!document.getElementById('consent_third_party_order').checked) {{ alert("개인정보 제공 동의가 필요합니다."); return; }}
+        var editBlock = document.getElementById('address-edit-block');
+        if (!editBlock.classList.contains('hidden')) {{
+            var ea = document.getElementById('edit_address').value.trim();
+            if (ea) {{
+                document.getElementById('order_address_hidden').value = ea;
+                document.getElementById('order_address_detail_hidden').value = document.getElementById('edit_address_detail').value.trim();
+                document.getElementById('order_entrance_pw_hidden').value = document.getElementById('edit_entrance_pw').value.trim();
+                document.getElementById('save_address_to_profile_hidden').value = document.getElementById('edit_save_to_profile').checked ? '1' : '0';
+            }}
+        }}
         if (isQuickZone) {{
             var q = document.getElementById('quick_agree');
             if (!q || !q.checked) {{ alert("퀵 추가 배송료에 동의해 주세요."); return; }}
@@ -4756,12 +4846,24 @@ def order_payment():
         except ValueError:
             points_used = 0
         quick_agree = request.form.get('quick_agree', '0').strip() in ('1', 'on', 'yes')
+        order_address = request.form.get('order_address', '').strip()
+        order_address_detail = request.form.get('order_address_detail', '').strip()
+        order_entrance_pw = request.form.get('order_entrance_pw', '').strip()
+        save_address_to_profile = request.form.get('save_address_to_profile', '0').strip() in ('1', 'on', 'yes')
+        effective_address = order_address if order_address else (current_user.address or "")
         items = Cart.query.filter_by(user_id=current_user.id).all()
-        if not items or not is_address_in_delivery_zone(current_user.address or ""):
+        if not items:
             return redirect('/order/confirm')
-        zone_type = get_delivery_zone_type(current_user.address or "")
+        if not is_address_in_delivery_zone(effective_address):
+            flash("선택한 배송지는 배송 가능 구역이 아닙니다. 주소를 확인해 주세요.")
+            return redirect('/order/confirm')
+        zone_type = get_delivery_zone_type(effective_address)
         if zone_type == 'quick' and not quick_agree:
             return redirect('/order/confirm')
+        session['order_address'] = effective_address
+        session['order_address_detail'] = order_address_detail if order_address else (current_user.address_detail or "")
+        session['order_entrance_pw'] = order_entrance_pw if order_address else (current_user.entrance_pw or "")
+        session['save_address_to_profile'] = save_address_to_profile
         subtotal = sum(i.price * i.quantity for i in items)
         cat_price_sums = {}
         for i in items:
@@ -4782,7 +4884,8 @@ def order_payment():
         session['quick_extra_fee'] = quick_extra_fee_val
         return redirect(url_for('order_payment'))
     items = Cart.query.filter_by(user_id=current_user.id).all()
-    if not items or not is_address_in_delivery_zone(current_user.address or ""):
+    effective_addr = session.get('order_address') or current_user.address or ""
+    if not items or not is_address_in_delivery_zone(effective_addr):
         return redirect('/order/confirm')
     
     subtotal = sum(i.price * i.quantity for i in items)
@@ -4902,8 +5005,14 @@ def payment_success():
         quick_extra = session.get('quick_extra_fee', 0) or 0
         original_total = int(amt) + points_used  # 결제창에 넘긴 금액(amt) + 사용 포인트 = 주문 원금액
 
+        # 주문 시 변경한 배송지가 있으면 session 값 사용, 없으면 회원 기본 주소 사용
+        delivery_addr = session.get('order_address') or current_user.address or ""
+        delivery_addr_detail = session.get('order_address_detail') or current_user.address_detail or ""
+        delivery_entrance_pw = session.get('order_entrance_pw') or current_user.entrance_pw or ""
+        delivery_address_str = f"({delivery_addr}) {delivery_addr_detail} (현관:{delivery_entrance_pw})"
+
         # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록.
-        order = Order(user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email, product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'), order_id=oid, payment_key=pk, delivery_address=f"({current_user.address}) {current_user.address_detail} (현관:{current_user.entrance_pw})", request_memo=current_user.request_memo, status='결제완료', points_used=points_used, quick_extra_fee=quick_extra)
+        order = Order(user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email, product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'), order_id=oid, payment_key=pk, delivery_address=delivery_address_str, request_memo=current_user.request_memo, status='결제완료', points_used=points_used, quick_extra_fee=quick_extra)
         db.session.add(order)
         db.session.flush()  # order.id 확보
         for i in items:
@@ -4936,8 +5045,19 @@ def payment_success():
             if p: p.stock -= i.quantity
         
         apply_order_points(current_user, original_total, points_used, order.id)
+        if session.get('save_address_to_profile') and delivery_addr:
+            try:
+                current_user.address = delivery_addr
+                current_user.address_detail = delivery_addr_detail
+                current_user.entrance_pw = delivery_entrance_pw
+            except Exception:
+                pass
         session.pop('points_used', None)
         session.pop('quick_extra_fee', None)
+        session.pop('order_address', None)
+        session.pop('order_address_detail', None)
+        session.pop('order_entrance_pw', None)
+        session.pop('save_address_to_profile', None)
         Cart.query.filter_by(user_id=current_user.id).delete()
         db.session.commit()
         title, body = get_template_content('order_created', order_id=oid)
