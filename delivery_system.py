@@ -23,6 +23,7 @@ db_delivery = SQLAlchemy()
 # --------------------------------------------------------------------------------
 # 모든 관리자 페이지에서 공통으로 사용할 상단바 설계도입니다.
 def get_admin_nav():
+    # request.path를 확인해서 현재 위치한 메뉴에 초록색 밑줄을 그어줍니다.
     return """
     <nav class="bg-white border-b h-16 flex items-center justify-between px-6 sticky top-0 z-50 shadow-sm">
         <div class="flex items-center gap-8">
@@ -283,6 +284,7 @@ def logi_admin_dashboard():
                     <a href="{{ url_for('logi.logi_admin_dashboard', status='보류') }}" class="{% if current_status=='보류' %}tab-active{% endif %} pb-1.5 px-1 text-yellow-600">보류</a>
                 </div>
                 <div class="flex items-center gap-3 flex-wrap">
+                    <input type="text" id="logi-chosung-search" placeholder="초성 검색 (주소·이름·품명·기사)" class="border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 bg-white text-[12px] outline-none focus:ring-2 focus:ring-green-400 w-48" maxlength="80">
                     <select onchange="location.href='{{ url_for('logi.logi_admin_dashboard') }}?status={{current_status}}&category='+encodeURIComponent(this.value)" class="border border-slate-100 rounded-xl px-3 py-2 font-black text-slate-400 bg-slate-50 text-[11px] outline-none">
                         <option value="전체">카테고리 전체</option>
                         {% for sc in saved_cats %}<option value="{{sc}}" {% if current_cat == sc %}selected{% endif %}>{{sc}}</option>{% endfor %}
@@ -309,9 +311,9 @@ def logi_admin_dashboard():
                             <th class="p-4 w-24 text-center">Action</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100 bg-white">
+                    <tbody class="divide-y divide-slate-100 bg-white" id="logi-task-tbody">
                         {% for t in tasks %}
-                        <tr class="{% if t.status == '결제취소' %}bg-red-50{% endif %} hover:bg-slate-50 transition">
+                        <tr class="logi-task-row {% if t.status == '결제취소' %}bg-red-50{% endif %} hover:bg-slate-50 transition" data-search="{{ ((t.address or '') + ' ' + (t.product_details or '') + ' ' + (t.customer_name or '') + ' ' + (t.driver_name or '') + ' ' + (t.category or ''))|e }}">
                             <td class="py-3 px-2 text-center w-8">
                                 <input type="checkbox" class="task-check w-4 h-4 rounded border-slate-300 accent-green-600" value="{{t.id}}" data-category="{{ t.category }}">
                             </td>
@@ -366,6 +368,35 @@ def logi_admin_dashboard():
                 if(currentSize > 20) currentSize = 20;
                 document.getElementById('app-body').style.fontSize = currentSize + 'px';
             }
+
+            // 초성 검색: 한글 초성 추출 (ㄱㄲㄴㄷ...)
+            const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+            function getChosung(str) {
+                if (!str) return "";
+                let result = "";
+                for (let i = 0; i < str.length; i++) {
+                    let c = str.charCodeAt(i);
+                    if (c >= 0xAC00 && c <= 0xD7A3) {
+                        result += CHO[Math.floor((c - 0xAC00) / 588)];
+                    } else {
+                        result += str[i];
+                    }
+                }
+                return result;
+            }
+            function applyChosungFilter() {
+                const q = (document.getElementById('logi-chosung-search') || {}).value.trim().toLowerCase();
+                const rows = document.querySelectorAll('.logi-task-row');
+                rows.forEach(tr => {
+                    const text = (tr.getAttribute('data-search') || '');
+                    const rowChosung = getChosung(text).toLowerCase();
+                    const queryChosung = getChosung(q).toLowerCase();
+                    const match = !queryChosung || rowChosung.includes(queryChosung) || text.toLowerCase().includes(q);
+                    tr.style.display = match ? '' : 'none';
+                });
+            }
+            document.getElementById('logi-chosung-search')?.addEventListener('input', applyChosungFilter);
+            document.getElementById('logi-chosung-search')?.addEventListener('keyup', applyChosungFilter);
 
             // [추가] 카테고리별 전체 선택 기능
             function toggleCategoryAll(master, catName) {
@@ -760,6 +791,9 @@ def logi_driver_work():
     {% endif %}
 
     <div class="space-y-4">
+        <div class="px-2 mb-2">
+            <input type="text" id="driver-chosung-search" placeholder="초성 검색 (주소·이름·품명)" class="w-full bg-slate-800 border border-slate-600 text-white rounded-xl px-4 py-3 font-bold text-sm outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500" maxlength="80">
+        </div>
         {% if view_status != 'complete' %}
         <div class="flex items-center justify-between px-2 mb-2">
             <label class="flex items-center gap-3 font-black text-slate-500 text-base cursor-pointer">
@@ -772,7 +806,7 @@ def logi_driver_work():
         {% endif %}
 
         {% for t in tasks %}
-        <div class="task-card border-l-[10px] {% if view_status=='complete' %}border-green-900{% elif view_status=='pickup' %}border-orange-600{% else %}border-blue-600{% endif %}">
+        <div class="driver-task-card task-card border-l-[10px] {% if view_status=='complete' %}border-green-900{% elif view_status=='pickup' %}border-orange-600{% else %}border-blue-600{% endif %}" data-search="{{ ((t.address or '') + ' ' + (t.product_details or '') + ' ' + (t.customer_name or '') + ' ' + (t.category or ''))|e }}">
             {% if view_status == 'complete' %}
                 <div class="flex justify-between items-center">
                     <div class="min-w-0">
@@ -856,6 +890,31 @@ def logi_driver_work():
             if(currentSize < 12) currentSize = 12; if(currentSize > 35) currentSize = 35; 
             document.getElementById('driver-body').style.fontSize = currentSize+'px';
         }
+
+        const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
+        function getChosung(str) {
+            if (!str) return "";
+            let result = "";
+            for (let i = 0; i < str.length; i++) {
+                let c = str.charCodeAt(i);
+                if (c >= 0xAC00 && c <= 0xD7A3) result += CHO[Math.floor((c - 0xAC00) / 588)];
+                else result += str[i];
+            }
+            return result;
+        }
+        function applyDriverChosungFilter() {
+            const q = (document.getElementById('driver-chosung-search') || {}).value.trim().toLowerCase();
+            const cards = document.querySelectorAll('.driver-task-card');
+            cards.forEach(el => {
+                const text = (el.getAttribute('data-search') || '');
+                const rowChosung = getChosung(text).toLowerCase();
+                const queryChosung = getChosung(q).toLowerCase();
+                const match = !queryChosung || rowChosung.includes(queryChosung) || text.toLowerCase().includes(q);
+                el.style.display = match ? '' : 'none';
+            });
+        }
+        document.getElementById('driver-chosung-search')?.addEventListener('input', applyDriverChosungFilter);
+        document.getElementById('driver-chosung-search')?.addEventListener('keyup', applyDriverChosungFilter);
 
         function toggleDriverAll(master) {
             document.querySelectorAll('.task-check').forEach(cb => cb.checked = master.checked);

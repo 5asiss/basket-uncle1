@@ -1,0 +1,19 @@
+# Render Web Service (1차 배포)
+# https://dashboard.render.com → New Web Service → 이 리포지토리 연결 후 아래 설정 참고
+
+# 수동 설정 시 Dashboard 에서:
+# - Build Command: pip install -r requirements.txt
+# - Start Command: gunicorn --bind 0.0.0.0:$PORT app:app
+# - Environment: FLASK_SECRET_KEY, TOSS_CLIENT_KEY, TOSS_SECRET_KEY 등 .env.example 참고
+
+services:
+  - type: web
+    name: basket-uncle
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.12.0"

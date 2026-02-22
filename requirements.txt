@@ -1,10 +1,17 @@
+# 배포/실행
 flask
-flask_sqlalchemy
-flask_login
+flask-sqlalchemy
+flask-login
+python-dotenv
+requests
 pandas
 openpyxl
-werkzeug
+pywebpush
+py-vapid
 gunicorn
-requests
-Pillow
-python-dotenv
+
+# --- 프로젝트 메모 (pip 설치와 무관) ---
+# 배차관리에서 수정할때 기사 타입 (직영/일반) , 픽업완료 버튼 추가 픽업상태 오더관리랑 동기화
+
+
+# 입금 예정일,표시 예정일 지나면, 미수금 확인표시 / 업체 타입 선불·결제일지정·미지정 / 배차관리 기사지급일 설정 등

@@ -1,0 +1,38 @@
+# 환경/비밀
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# DB (로컬 개발용, 업로드 제외)
+*.db
+instance/
+*.sqlite3
+
+# 업로드/미디어 (선택: 서버에서 생성)
+# static/uploads/
+
+# IDE/OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 로그/캐시
+*.log
+.cache/

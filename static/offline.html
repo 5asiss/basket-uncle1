@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>오프라인 - 바구니삼촌</title>
+  <meta name="theme-color" content="#0d9488">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #fafaf9; color: #1c1917; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    .box { text-align: center; max-width: 20rem; }
+    .icon { font-size: 3rem; margin-bottom: 1rem; }
+    h1 { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.5rem; }
+    p { color: #78716c; font-size: 0.875rem; margin: 0 0 1.5rem; }
+    .btn { display: inline-block; background: #0d9488; color: #fff; padding: 0.75rem 1.5rem; border-radius: 9999px; text-decoration: none; font-weight: 600; font-size: 0.875rem; }
+    .btn:hover { background: #0f766e; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="icon">📶</div>
+    <h1>인터넷 연결이 없습니다</h1>
+    <p>연결을 확인한 뒤 새로고침 해 주세요.</p>
+    <a href="/" class="btn">다시 시도</a>
+  </div>
+  <script>
+    window.addEventListener('online', function() { window.location.reload(); });
+  </script>
+</body>
+</html>
