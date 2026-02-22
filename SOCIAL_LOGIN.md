@@ -37,12 +37,12 @@
 
 1. [카카오 개발자](https://developers.kakao.com/) → **내 애플리케이션** → **애플리케이션 추가**
 2. **앱 설정** → **플랫폼** → **Web** 추가 → **사이트 도메인**: `https://your-domain.com` (로컬: `http://localhost:5000`)
-3. **카카오 로그인** → **활성화** ON → **Redirect URI**: `https://your-domain.com/auth/kakao/callback` (로컬: `http://localhost:5000/auth/kakao/callback`)
+3. **카카오 로그인** → **활성화** ON → **Redirect URI**: `https://basam.co.kr/auth/kakao/callback` (로컬: `http://localhost:5000/auth/kakao/callback`)
 4. **앱 키**에서 **REST API 키** 복사. (선택) **카카오 로그인** → **보안**에서 **Client Secret** 생성 후 사용
 5. `.env`에 추가:
    ```env
    KAKAO_REST_API_KEY=발급받은_REST_API_키
-   KAKAO_CLIENT_SECRET=  # 선택 (보안 강화 시)
+   KAKAO_CLIENT_SECRET=  # 선택 (보안 강화 시)1c27b53b6287a15e0ad5ce39a9c2cfc6
    ```
    또는 `KAKAO_CLIENT_ID` 로 같은 REST API 키를 넣어도 동작합니다.
 

@@ -237,6 +237,7 @@ class Order(db.Model):
     request_memo = db.Column(db.String(500))
     created_at = db.Column(db.DateTime, default=datetime.now)
     points_used = db.Column(db.Integer, default=0)  # 이 주문에서 사용한 포인트(원)
+    quick_extra_fee = db.Column(db.Integer, default=0)  # 퀵폴리곤 지역 추가 배송료(원). 0이면 일반 구역
 
 class OrderItem(db.Model):
     """주문 품목 (품목별 ID·부분취소·배송상태 적용)"""
@@ -323,11 +324,16 @@ class SitePopup(db.Model):
 
 
 class DeliveryZone(db.Model):
-    """배송가능 구역 (폴리곤 좌표 목록). 연수구 등 지도 클릭으로 설정."""
+    """배송가능 구역 (폴리곤 좌표 또는 퀵지역 이름/좌표). 그 외 지역은 배송불가."""
     __tablename__ = "delivery_zone"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), default="기본 구역")
-    polygon_json = db.Column(db.Text, nullable=True)  # JSON: [[lat,lng],[lat,lng],...]
+    polygon_json = db.Column(db.Text, nullable=True)  # JSON: [[lat,lng],...] — 일반 배송구역
+    quick_region_polygon_json = db.Column(db.Text, nullable=True)  # JSON: [[lat,lng],...] — 퀵지역(추가료 동의 시 배송)
+    quick_region_names = db.Column(db.Text, nullable=True)  # JSON: ["송도동","선린동"] — 주소 문자열 포함 시 배송가능
+    use_quick_region_only = db.Column(db.Boolean, default=False)  # 보관용
+    quick_extra_fee = db.Column(db.Integer, default=10000)  # 퀵폴리곤 지역 추가 배송료 (원). 관리자 수정 가능
+    quick_extra_message = db.Column(db.Text, nullable=True)  # 퀵 지역 안내 문구. 관리자 수정 가능
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -383,7 +389,7 @@ def send_push_for_user(user_id, title, body, url='/mypage/messages'):
     if not vapid_private:
         return
     try:
-        from pywebpush import webpush, WebPushException
+        from pywebpush import webpush, WebPushException  # pyright: ignore[reportMissingImports]
     except ImportError:
         return
     subs = PushSubscription.query.filter_by(user_id=user_id).all()
@@ -467,30 +473,117 @@ def _geocode_address(address_str):
         return None
 
 
-def is_address_in_delivery_zone(address_str):
-    """주소가 설정된 배송구역 안에 있으면 True. 구역 미설정 시 '송도동' 포함 여부로 판단."""
-    zone = DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
-    if not zone or not zone.polygon_json:
-        return "송도동" in (address_str or "")
+def _get_quick_region_list(zone):
+    """DeliveryZone.quick_region_names JSON 파싱. 비어있거나 오류 시 빈 리스트."""
+    if not zone or not getattr(zone, 'quick_region_names', None):
+        return []
+    try:
+        names = json.loads(zone.quick_region_names)
+        return [str(n).strip() for n in names if n and str(n).strip()]
+    except Exception:
+        return []
+
+
+def _get_zone():
+    """최신 배송구역 1건."""
+    return DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
+
+
+def is_address_in_main_polygon(address_str):
+    """주소가 일반 폴리곤 안에 있으면 True (배송가능지역, 추가료 없음)."""
+    zone = _get_zone()
+    addr = (address_str or "").strip()
+    if not addr or not zone or not zone.polygon_json:
+        return False
     try:
         polygon = json.loads(zone.polygon_json)
         if not polygon or len(polygon) < 3:
-            return "송도동" in (address_str or "")
-        coords = _geocode_address(address_str)
-        if not coords:
-            return "송도동" in (address_str or "")
-        lat, lng = coords
-        return _point_in_polygon(lat, lng, polygon)
+            return False
+        coords = _geocode_address(addr)
+        return bool(coords and _point_in_polygon(coords[0], coords[1], polygon))
     except Exception:
-        return "송도동" in (address_str or "")
+        return False
+
+
+def is_address_in_quick_polygon(address_str):
+    """주소가 퀵 폴리곤 안에 있으면 True (추가료 동의 시 퀵 배송)."""
+    zone = _get_zone()
+    addr = (address_str or "").strip()
+    if not addr or not zone or not getattr(zone, 'quick_region_polygon_json', None):
+        return False
+    try:
+        quick_poly = json.loads(zone.quick_region_polygon_json)
+        if not quick_poly or len(quick_poly) < 3:
+            return False
+        coords = _geocode_address(addr)
+        return bool(coords and _point_in_polygon(coords[0], coords[1], quick_poly))
+    except Exception:
+        return False
+
+
+def get_delivery_zone_type(address_str):
+    """주소 기준 구역 구분. 'normal'=일반폴리곤(배송가능), 'quick'=퀵폴리곤만(추가료 동의 시), 'unavailable'=배송불가."""
+    addr = (address_str or "").strip()
+    if not addr:
+        return 'unavailable'
+    if is_address_in_main_polygon(addr):
+        return 'normal'
+    if is_address_in_quick_polygon(addr):
+        return 'quick'
+    zone = _get_zone()
+    quick = _get_quick_region_list(zone) if zone else []
+    if quick and any(name in addr for name in quick):
+        return 'normal'
+    return 'unavailable'
+
+
+def get_quick_extra_config():
+    """퀵폴리곤 추가료(원)와 안내 문구. (fee, message)."""
+    zone = _get_zone()
+    fee = 10000
+    msg = "해당 주소는 배송지역이 아닙니다. 배송료 추가 시 퀵으로 배송됩니다. 추가하시고 주문하시겠습니까?"
+    if zone:
+        fee = int(getattr(zone, 'quick_extra_fee', None) or 10000)
+        if getattr(zone, 'quick_extra_message', None):
+            msg = (zone.quick_extra_message or "").strip() or msg
+    return fee, msg
+
+
+def is_address_in_delivery_zone(address_str):
+    """주소가 배송 가능한지 (일반 폴리곤 또는 퀵 폴리곤 또는 퀵 이름). 퀵만 있으면 퀵만, 그 외 전부 배송불가."""
+    zone = _get_zone()
+    addr = (address_str or "").strip()
+    if not addr:
+        return False
+    if is_address_in_main_polygon(addr):
+        return True
+    if is_address_in_quick_polygon(addr):
+        return True
+    quick = _get_quick_region_list(zone) if zone else []
+    if quick:
+        return any(name in addr for name in quick)
+    if zone and zone.polygon_json:
+        try:
+            polygon = json.loads(zone.polygon_json)
+            if polygon and len(polygon) >= 3:
+                coords = _geocode_address(addr)
+                if coords:
+                    return _point_in_polygon(coords[0], coords[1], polygon)
+        except Exception:
+            pass
+    return False
 
 
 def _get_user_total_paid(user_id):
-    """회원의 결제완료/배송 기준 누적 결제액 (취소·환불 제외)."""
+    """회원 등급 산정용 누적 구매금액: 배송완료된 품목 금액만 인정 (취소·환불 주문 제외)."""
     from sqlalchemy import func
-    total = db.session.query(func.coalesce(func.sum(Order.total_price + Order.delivery_fee), 0)).filter(
+    total = db.session.query(
+        func.coalesce(func.sum(OrderItem.price * OrderItem.quantity), 0)
+    ).join(Order, OrderItem.order_id == Order.id).filter(
         Order.user_id == user_id,
-        Order.status.notin_(['취소', '환불'])
+        Order.status.notin_(['취소', '환불']),
+        OrderItem.cancelled == False,
+        OrderItem.item_status == '배송완료'
     ).scalar()
     return int(total) if total is not None else 0
 
@@ -3473,7 +3566,9 @@ def auth_naver_callback():
     login_user(user)
     if user.email and user.email.endswith('@social.local'):
         flash("네이버로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
-    return redirect(next_url)
+    resp = redirect(next_url)
+    resp.set_cookie('last_login_method', 'naver', max_age=365*24*3600, samesite='Lax')
+    return resp
 
 
 @app.route('/auth/google')
@@ -3550,7 +3645,9 @@ def auth_google_callback():
     login_user(user)
     if user.email and user.email.endswith('@social.local'):
         flash("구글로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
-    return redirect(next_url)
+    resp = redirect(next_url)
+    resp.set_cookie('last_login_method', 'google', max_age=365*24*3600, samesite='Lax')
+    return resp
 
 
 @app.route('/auth/kakao')
@@ -3630,7 +3727,9 @@ def auth_kakao_callback():
     login_user(user)
     if user.email and user.email.endswith('@social.local'):
         flash("카카오로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
-    return redirect(next_url)
+    resp = redirect(next_url)
+    resp.set_cookie('last_login_method', 'kakao', max_age=365*24*3600, samesite='Lax')
+    return resp
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -3641,34 +3740,51 @@ def login():
         if user and user.password and check_password_hash(user.password, request.form.get('password')):
             session.permanent = True
             login_user(user)
-            return redirect(request.args.get('next') or '/')
+            resp = redirect(request.args.get('next') or '/')
+            resp.set_cookie('last_login_method', 'email', max_age=365*24*3600, samesite='Lax')
+            return resp
         flash("로그인 정보를 다시 한 번 확인해주세요.")
     next_arg = request.args.get('next', '')
     next_q = ('?next=' + requests.utils.quote(next_arg)) if next_arg else ''
+    recent_login = request.cookies.get('last_login_method') or ''
     return render_template_string(HEADER_HTML + """
     <div class="max-w-md mx-auto mt-24 p-10 md:p-16 bg-white rounded-[3rem] md:rounded-[4rem] shadow-2xl border text-left">
-        <h2 class="text-3xl font-black text-center mb-16 text-teal-600 uppercase italic tracking-tighter text-center">Login</h2>
-        <form method="POST" class="space-y-8 text-left">
-            <div class="space-y-2 text-left">
-                <label class="text-[10px] text-gray-300 font-black uppercase tracking-widest ml-4 text-left">ID (Email)</label>
-                <input name="email" type="email" placeholder="email@example.com" class="w-full p-6 bg-gray-50 rounded-3xl font-black focus:ring-4 focus:ring-teal-100 outline-none text-sm text-left" required>
-            </div>
-            <div class="space-y-2 text-left">
-                <label class="text-[10px] text-gray-300 font-black uppercase tracking-widest ml-4 text-left">Password</label>
-                <input name="password" type="password" placeholder="••••••••" class="w-full p-6 bg-gray-50 rounded-3xl font-black focus:ring-4 focus:ring-teal-100 outline-none text-sm text-left" required>
-            </div>
-            <button class="w-full bg-teal-600 text-white py-6 rounded-3xl font-black text-lg md:text-xl shadow-xl hover:bg-teal-700 transition active:scale-95 text-center">로그인</button>
-        </form>
-        <div class="mt-8 pt-8 border-t border-gray-100">
+        <h2 class="text-3xl font-black text-center mb-8 text-teal-600 uppercase italic tracking-tighter text-center">Login</h2>
+        <div class="mb-8">
             <p class="text-[10px] text-gray-400 font-black uppercase tracking-widest text-center mb-4">네이버 · 구글 · 카카오 통합 로그인</p>
             <div class="flex flex-col gap-3">
-                <a href="/auth/naver{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#03C75A] text-white hover:opacity-90 transition shadow-sm"><span class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">N</span> 네이버로 로그인</a>
-                <a href="/auth/google{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-white border-2 border-gray-200 text-gray-700 hover:bg-gray-50 transition"><span class="w-5 h-5 rounded-full bg-[#4285F4] flex items-center justify-center text-white text-[10px]">G</span> 구글로 로그인</a>
-                <a href="/auth/kakao{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#FEE500] text-[#191919] hover:opacity-90 transition"><span class="w-5 h-5 rounded-full bg-[#191919] flex items-center justify-center text-[#FEE500] text-[10px]">K</span> 카카오로 로그인</a>
+                <div class="relative">
+                    {% if recent_login == 'naver' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">→</span></p>{% endif %}
+                    <a href="/auth/naver{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#03C75A] text-white hover:opacity-90 transition shadow-sm"><span class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">N</span> 네이버로 로그인</a>
+                </div>
+                <div class="relative">
+                    {% if recent_login == 'google' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">↓</span></p>{% endif %}
+                    <a href="/auth/google{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-white border-2 border-gray-200 text-gray-700 hover:bg-gray-50 transition"><span class="w-5 h-5 rounded-full bg-[#4285F4] flex items-center justify-center text-white text-[10px]">G</span> 구글로 로그인</a>
+                </div>
+                <div class="relative">
+                    {% if recent_login == 'kakao' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">↓</span></p>{% endif %}
+                    <a href="/auth/kakao{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#FEE500] text-[#191919] hover:opacity-90 transition"><span class="w-5 h-5 rounded-full bg-[#191919] flex items-center justify-center text-[#FEE500] text-[10px]">K</span> 카카오로 로그인</a>
+                </div>
+            </div>
+        </div>
+        <div class="pt-8 border-t border-gray-100">
+            <p class="text-[10px] text-gray-400 font-black uppercase tracking-widest text-center mb-4">이메일 로그인</p>
+            <div class="relative">{% if recent_login == 'email' %}<p class="text-[10px] text-teal-600 font-black mb-1.5 flex items-center gap-1"><span class="inline-block">최근 로그인</span><span class="inline-block text-teal-500" aria-hidden="true">↓</span></p>{% endif %}
+            <form method="POST" class="space-y-8 text-left">
+                <div class="space-y-2 text-left">
+                    <label class="text-[10px] text-gray-300 font-black uppercase tracking-widest ml-4 text-left">ID (Email)</label>
+                    <input name="email" type="email" placeholder="email@example.com" class="w-full p-6 bg-gray-50 rounded-3xl font-black focus:ring-4 focus:ring-teal-100 outline-none text-sm text-left" required>
+                </div>
+                <div class="space-y-2 text-left">
+                    <label class="text-[10px] text-gray-300 font-black uppercase tracking-widest ml-4 text-left">Password</label>
+                    <input name="password" type="password" placeholder="••••••••" class="w-full p-6 bg-gray-50 rounded-3xl font-black focus:ring-4 focus:ring-teal-100 outline-none text-sm text-left" required>
+                </div>
+                <button class="w-full bg-teal-600 text-white py-6 rounded-3xl font-black text-lg md:text-xl shadow-xl hover:bg-teal-700 transition active:scale-95 text-center">로그인</button>
+            </form>
             </div>
         </div>
         <div class="text-center mt-10 text-center"><a href="/register" class="text-gray-400 text-xs font-black hover:text-teal-600 transition text-center text-center">아직 회원이 아니신가요? 회원가입</a></div>
-    </div>""" + FOOTER_HTML, next_q=next_q)
+    </div>""" + FOOTER_HTML, next_q=next_q, recent_login=recent_login)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -3679,7 +3795,7 @@ def register():
         
         # 배송구역 체크 (관리자 설정 폴리곤 또는 기본 송도동)
         if not is_address_in_delivery_zone(addr or ""):
-            flash("배송가능주소 아닙니다. 배송지 주소를 확인해주세요."); return redirect('/register')
+            flash("해당 주소는 배송 가능 구역이 아닙니다. 설정된 퀵지역 내 주소만 가입 가능하며, 그 외 지역은 배송 불가입니다."); return redirect('/register')
 
         if not request.form.get('consent_e_commerce'):
             flash("전자상거래 이용 약관 및 유의사항에 동의해야 합니다."); return redirect('/register')
@@ -3738,7 +3854,7 @@ def update_address():
     ent_pw = request.form.get('entrance_pw')
 
     if not addr or not is_address_in_delivery_zone(addr):
-        flash("배송가능주소 아닙니다. 배송 가능 구역 내 주소로 입력해 주세요.")
+        flash("해당 주소는 배송 가능 구역이 아닙니다. 퀵지역 설정 구역 내 주소만 배송 가능하며, 그 외 지역은 배송 불가입니다.")
         return redirect(url_for('mypage'))
 
     try:
@@ -4172,7 +4288,7 @@ def mypage():
                     return navigator.serviceWorker.ready.then(function(reg) {
                         return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes });
                     }).then(function(sub) {
-                        function abToB64Url(buf) { var b = new Uint8Array(buf); var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); }
+                        function abToB64Url(buf) { var b = new Uint8Array(buf); var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); }
                         var subJson = { endpoint: sub.endpoint, keys: { p256dh: abToB64Url(sub.getKey('p256dh')), auth: abToB64Url(sub.getKey('auth')) } };
                         return fetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: subJson }), credentials: 'same-origin' });
                     }).then(function(r) { return r.json(); }).then(function(d) {
@@ -4501,8 +4617,12 @@ def order_confirm():
     can_use_points = total >= min_order_to_use and user_points > 0
     max_use = min(user_points, max_points_per_order, total) if can_use_points else 0
     
-    # 배송구역 내 주소 여부 (관리자 설정 폴리곤 또는 기본 송도동)
-    is_songdo = is_address_in_delivery_zone(current_user.address or "")
+    # 배송구역: 일반폴리곤=배송가능, 퀵폴리곤=추가료 동의 시 주문, 그 외=배송불가
+    zone_type = get_delivery_zone_type(current_user.address or "")
+    quick_extra_fee, quick_extra_message = get_quick_extra_config()
+    is_songdo = zone_type in ('normal', 'quick')
+    is_quick_zone = (zone_type == 'quick')
+    total_with_quick = total + quick_extra_fee if is_quick_zone else total
 
     content = f"""
     <div class="max-w-xl mx-auto py-12 md:py-20 px-4 md:px-6 font-black text-left">
@@ -4512,8 +4632,8 @@ def order_confirm():
         
         <div class="bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border border-gray-50 space-y-10 text-left">
             
-            <div class="p-6 md:p-8 {'bg-teal-50 border-teal-100' if is_songdo else 'bg-red-50 border-red-100'} rounded-3xl border relative overflow-hidden">
-                <span class="{'text-teal-600' if is_songdo else 'text-red-600'} text-[10px] block uppercase font-black mb-3 tracking-widest">
+            <div class="p-6 md:p-8 {'bg-teal-50 border-teal-100' if zone_type == 'normal' else 'bg-amber-50 border-amber-200' if zone_type == 'quick' else 'bg-red-50 border-red-100'} rounded-3xl border relative overflow-hidden">
+                <span class="{'text-teal-600' if zone_type == 'normal' else 'text-amber-700' if zone_type == 'quick' else 'text-red-600'} text-[10px] block uppercase font-black mb-3 tracking-widest">
                     배송지 정보
                 </span>
                 <p class="text-lg md:text-xl text-gray-800 font-black leading-snug">
@@ -4521,11 +4641,19 @@ def order_confirm():
                     <span class="text-gray-500">{ current_user.address_detail or '' }</span>
                 </p>
                 <p class="mt-4 font-black text-sm">
-                    {'<span class="text-teal-600 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송 가능 지역입니다.</span>' if is_songdo else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 배송가능주소 아닙니다.</span>'}
+                    {'<span class="text-teal-600 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송 가능 지역입니다.</span>' if zone_type == 'normal' else '<span class="text-amber-700 flex items-center gap-2"><i class="fas fa-truck-fast"></i> 퀵 배송 지역입니다. 추가 배송료 동의 시 주문 가능.</span>' if zone_type == 'quick' else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 배송가능주소 아닙니다.</span>'}
                 </p>
             </div>
 
-            {f'<div class="p-6 bg-red-100 rounded-2xl text-red-700 text-xs md:text-sm font-bold leading-relaxed">⚠️ 배송가능주소 아닙니다. 주소를 수정해 주세요.</div>' if not is_songdo else ''}
+            {f'<div class="p-6 bg-red-100 rounded-2xl text-red-700 text-xs md:text-sm font-bold leading-relaxed">⚠️ 배송가능주소 아닙니다. 주소를 수정해 주세요.</div>' if zone_type == 'unavailable' else ''}
+            {f'''<div class="p-6 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs md:text-sm font-bold leading-relaxed">
+                <p class="mb-3">{ quick_extra_message }</p>
+                <p class="mb-3">퀵 추가 배송료: <strong>{ "{:,}".format(quick_extra_fee) }원</strong></p>
+                <label class="flex items-start gap-3 cursor-pointer mt-4">
+                    <input type="checkbox" id="quick_agree" class="mt-1 w-4 h-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500">
+                    <span>위 추가 배송료에 동의하고 퀵으로 주문합니다.</span>
+                </label>
+            </div>''' if is_quick_zone else ''}
 
             <div class="space-y-4 pt-4">
                 <div class="flex justify-between items-end font-black">
@@ -4542,10 +4670,11 @@ def order_confirm():
                 </div>''' if can_use_points else f'<div class="bg-gray-50 p-4 rounded-2xl text-[10px] text-gray-500 font-bold">보유 포인트: { "{:,}".format(user_points) }원. { min_order_to_use and total < min_order_to_use and ("{:,}".format(min_order_to_use) + "원 이상 구매 시 사용 가능합니다.") or "사용 가능한 포인트가 없습니다." }</div>'}
                 <div class="flex justify-between items-end font-black border-t border-gray-100 pt-4">
                     <span class="text-gray-400 text-xs uppercase tracking-widest">최종 결제 금액</span>
-                    <span class="text-4xl md:text-5xl text-teal-600 font-black italic underline underline-offset-8" id="final_amount_display">{ "{:,}".format(total) }원</span>
+                    <span class="text-4xl md:text-5xl text-teal-600 font-black italic underline underline-offset-8" id="final_amount_display">{ "{:,}".format(total if not is_quick_zone else total) }원</span>
                 </div>
+                {f'<p class="text-[10px] text-amber-700 font-bold">퀵 동의 시 결제 금액: <span id="final_with_quick_display">{ "{:,}".format(total_with_quick) }원</span></p>' if is_quick_zone else ''}
                 <div class="bg-orange-50 p-5 rounded-2xl border border-orange-100 text-[10px] md:text-xs text-orange-700 font-bold leading-relaxed">
-                    📢 배송비: 카테고리별 1,900원, 카테고리 합계 50,000원 이상이면 1,900원 추가 (카테고리마다 따로 계산). 현재 배송비: { "{:,}".format(delivery_fee) }원
+                    📢 배송비: 카테고리별 1,900원, 카테고리 합계 50,000원 이상이면 1,900원 추가. 현재 배송비: { "{:,}".format(delivery_fee) }원
                 </div>
             </div>
 
@@ -4566,21 +4695,24 @@ def order_confirm():
 
             <form id="payForm" action="/order/payment" method="POST" class="mt-4">
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
-                {f'<button type="button" onclick="startPayment()" class="w-full bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 hover:bg-teal-700 transition active:scale-95">안전 결제하기</button>' if is_songdo else '<button type="button" class="w-full bg-gray-300 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl cursor-not-allowed" disabled>배송지를 확인해 주세요</button>'}
+                <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
+                {f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 hover:bg-teal-700 transition active:scale-95">안전 결제하기</button>' if zone_type == 'normal' else f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-amber-500 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl hover:bg-amber-600 transition active:scale-95">퀵 추가료 동의 후 결제하기</button>' if zone_type == 'quick' else '<button type="button" class="w-full bg-gray-300 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl cursor-not-allowed" disabled>배송지를 확인해 주세요</button>'}
             </form>
         </div>
     </div>
 
     <script>
     var orderTotal = { total };
+    var quickExtraFee = { quick_extra_fee };
+    var isQuickZone = { 'true' if is_quick_zone else 'false' };
+    var totalWithQuick = { total_with_quick };
     function startPayment() {{
-        if(!document.getElementById('consent_agency').checked) {{
-            alert("구매 대행 서비스 이용 동의가 필요합니다.");
-            return;
-        }}
-        if(!document.getElementById('consent_third_party_order').checked) {{
-            alert("개인정보 제공 동의가 필요합니다.");
-            return;
+        if(!document.getElementById('consent_agency').checked) {{ alert("구매 대행 서비스 이용 동의가 필요합니다."); return; }}
+        if(!document.getElementById('consent_third_party_order').checked) {{ alert("개인정보 제공 동의가 필요합니다."); return; }}
+        if (isQuickZone) {{
+            var q = document.getElementById('quick_agree');
+            if (!q || !q.checked) {{ alert("퀵 추가 배송료에 동의해 주세요."); return; }}
+            document.getElementById('quick_agree_hidden').value = '1';
         }}
         var ptsInput = document.getElementById('points_used_input');
         var pts = ptsInput ? parseInt(ptsInput.value, 10) || 0 : 0;
@@ -4596,14 +4728,23 @@ def order_confirm():
             var v = parseInt(this.value, 10) || 0;
             var m = { max_use };
             if (v > m) this.value = m;
-            var final = orderTotal - (parseInt(this.value, 10) || 0);
+            var base = orderTotal;
+            if (isQuickZone) base = totalWithQuick;
+            var final = base - (parseInt(this.value, 10) || 0);
             var el = document.getElementById('final_amount_display');
             if (el) el.textContent = final.toLocaleString() + '원';
         }});
     }}
+    if (isQuickZone) {{
+        var qAgree = document.getElementById('quick_agree');
+        if (qAgree) qAgree.addEventListener('change', function() {{
+            var el = document.getElementById('final_amount_display');
+            if (el) el.textContent = (this.checked ? totalWithQuick : orderTotal).toLocaleString() + '원';
+        }});
+    }}
     </script>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, total=total, delivery_fee=delivery_fee, is_songdo=is_songdo, user_points=user_points, max_use=max_use, min_order_to_use=min_order_to_use)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, total=total, delivery_fee=delivery_fee, is_songdo=is_songdo, zone_type=zone_type, quick_extra_fee=quick_extra_fee, quick_extra_message=quick_extra_message, total_with_quick=total_with_quick, is_quick_zone=is_quick_zone, user_points=user_points, max_use=max_use, min_order_to_use=min_order_to_use)
 @app.route('/order/payment', methods=['GET', 'POST'])
 @login_required
 def order_payment():
@@ -4614,8 +4755,12 @@ def order_payment():
             points_used = int(points_used) if points_used else 0
         except ValueError:
             points_used = 0
+        quick_agree = request.form.get('quick_agree', '0').strip() in ('1', 'on', 'yes')
         items = Cart.query.filter_by(user_id=current_user.id).all()
         if not items or not is_address_in_delivery_zone(current_user.address or ""):
+            return redirect('/order/confirm')
+        zone_type = get_delivery_zone_type(current_user.address or "")
+        if zone_type == 'quick' and not quick_agree:
             return redirect('/order/confirm')
         subtotal = sum(i.price * i.quantity for i in items)
         cat_price_sums = {}
@@ -4623,6 +4768,10 @@ def order_payment():
             cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
         delivery_fee = sum(1900 + (1900 if amt >= 50000 else 0) for amt in cat_price_sums.values())
         total = subtotal + delivery_fee
+        quick_extra_fee_val = 0
+        if zone_type == 'quick' and quick_agree:
+            quick_extra_fee_val, _ = get_quick_extra_config()
+            total += quick_extra_fee_val
         _, min_order_to_use, max_points_per_order = _get_point_config()
         user_points = getattr(current_user, 'points', 0) or 0
         if points_used < 0:
@@ -4630,6 +4779,7 @@ def order_payment():
         if total < min_order_to_use or points_used > min(user_points, max_points_per_order, total):
             points_used = 0
         session['points_used'] = points_used
+        session['quick_extra_fee'] = quick_extra_fee_val
         return redirect(url_for('order_payment'))
     items = Cart.query.filter_by(user_id=current_user.id).all()
     if not items or not is_address_in_delivery_zone(current_user.address or ""):
@@ -4641,7 +4791,8 @@ def order_payment():
         cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
     delivery_fee = sum(1900 + (1900 if amt >= 50000 else 0) for amt in cat_price_sums.values())
     points_used = session.get('points_used', 0) or 0
-    total_before_points = int(subtotal + delivery_fee)
+    quick_extra_fee_val = session.get('quick_extra_fee', 0) or 0
+    total_before_points = int(subtotal + delivery_fee + quick_extra_fee_val)
     total = total_before_points - points_used  # 토스에 넘길 실제 결제 금액
     tax_free = int(sum(i.price * i.quantity for i in items if i.tax_type == '면세'))
     order_id = f"ORDER_{datetime.now().strftime('%Y%m%d%H%M%S')}_{current_user.id}"
@@ -4748,10 +4899,11 @@ def payment_success():
         for i in items: cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
         delivery_fee = sum(1900 + (1900 if amt_ >= 50000 else 0) for amt_ in cat_price_sums.values())
         points_used = session.get('points_used', 0) or 0
+        quick_extra = session.get('quick_extra_fee', 0) or 0
         original_total = int(amt) + points_used  # 결제창에 넘긴 금액(amt) + 사용 포인트 = 주문 원금액
 
-        # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록)
-        order = Order(user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email, product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'), order_id=oid, payment_key=pk, delivery_address=f"({current_user.address}) {current_user.address_detail} (현관:{current_user.entrance_pw})", request_memo=current_user.request_memo, status='결제완료', points_used=points_used)
+        # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록.
+        order = Order(user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email, product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'), order_id=oid, payment_key=pk, delivery_address=f"({current_user.address}) {current_user.address_detail} (현관:{current_user.entrance_pw})", request_memo=current_user.request_memo, status='결제완료', points_used=points_used, quick_extra_fee=quick_extra)
         db.session.add(order)
         db.session.flush()  # order.id 확보
         for i in items:
@@ -4785,6 +4937,7 @@ def payment_success():
         
         apply_order_points(current_user, original_total, points_used, order.id)
         session.pop('points_used', None)
+        session.pop('quick_extra_fee', None)
         Cart.query.filter_by(user_id=current_user.id).delete()
         db.session.commit()
         title, body = get_template_content('order_created', order_id=oid)
@@ -4989,7 +5142,7 @@ def admin_order_items(order_id):
             flash("해당 주문에 대한 권한이 없습니다.")
             return redirect('/admin?tab=orders')
     order_items = OrderItem.query.filter_by(order_id=order_id).order_by(OrderItem.id.asc()).all()
-    return render_template_string("""
+    _order_item_status_tpl = """
     <!DOCTYPE html>
     <html lang="ko">
     <head>
@@ -5080,41 +5233,166 @@ def admin_order_items(order_id):
         </script>
     </body>
     </html>
-    """, order=order, order_items=order_items)
+    """
+    return render_template_string(_order_item_status_tpl, order=order, order_items=order_items)
+
+
+def _ensure_delivery_zone_columns():
+    """delivery_zone 테이블에 퀵지역·그 외 배송불가용 컬럼이 없으면 추가 (기존 DB 호환)."""
+    try:
+        from sqlalchemy import inspect
+        insp = inspect(db.engine)
+        cols = [c['name'] for c in insp.get_columns('delivery_zone')]
+        if 'quick_region_names' not in cols:
+            db.session.execute(text("ALTER TABLE delivery_zone ADD COLUMN quick_region_names TEXT"))
+            db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+    try:
+        from sqlalchemy import inspect
+        insp = inspect(db.engine)
+        cols = [c['name'] for c in insp.get_columns('delivery_zone')]
+        if 'use_quick_region_only' not in cols:
+            db.session.execute(text("ALTER TABLE delivery_zone ADD COLUMN use_quick_region_only BOOLEAN DEFAULT 0"))
+            db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+    try:
+        from sqlalchemy import inspect
+        insp = inspect(db.engine)
+        cols = [c['name'] for c in insp.get_columns('delivery_zone')]
+        if 'quick_region_polygon_json' not in cols:
+            db.session.execute(text("ALTER TABLE delivery_zone ADD COLUMN quick_region_polygon_json TEXT"))
+            db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+    for col, sql in [
+        ('quick_extra_fee', 'ALTER TABLE delivery_zone ADD COLUMN quick_extra_fee INTEGER DEFAULT 10000'),
+        ('quick_extra_message', 'ALTER TABLE delivery_zone ADD COLUMN quick_extra_message TEXT'),
+    ]:
+        try:
+            insp = inspect(db.engine)
+            cols = [c['name'] for c in insp.get_columns('delivery_zone')]
+            if col not in cols:
+                db.session.execute(text(sql))
+                db.session.commit()
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+    try:
+        insp = inspect(db.engine)
+        cols = [c['name'] for c in insp.get_columns('order')]
+        if 'quick_extra_fee' not in cols:
+            db.session.execute(text("ALTER TABLE \"order\" ADD COLUMN quick_extra_fee INTEGER DEFAULT 0"))
+            db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
 
 @app.route('/admin/delivery_zone/api', methods=['GET', 'POST'])
 @login_required
 def admin_delivery_zone_api():
-    """배송구역 폴리곤: GET=반환, POST=저장 (마스터 관리자 전용)"""
+    """배송구역: GET=폴리곤·퀵지역 반환, POST=폴리곤 또는 퀵지역 저장 (마스터 관리자 전용). 퀵지역만 사용 시 그 외 지역 배송불가."""
     if not current_user.is_admin:
         return jsonify({'error': '권한 없음'}), 403
+    _ensure_delivery_zone_columns()
     if request.method == 'GET':
         z = DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
-        if not z or not z.polygon_json:
-            return jsonify({'polygon': []})
-        try:
-            polygon = json.loads(z.polygon_json)
-            return jsonify({'polygon': polygon})
-        except Exception:
-            return jsonify({'polygon': []})
+        polygon = []
+        quick_region_polygon = []
+        quick_region_names = []
+        use_quick_region_only = False
+        quick_extra_fee = 10000
+        quick_extra_message = ''
+        if z:
+            if z.polygon_json:
+                try:
+                    polygon = json.loads(z.polygon_json)
+                except Exception:
+                    pass
+            if getattr(z, 'quick_region_polygon_json', None):
+                try:
+                    quick_region_polygon = json.loads(z.quick_region_polygon_json) or []
+                except Exception:
+                    pass
+            if getattr(z, 'quick_region_names', None):
+                try:
+                    quick_region_names = json.loads(z.quick_region_names) or []
+                except Exception:
+                    pass
+            use_quick_region_only = bool(getattr(z, 'use_quick_region_only', False))
+            quick_extra_fee = int(getattr(z, 'quick_extra_fee', None) or 10000)
+            quick_extra_message = (getattr(z, 'quick_extra_message', None) or '') or ''
+        return jsonify({'polygon': polygon, 'quick_region_polygon': quick_region_polygon, 'quick_region_names': quick_region_names, 'use_quick_region_only': use_quick_region_only, 'quick_extra_fee': quick_extra_fee, 'quick_extra_message': quick_extra_message})
     # POST
-    data = request.get_json()
-    if not data or 'polygon' not in data:
-        return jsonify({'error': 'polygon 필드 필요'}), 400
-    polygon = data['polygon']
-    if not isinstance(polygon, list) or len(polygon) < 3:
-        return jsonify({'error': '꼭짓점 3개 이상 필요'}), 400
-    try:
-        json.dumps(polygon)
-    except (TypeError, ValueError):
-        return jsonify({'error': '유효한 좌표 배열이 아님'}), 400
+    data = request.get_json() or {}
     z = DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
     if not z:
-        z = DeliveryZone(name='연수구', polygon_json=json.dumps(polygon))
+        z = DeliveryZone(name='연수구')
         db.session.add(z)
-    else:
-        z.polygon_json = json.dumps(polygon)
+        db.session.flush()
+    updated = False
+    if 'polygon' in data:
+        polygon = data['polygon']
+        if polygon is not None:
+            if not isinstance(polygon, list) or len(polygon) < 3:
+                return jsonify({'error': '꼭짓점 3개 이상 필요'}), 400
+            try:
+                json.dumps(polygon)
+            except (TypeError, ValueError):
+                return jsonify({'error': '유효한 좌표 배열이 아님'}), 400
+            z.polygon_json = json.dumps(polygon)
+            updated = True
+    if 'quick_region_names' in data:
+        val = data['quick_region_names']
+        if isinstance(val, str):
+            val = [n.strip() for n in val.replace('，', ',').split(',') if n.strip()]
+        if isinstance(val, list):
+            z.quick_region_names = json.dumps([str(n).strip() for n in val if str(n).strip()])
+            updated = True
+    if 'use_quick_region_only' in data:
+        z.use_quick_region_only = data['use_quick_region_only'] in (True, 'true', '1', 1)
+        updated = True
+    if 'quick_region_polygon' in data:
+        qrp = data['quick_region_polygon']
+        if qrp is None or (isinstance(qrp, list) and len(qrp) == 0):
+            z.quick_region_polygon_json = None
+            updated = True
+        elif isinstance(qrp, list) and len(qrp) >= 3:
+            try:
+                json.dumps(qrp)
+                z.quick_region_polygon_json = json.dumps(qrp)
+                updated = True
+            except (TypeError, ValueError):
+                return jsonify({'error': '퀵지역 폴리곤 좌표가 유효하지 않습니다.'}), 400
+        else:
+            return jsonify({'error': '퀵지역 폴리곤은 꼭짓점 3개 이상 필요합니다.'}), 400
+    if 'quick_extra_fee' in data:
+        try:
+            v = data['quick_extra_fee']
+            z.quick_extra_fee = int(v) if v not in (None, '') else 10000
+            updated = True
+        except (TypeError, ValueError):
+            z.quick_extra_fee = 10000
+            updated = True
+    if 'quick_extra_message' in data:
+        z.quick_extra_message = (data['quick_extra_message'] or '').strip() or None
+        updated = True
+    if updated:
         z.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify({'ok': True})
@@ -5523,14 +5801,34 @@ def admin_dashboard():
         category_names = {c.id: c.name for c in Category.query.all()}  # 리뷰 테이블에서 판매자명 표시용
 
     delivery_zone_polygon = []
+    delivery_zone_quick_polygon = []
+    delivery_zone_quick_regions = []
+    delivery_zone_use_quick_only = False
+    delivery_zone_quick_extra_fee = 10000
+    delivery_zone_quick_extra_message = ''
     kakao_map_app_key = KAKAO_MAP_APP_KEY
     if tab == 'delivery_zone' and is_master:
+        _ensure_delivery_zone_columns()
         z = DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
-        if z and z.polygon_json:
-            try:
-                delivery_zone_polygon = json.loads(z.polygon_json)
-            except Exception:
-                pass
+        if z:
+            if z.polygon_json:
+                try:
+                    delivery_zone_polygon = json.loads(z.polygon_json)
+                except Exception:
+                    pass
+            if getattr(z, 'quick_region_polygon_json', None):
+                try:
+                    delivery_zone_quick_polygon = json.loads(z.quick_region_polygon_json) or []
+                except Exception:
+                    pass
+            if getattr(z, 'quick_region_names', None):
+                try:
+                    delivery_zone_quick_regions = json.loads(z.quick_region_names) or []
+                except Exception:
+                    pass
+            delivery_zone_use_quick_only = bool(getattr(z, 'use_quick_region_only', False))
+            delivery_zone_quick_extra_fee = int(getattr(z, 'quick_extra_fee', None) or 10000)
+            delivery_zone_quick_extra_message = (getattr(z, 'quick_extra_message', None) or '').strip() or '해당 주소는 배송지역이 아닙니다. 배송료 추가 시 퀵으로 배송됩니다. 추가하시고 주문하시겠습니까?'
 
     member_grade_users = []
     member_grade_min2 = member_grade_min3 = member_grade_min4 = member_grade_min5 = 0
@@ -5756,75 +6054,131 @@ def admin_dashboard():
             <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
             {% endif %}
+            <div class="mb-10 p-6 bg-teal-50 border border-teal-200 rounded-2xl">
+                <h3 class="text-base font-black text-teal-800 italic mb-2">퀵지역 설정 <span class="text-teal-600 text-xs font-bold">(우선 적용, 그 외 배송불가)</span></h3>
+                <p class="text-[11px] text-teal-700 font-bold mb-3"><strong>방법 1) 지도에서 좌표로 설정</strong> — 아래 지도에서 「퀵지역 편집」 선택 후 클릭해 꼭짓점을 찍고 <strong>퀵지역 폴리곤 저장</strong>. <strong>방법 2) 지역명 입력</strong> — 주소에 포함되면 배송가능인 지역명을 쉼표로 입력.</p>
+                <p class="text-[10px] text-teal-600 mb-3">※ 퀵지역 좌표(폴리곤)가 있으면 좌표로만 판단합니다. 없으면 지역명으로 판단하며, 둘 다 없으면 일반 폴리곤만 사용합니다.</p>
+                <div class="flex gap-2 flex-wrap items-center mb-3">
+                    <input type="text" id="quick_region_input" value="{{ delivery_zone_quick_regions | join(', ') }}" placeholder="송도동, 선린동 (좌표 대신 사용 시)" class="flex-1 min-w-[200px] border border-teal-200 rounded-xl px-4 py-2.5 text-sm font-bold text-gray-800">
+                    <button type="button" id="quick_region_save_btn" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs shadow hover:bg-teal-700">퀵지역(이름) 저장</button>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer mb-2">
+                    <input type="checkbox" id="use_quick_region_only" {% if delivery_zone_use_quick_only %}checked{% endif %} class="rounded border-teal-300 text-teal-600 focus:ring-teal-500">
+                    <span class="text-sm font-bold text-teal-800">퀵지역만 사용 — 퀵지역(좌표/이름) 있으면 그만 배송가능, 그 외 배송불가</span>
+                </label>
+            </div>
+            <div class="mb-10 p-6 bg-amber-50 border border-amber-200 rounded-2xl">
+                <h3 class="text-base font-black text-amber-800 italic mb-2">퀵 지역 추가 배송료 · 안내 문구 <span class="text-amber-600 text-xs font-bold">(수정 가능)</span></h3>
+                <p class="text-[11px] text-amber-700 font-bold mb-3">퀵 폴리곤 지역 주문 시 결제 화면에 안내되는 문구와 추가 배송료(원)입니다. 동의 시 해당 금액이 결제에 포함됩니다.</p>
+                <div class="flex flex-wrap gap-3 items-end mb-3">
+                    <label class="flex flex-col gap-1">
+                        <span class="text-[10px] text-amber-700 font-black uppercase">퀵 추가 배송료 (원)</span>
+                        <input type="number" id="quick_extra_fee_input" min="0" step="1" value="{{ delivery_zone_quick_extra_fee }}" class="w-32 border border-amber-200 rounded-xl px-3 py-2 text-sm font-black text-gray-800">
+                    </label>
+                    <button type="button" id="quick_extra_save_btn" class="px-5 py-2.5 bg-amber-600 text-white rounded-xl font-black text-xs shadow hover:bg-amber-700">저장</button>
+                </div>
+                <label class="flex flex-col gap-1">
+                    <span class="text-[10px] text-amber-700 font-black uppercase">퀵 배송 안내 문구 (결제 전 고객에게 표시)</span>
+                    <textarea id="quick_extra_message_input" rows="3" class="w-full border border-amber-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-800 placeholder-gray-400" placeholder="해당 주소는 배송지역이 아닙니다. 배송료 추가 시 퀵으로 배송됩니다. 추가하시고 주문하시겠습니까?">{{ delivery_zone_quick_extra_message }}</textarea>
+                </label>
+            </div>
             <div class="mb-12">
-                <h3 class="text-lg font-black text-gray-800 italic mb-2">배송가능 구역 설정 (연수구)</h3>
-                <p class="text-[11px] text-gray-500 font-bold mb-4">지도에서 클릭하여 배송가능 영역 꼭짓점을 찍고, 저장하면 해당 구역 내 주소만 배송가능으로 인식됩니다.</p>
-                <div class="flex gap-3 mb-4 items-center flex-wrap">
-                    <button type="button" id="dz_save_btn" class="px-5 py-2.5 bg-orange-600 text-white rounded-xl font-black text-xs shadow hover:bg-orange-700">저장</button>
-                    <button type="button" id="dz_reset_btn" class="px-5 py-2.5 bg-gray-200 text-gray-700 rounded-xl font-black text-xs hover:bg-gray-300">초기화</button>
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">지도에서 배송구역 설정 (좌표 클릭)</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-2">편집할 구역을 선택한 뒤 지도를 클릭해 꼭짓점을 추가하세요. <span class="text-orange-600 font-black">주황색 = 일반 배송구역</span> (퀵지역 비었을 때만 사용), <span class="text-teal-600 font-black">틸색 = 퀵지역</span> (우선 적용).</p>
+                <div class="flex flex-wrap gap-3 mb-3 items-center">
+                    <span class="text-xs font-black text-gray-600">지금 편집:</span>
+                    <button type="button" id="dz_edit_main_btn" class="px-4 py-2 rounded-xl font-black text-xs bg-orange-100 text-orange-700 border-2 border-orange-300">일반 폴리곤</button>
+                    <button type="button" id="dz_edit_quick_btn" class="px-4 py-2 rounded-xl font-black text-xs bg-teal-100 text-teal-700 border-2 border-teal-300">퀵지역 폴리곤</button>
+                </div>
+                <div class="flex gap-3 mb-3 items-center flex-wrap">
+                    <button type="button" id="dz_save_btn" class="px-5 py-2.5 bg-orange-600 text-white rounded-xl font-black text-xs shadow hover:bg-orange-700">일반 폴리곤 저장</button>
+                    <button type="button" id="dz_reset_btn" class="px-5 py-2.5 bg-gray-200 text-gray-700 rounded-xl font-black text-xs hover:bg-gray-300">일반 초기화</button>
                     <span id="dz_coords_display" class="text-[11px] text-gray-600 font-bold"></span>
                 </div>
+                <div class="flex gap-3 mb-3 items-center flex-wrap">
+                    <button type="button" id="dz_quick_save_btn" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs shadow hover:bg-teal-700">퀵지역 폴리곤 저장</button>
+                    <button type="button" id="dz_quick_reset_btn" class="px-5 py-2.5 bg-gray-200 text-gray-700 rounded-xl font-black text-xs hover:bg-gray-300">퀵지역 초기화</button>
+                    <span id="dz_quick_coords_display" class="text-[11px] text-teal-700 font-bold"></span>
+                </div>
                 <div id="delivery_zone_map" class="w-full rounded-2xl border border-gray-200 overflow-hidden" style="height: 500px;"></div>
-                <p class="text-[10px] text-gray-500 mt-2">연수구 중심. 클릭 시 꼭짓점 추가, 3점 이상 저장 가능. {% if not kakao_map_app_key %}(카카오맵 사용: 환경변수 KAKAO_MAP_APP_KEY 설정){% endif %}</p>
+                <p class="text-[10px] text-gray-500 mt-2">꼭짓점 3개 이상 필요. {% if not kakao_map_app_key %}(카카오맵: KAKAO_MAP_APP_KEY 설정){% endif %}</p>
             </div>
             <script>
             (function(){
                 var initialPolygon = {{ delivery_zone_polygon | tojson }};
+                var initialQuickPolygon = {{ delivery_zone_quick_polygon | tojson }};
                 var yeonsu = [37.3931, 126.6397];
                 var points = Array.isArray(initialPolygon) ? initialPolygon.slice() : [];
+                var quickPoints = Array.isArray(initialQuickPolygon) ? initialQuickPolygon.slice() : [];
+                var editMode = 'main';
                 var useKakao = {{ 'true' if kakao_map_app_key else 'false' }};
 
                 function updateCoordsDisplay() {
                     var el = document.getElementById('dz_coords_display');
-                    if (el) el.textContent = points.length ? '꼭짓점 ' + points.length + '개: ' + points.map(function(p){ return p[0].toFixed(5)+','+p[1].toFixed(5); }).join(' → ') : '';
+                    if (el) el.textContent = points.length ? '일반 꼭짓점 ' + points.length + '개' : '';
+                    var qel = document.getElementById('dz_quick_coords_display');
+                    if (qel) qel.textContent = quickPoints.length ? '퀵지역 꼭짓점 ' + quickPoints.length + '개' : '';
+                    var mainBtn = document.getElementById('dz_edit_main_btn');
+                    var quickBtn = document.getElementById('dz_edit_quick_btn');
+                    if (mainBtn) { mainBtn.className = editMode === 'main' ? 'px-4 py-2 rounded-xl font-black text-xs bg-orange-600 text-white border-2 border-orange-700' : 'px-4 py-2 rounded-xl font-black text-xs bg-orange-100 text-orange-700 border-2 border-orange-300'; }
+                    if (quickBtn) { quickBtn.className = editMode === 'quick' ? 'px-4 py-2 rounded-xl font-black text-xs bg-teal-600 text-white border-2 border-teal-700' : 'px-4 py-2 rounded-xl font-black text-xs bg-teal-100 text-teal-700 border-2 border-teal-300'; }
                 }
 
                 function bindButtons() {
                     document.getElementById('dz_save_btn').addEventListener('click', function() {
-                        if (points.length < 3) { alert('꼭짓점을 3개 이상 찍어주세요.'); return; }
-                        fetch('/admin/delivery_zone/api', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                            body: JSON.stringify({ polygon: points })
-                        }).then(function(r) { return r.json(); }).then(function(data) {
-                            if (data.error) { alert(data.error); return; }
-                            alert('저장되었습니다.');
-                        }).catch(function() { alert('저장 실패'); });
+                        if (points.length < 3) { alert('일반 폴리곤 꼭짓점을 3개 이상 찍어주세요.'); return; }
+                        fetch('/admin/delivery_zone/api', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ polygon: points }) })
+                        .then(function(r) { return r.json(); }).then(function(d) { if (d.error) alert(d.error); else alert('일반 폴리곤 저장되었습니다.'); }).catch(function() { alert('저장 실패'); });
                     });
-                    document.getElementById('dz_reset_btn').addEventListener('click', function() {
-                        points = [];
-                        if (window.dzRedraw) window.dzRedraw();
-                        updateCoordsDisplay();
+                    document.getElementById('dz_reset_btn').addEventListener('click', function() { points = []; if (window.dzRedraw) window.dzRedraw(); updateCoordsDisplay(); });
+                    document.getElementById('dz_quick_save_btn').addEventListener('click', function() {
+                        if (quickPoints.length < 3) { alert('퀵지역 폴리곤 꼭짓점을 3개 이상 찍어주세요.'); return; }
+                        fetch('/admin/delivery_zone/api', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ quick_region_polygon: quickPoints }) })
+                        .then(function(r) { return r.json(); }).then(function(d) { if (d.error) alert(d.error); else alert('퀵지역 폴리곤 저장되었습니다. 그 외 지역 배송불가 적용.'); }).catch(function() { alert('저장 실패'); });
+                    });
+                    document.getElementById('dz_quick_reset_btn').addEventListener('click', function() { quickPoints = []; if (window.dzRedraw) window.dzRedraw(); updateCoordsDisplay(); });
+                    document.getElementById('dz_edit_main_btn').addEventListener('click', function() { editMode = 'main'; updateCoordsDisplay(); });
+                    document.getElementById('dz_edit_quick_btn').addEventListener('click', function() { editMode = 'quick'; updateCoordsDisplay(); });
+                    var qrInput = document.getElementById('quick_region_input');
+                    var useQuickOnlyCb = document.getElementById('use_quick_region_only');
+                    document.getElementById('quick_region_save_btn').addEventListener('click', function() {
+                        var raw = (qrInput && qrInput.value) ? qrInput.value.trim() : '';
+                        var list = raw ? raw.replace(/，/g, ',').split(',').map(function(s){ return s.trim(); }).filter(Boolean) : [];
+                        var useQuickOnly = useQuickOnlyCb && useQuickOnlyCb.checked;
+                        fetch('/admin/delivery_zone/api', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ quick_region_names: list, use_quick_region_only: useQuickOnly }) })
+                        .then(function(r) { return r.json(); }).then(function(d) { if (d.error) alert(d.error); else alert('퀵지역(이름) 저장되었습니다.'); }).catch(function() { alert('저장 실패'); });
+                    });
+                    var feeIn = document.getElementById('quick_extra_fee_input');
+                    var msgIn = document.getElementById('quick_extra_message_input');
+                    document.getElementById('quick_extra_save_btn').addEventListener('click', function() {
+                        var fee = feeIn ? (parseInt(feeIn.value, 10) || 0) : 10000;
+                        var msg = (msgIn && msgIn.value) ? msgIn.value.trim() : '';
+                        fetch('/admin/delivery_zone/api', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ quick_extra_fee: fee, quick_extra_message: msg }) })
+                        .then(function(r) { return r.json(); }).then(function(d) { if (d.error) alert(d.error); else alert('퀵 추가 배송료·안내 문구가 저장되었습니다.'); }).catch(function() { alert('저장 실패'); });
                     });
                 }
 
                 if (useKakao && typeof kakao !== 'undefined') {
                     kakao.maps.load(function() {
                         var container = document.getElementById('delivery_zone_map');
-                        var options = { center: new kakao.maps.LatLng(yeonsu[0], yeonsu[1]), level: 5 };
-                        var map = new kakao.maps.Map(container, options);
-                        var kakaoMarkers = [];
-                        var kakaoLine = null;
+                        var map = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(yeonsu[0], yeonsu[1]), level: 5 });
+                        var mainMarkers = [], mainLine = null, quickMarkers = [], quickLine = null;
 
                         window.dzRedraw = function() {
-                            kakaoMarkers.forEach(function(m) { m.setMap(null); });
-                            kakaoMarkers = [];
-                            if (kakaoLine) { kakaoLine.setMap(null); kakaoLine = null; }
-                            points.forEach(function(p) {
-                                var m = new kakao.maps.Marker({ position: new kakao.maps.LatLng(p[0], p[1]), map: map });
-                                kakaoMarkers.push(m);
-                            });
-                            if (points.length >= 2) {
-                                var path = points.map(function(p) { return new kakao.maps.LatLng(p[0], p[1]); });
-                                kakaoLine = new kakao.maps.Polyline({ path: path, strokeColor: '#ea580c', strokeWeight: 4 });
-                                kakaoLine.setMap(map);
-                            }
+                            mainMarkers.forEach(function(m) { m.setMap(null); }); mainMarkers = [];
+                            if (mainLine) { mainLine.setMap(null); mainLine = null; }
+                            points.forEach(function(p) { mainMarkers.push(new kakao.maps.Marker({ position: new kakao.maps.LatLng(p[0], p[1]), map: map })); });
+                            if (points.length >= 2) { mainLine = new kakao.maps.Polyline({ path: points.map(function(p){ return new kakao.maps.LatLng(p[0],p[1]); }), strokeColor: '#ea580c', strokeWeight: 4 }); mainLine.setMap(map); }
+                            quickMarkers.forEach(function(m) { m.setMap(null); }); quickMarkers = [];
+                            if (quickLine) { quickLine.setMap(null); quickLine = null; }
+                            quickPoints.forEach(function(p) { quickMarkers.push(new kakao.maps.Marker({ position: new kakao.maps.LatLng(p[0], p[1]), map: map })); });
+                            if (quickPoints.length >= 2) { quickLine = new kakao.maps.Polyline({ path: quickPoints.map(function(p){ return new kakao.maps.LatLng(p[0],p[1]); }), strokeColor: '#0d9488', strokeWeight: 5 }); quickLine.setMap(map); }
                             updateCoordsDisplay();
                         };
 
-                        kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
-                            var latlng = mouseEvent.latLng;
-                            points.push([latlng.getLat(), latlng.getLng()]);
+                        kakao.maps.event.addListener(map, 'click', function(ev) {
+                            var lat = ev.latLng.getLat(), lng = ev.latLng.getLng();
+                            if (editMode === 'main') points.push([lat, lng]); else quickPoints.push([lat, lng]);
                             window.dzRedraw();
                         });
 
@@ -5834,19 +6188,23 @@ def admin_dashboard():
                 } else {
                     var map = L.map('delivery_zone_map').setView(yeonsu, 14);
                     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
-                    var layerGroup = L.layerGroup().addTo(map);
-                    var polyLine = null;
+                    var mainLayer = L.layerGroup().addTo(map), quickLayer = L.layerGroup().addTo(map);
+                    var mainPoly = null, quickPoly = null;
 
                     window.dzRedraw = function() {
-                        layerGroup.clearLayers();
-                        if (polyLine) { map.removeLayer(polyLine); polyLine = null; }
-                        points.forEach(function(p) { L.marker(p).addTo(layerGroup); });
-                        if (points.length >= 2) { polyLine = L.polyline(points, { color: 'orange', weight: 3 }).addTo(map); }
+                        mainLayer.clearLayers(); quickLayer.clearLayers();
+                        if (mainPoly) { map.removeLayer(mainPoly); mainPoly = null; }
+                        if (quickPoly) { map.removeLayer(quickPoly); quickPoly = null; }
+                        points.forEach(function(p) { L.marker(p).addTo(mainLayer); });
+                        quickPoints.forEach(function(p) { L.marker(p).addTo(quickLayer); });
+                        if (points.length >= 2) { mainPoly = L.polyline(points, { color: '#ea580c', weight: 4 }).addTo(map); }
+                        if (quickPoints.length >= 2) { quickPoly = L.polyline(quickPoints, { color: '#0d9488', weight: 5 }).addTo(map); }
                         updateCoordsDisplay();
                     };
 
                     map.on('click', function(e) {
-                        points.push([e.latlng.lat, e.latlng.lng]);
+                        var pt = [e.latlng.lat, e.latlng.lng];
+                        if (editMode === 'main') points.push(pt); else quickPoints.push(pt);
                         window.dzRedraw();
                     });
 
@@ -5859,7 +6217,7 @@ def admin_dashboard():
         {% elif tab == 'member_grade' %}
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">회원 등급 관리 (1·2·3단계)</h3>
-                <p class="text-[11px] text-gray-500 font-bold mb-4">등급은 화면에 노출하지 않으며, 등급별 카테고리 공개·메시지 발송 등에 사용합니다. 직접 설정하거나 구매이력 기준으로 자동 반영할 수 있습니다.</p>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">등급은 화면에 노출하지 않으며, 등급별 카테고리 공개·메시지 발송 등에 사용합니다. 직접 설정하거나 구매이력 기준으로 자동 반영할 수 있습니다. 구매금액은 <strong>배송완료</strong>된 품목 금액만 인정됩니다.</p>
                 <div class="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-6">
                     <p class="font-black text-amber-800 text-xs mb-3">자동 등급 기준 (누적 결제액, 원)</p>
                     <form id="mg_config_form" class="flex flex-wrap items-end gap-4">
@@ -8460,6 +8818,17 @@ with app.app_context():
         db.session.rollback()
     try:
         db.session.execute(text('ALTER TABLE user ADD COLUMN points INTEGER DEFAULT 0'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    # 소셜 로그인 컬럼 (기존 DB 호환)
+    try:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN auth_provider VARCHAR(20)'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    try:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN auth_provider_id VARCHAR(100)'))
         db.session.commit()
     except Exception:
         db.session.rollback()
