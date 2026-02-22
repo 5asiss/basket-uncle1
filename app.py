@@ -69,25 +69,44 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# PWA: manifest (동적 start_url, scope/id로 패키징 호환)
+# PWA: manifest (역할별 이름: 소비자=바구니삼촌, 관리자=바삼관리자, 기사=바삼배송관리)
 @app.route('/manifest.json')
 def pwa_manifest():
     base = request.url_root.rstrip('/')
+    app_type = request.args.get('app', 'consumer')
+    if app_type == 'admin':
+        name, short_name = '바삼관리자', '바삼관리자'
+        start_url = base + '/admin'
+    elif app_type == 'driver':
+        name, short_name = '바삼배송관리', '바삼기사'
+        start_url = base + '/logi/'
+    else:
+        name, short_name = '바구니삼촌', '바구니삼촌'
+        start_url = base + '/'
+    # PWA 로고: static/logo/icon-192.png, icon-512.png 있으면 사용, 없으면 side1.jpg
+    logo_dir = os.path.join(app.root_path, app.static_folder or 'static', 'logo')
+    icon_192 = base + '/static/logo/icon-192.png' if os.path.isfile(os.path.join(logo_dir, 'icon-192.png')) else base + '/static/logo/side1.jpg'
+    icon_512 = base + '/static/logo/icon-512.png' if os.path.isfile(os.path.join(logo_dir, 'icon-512.png')) else base + '/static/logo/side1.jpg'
+    icon_type_192 = 'image/png' if icon_192.endswith('.png') else 'image/jpeg'
+    icon_type_512 = 'image/png' if icon_512.endswith('.png') else 'image/jpeg'
+    icons = [
+        {'src': icon_192, 'sizes': '192x192', 'type': icon_type_192, 'purpose': 'any'},
+        {'src': icon_512, 'sizes': '512x512', 'type': icon_type_512, 'purpose': 'any'},
+        {'src': icon_192, 'sizes': '192x192', 'type': icon_type_192, 'purpose': 'maskable'},
+        {'src': icon_512, 'sizes': '512x512', 'type': icon_type_512, 'purpose': 'maskable'},
+    ]
     return jsonify({
-        'name': '바구니삼촌',
-        'short_name': '바구니삼촌',
+        'name': name,
+        'short_name': short_name,
         'description': '농산물·식자재 배송 신개념 6PL 생활서비스',
-        'start_url': base + '/',
+        'start_url': start_url,
         'scope': base + '/',
         'id': base + '/',
         'display': 'standalone',
         'background_color': '#fafaf9',
         'theme_color': '#0d9488',
         'orientation': 'portrait-primary',
-        'icons': [
-            {'src': base + '/static/logo/side1.jpg', 'sizes': '192x192', 'type': 'image/jpeg', 'purpose': 'any'},
-            {'src': base + '/static/logo/side1.jpg', 'sizes': '512x512', 'type': 'image/jpeg', 'purpose': 'any'}
-        ]
+        'icons': icons
     })
 
 
@@ -126,8 +145,8 @@ class CategorySettlement(db.Model):
 class User(db.Model, UserMixin):
     """사용자 정보 모델"""
     id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(120), unique=True, nullable=False) 
-    password = db.Column(db.String(200), nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=True)  # 소셜 전용 회원은 이메일 없을 수 있음
+    password = db.Column(db.String(200), nullable=True)  # 소셜 로그인 전용 회원은 비밀번호 없음
     name = db.Column(db.String(50))
     phone = db.Column(db.String(20))
     address = db.Column(db.String(200))          
@@ -141,6 +160,10 @@ class User(db.Model, UserMixin):
     member_grade_overridden = db.Column(db.Boolean, default=False)  # True면 구매이력 자동반영 안 함
     # 포인트 (회원별 적립·사용)
     points = db.Column(db.Integer, default=0)
+    # 소셜 로그인: naver, google, kakao / 해당 provider의 고유 id
+    auth_provider = db.Column(db.String(20), nullable=True)
+    auth_provider_id = db.Column(db.String(100), nullable=True)
+    __table_args__ = (db.UniqueConstraint('auth_provider', 'auth_provider_id', name='uq_user_auth_provider'),)
 
 class Category(db.Model):
     """카테고리 및 판매 사업자 정보 모델"""
@@ -280,6 +303,23 @@ class PushSubscription(db.Model):
     auth = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
     __table_args__ = (db.UniqueConstraint('user_id', 'endpoint', name='uq_push_user_endpoint'),)
+
+
+class SitePopup(db.Model):
+    """접속 시 알림 팝업. 공지/이벤트/알림 등, 노출 기간·이미지·날짜 설정."""
+    __tablename__ = "site_popup"
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=True)
+    popup_type = db.Column(db.String(30), default='notice')  # notice, event, alert
+    image_url = db.Column(db.String(500), nullable=True)
+    display_date = db.Column(db.String(100), nullable=True)  # 노출용 날짜/기간 문구 (예: 2025.02.22 ~ 02.28)
+    start_at = db.Column(db.DateTime, nullable=True)  # 노출 시작
+    end_at = db.Column(db.DateTime, nullable=True)    # 노출 종료
+    is_active = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class DeliveryZone(db.Model):
@@ -655,11 +695,15 @@ HEADER_HTML = """
     <meta name="naver-site-verification" content="11c3f5256fbdca16c2d7008b7cf7d0feff9b056b" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="description" content="바구니 삼촌은 농산물·식자재를 중간 유통 없이 직접 연결하고 최소 배송비만 받는 신개념 물류·구매대행 서비스입니다.">
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" id="pwa-manifest-link" href="/manifest.json">
+    <script>(function(){var p=window.location.pathname,l=document.getElementById('pwa-manifest-link');if(l){var app='consumer';if(p.indexOf('/admin')===0)app='admin';else if(p.indexOf('/logi')===0)app='driver';l.href='/manifest.json?app='+app;}})();</script>
     <meta name="theme-color" content="#0d9488">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="apple-touch-icon" href="/static/logo/side1.jpg">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/logo/side1.jpg">
+    <link rel="apple-touch-icon" sizes="152x152" href="/static/logo/side1.jpg">
+    <link rel="apple-touch-icon" sizes="120x120" href="/static/logo/side1.jpg">
 <title>바구니 삼촌 |  basam</title>
 
     <title>바구니삼촌 - 농산물·식자재 배송 신개념 6PL 생활서비스 basam </title>
@@ -781,9 +825,44 @@ HEADER_HTML = """
         .hero-desc { font-size: 0.95rem !important; opacity: 0.88; }
         .card-padding { padding: 1rem !important; }
     }
+    /* PWA 스플래시: 앱 클릭 시 로딩 전 2초 표시 */
+    #splash-screen {
+        position: fixed; inset: 0; z-index: 99999; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center;
+        background: linear-gradient(165deg, #0d9488 0%, #0f766e 40%, #134e4a 100%);
+        color: #fff; padding: 2rem; box-sizing: border-box;
+        transition: opacity 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    }
+    #splash-screen.hide { opacity: 0; pointer-events: none; }
+    #splash-screen .splash-logo { width: 88px; height: 88px; border-radius: 22px; object-fit: cover; box-shadow: 0 12px 40px rgba(0,0,0,0.25); margin-bottom: 1.5rem; }
+    #splash-screen .splash-title { font-size: 1.6rem; font-weight: 900; letter-spacing: -0.04em; margin-bottom: 0.5rem; text-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    #splash-screen .splash-desc { font-size: 0.85rem; font-weight: 600; opacity: 0.95; line-height: 1.5; max-width: 280px; }
+    #splash-screen .splash-dot { width: 6px; height: 6px; background: rgba(255,255,255,0.6); border-radius: 50%; margin: 1.25rem auto 0; animation: splash-pulse 1s ease-in-out infinite; }
+    @keyframes splash-pulse { 0%,100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.2); } }
 </style>
 </head>
 <body class="text-left antialiased">
+    <!-- PWA 스플래시: 세션당 1회, 2초 후 페이드아웃 -->
+    <div id="splash-screen">
+        <img src="/static/logo/side1.jpg" alt="바구니삼촌" class="splash-logo" onerror="this.style.display='none'">
+        <h1 class="splash-title">바구니삼촌</h1>
+        <p class="splash-desc">중간 없이, 당신 곁으로.<br>농산물·식자재 신개념 6PL 배송</p>
+        <div class="splash-dot"></div>
+    </div>
+    <script>
+    (function(){
+        if (sessionStorage.getItem('splash_done')) {
+            var s = document.getElementById('splash-screen'); if (s) s.classList.add('hide');
+            setTimeout(function(){ if (s) s.remove(); }, 600);
+            return;
+        }
+        setTimeout(function(){
+            var s = document.getElementById('splash-screen');
+            if (s) { s.classList.add('hide'); sessionStorage.setItem('splash_done', '1'); }
+            setTimeout(function(){ if (s) s.remove(); }, 600);
+        }, 2000);
+    })();
+    </script>
     <div id="toast">메시지가 표시됩니다. 🧺</div>
 
     <div id="logout-warning-modal" class="fixed inset-0 z-[9999] hidden flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-md">
@@ -983,8 +1062,8 @@ FOOTER_HTML = """
     <div id="pwa-add-home-banner" class="fixed bottom-0 left-0 right-0 z-40 hidden bg-teal-700 text-white shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
         <div class="max-w-lg mx-auto px-4 py-4 flex items-start gap-3">
             <div class="flex-1 min-w-0">
-                <p class="font-black text-sm mb-0.5">📱 상품·배송 알림, 한 번에 받으세요</p>
-                <p class="text-[11px] text-teal-200 font-bold mb-1">바로가기 추가하면 신상품·주문·배송 정보를 놓치지 않아요</p>
+                <p class="font-black text-sm mb-0.5" id="pwa-banner-title">📱 상품·배송 알림, 한 번에 받으세요</p>
+                <p class="text-[11px] text-teal-200 font-bold mb-1" id="pwa-banner-desc">바로가기 추가하면 신상품·주문·배송 정보를 놓치지 않아요</p>
                 <p id="pwa-add-home-text-android" class="text-xs text-teal-100 leading-relaxed hidden">Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong> 또는 <strong>앱 설치</strong></p>
                 <p id="pwa-add-home-text-ios" class="text-xs text-teal-100 leading-relaxed hidden">아이폰: Safari <strong>하단 [공유]</strong> → <strong>홈 화면에 추가</strong></p>
                 <button type="button" id="pwa-install-guide-btn" class="mt-2 text-xs font-black text-teal-200 underline hover:text-white transition">설치방법</button>
@@ -1029,7 +1108,7 @@ FOOTER_HTML = """
         var banner = document.getElementById('pwa-add-home-banner');
         var closeBtn = document.getElementById('pwa-add-home-close');
         if (!banner || !closeBtn) return;
-        if (localStorage.getItem('pwa_add_home_dismissed') === '1') { banner.remove(); return; }
+        if (sessionStorage.getItem('pwa_add_home_dismissed') === '1') { banner.remove(); return; }
         var ua = navigator.userAgent || '';
         var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         var isAndroid = /Android/.test(ua);
@@ -1041,7 +1120,9 @@ FOOTER_HTML = """
         else { if (textAndroid) textAndroid.classList.remove('hidden'); }
         banner.classList.remove('hidden');
         banner.classList.add('flex');
-        closeBtn.addEventListener('click', function() { localStorage.setItem('pwa_add_home_dismissed', '1'); banner.remove(); });
+        closeBtn.addEventListener('click', function() { sessionStorage.setItem('pwa_add_home_dismissed', '1'); banner.remove(); });
+        var p=window.location.pathname; var title=document.getElementById('pwa-banner-title'); var desc=document.getElementById('pwa-banner-desc');
+        if(p.indexOf('/admin')===0&&title&&desc){ title.textContent='📱 바삼관리자, 홈에서 바로 열기'; desc.textContent='바로가기 추가하면 홈 화면에 바삼관리자로 뜹니다'; }
         var guideBtn = document.getElementById('pwa-install-guide-btn');
         var guideModal = document.getElementById('pwa-install-guide-modal');
         var guideClose = document.getElementById('pwa-install-guide-close');
@@ -1062,6 +1143,61 @@ FOOTER_HTML = """
     <div id="uncleModalContent" class="p-6 text-sm leading-relaxed space-y-4 text-stone-600 overflow-y-auto"></div>
   </div>
 </div>
+
+    <!-- 접속 시 알림 팝업 (공지/이벤트/알림, 표시 기간 내만 노출) -->
+    <div id="site-popup-modal" class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center px-5 py-4 border-b border-gray-100">
+                <span id="site-popup-type-badge" class="text-[10px] px-2 py-1 rounded font-black">공지</span>
+                <button type="button" id="site-popup-close" class="w-10 h-10 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center text-xl leading-none">✕</button>
+            </div>
+            <div class="p-5 overflow-y-auto flex-1 text-left">
+                <h3 id="site-popup-title" class="text-lg font-black text-gray-800 mb-2"></h3>
+                <p id="site-popup-date" class="text-xs text-gray-500 mb-3 hidden"></p>
+                <div id="site-popup-image-wrap" class="mb-4 hidden"><img id="site-popup-image" src="" alt="" class="w-full rounded-xl object-cover max-h-48"></div>
+                <div id="site-popup-body" class="text-sm text-gray-700 whitespace-pre-wrap"></div>
+            </div>
+            <div class="px-5 py-4 border-t border-gray-100 flex justify-between items-center gap-3">
+                <label class="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+                    <input type="checkbox" id="site-popup-today-hide" class="rounded">
+                    <span>오늘 하루 안 보기</span>
+                </label>
+                <button type="button" id="site-popup-confirm" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl font-black text-sm">확인</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        var modal = document.getElementById('site-popup-modal');
+        if (!modal) return;
+        var todayKey = function(id) { return 'popup_hide_' + id + '_' + new Date().toDateString(); };
+        fetch('/api/popup/current').then(function(r){ return r.json(); }).then(function(data){
+            if (!data || !data.id) return;
+            if (sessionStorage.getItem(todayKey(data.id))) return;
+            var typeBadge = document.getElementById('site-popup-type-badge');
+            var titleEl = document.getElementById('site-popup-title');
+            var dateEl = document.getElementById('site-popup-date');
+            var imgWrap = document.getElementById('site-popup-image-wrap');
+            var imgEl = document.getElementById('site-popup-image');
+            var bodyEl = document.getElementById('site-popup-body');
+            var closeBtn = document.getElementById('site-popup-close');
+            var confirmBtn = document.getElementById('site-popup-confirm');
+            var todayHide = document.getElementById('site-popup-today-hide');
+            typeBadge.textContent = data.popup_type === 'event' ? '이벤트' : (data.popup_type === 'alert' ? '알림' : '공지');
+            typeBadge.className = 'text-[10px] px-2 py-1 rounded font-black ' + (data.popup_type === 'event' ? 'bg-amber-100 text-amber-800' : (data.popup_type === 'alert' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'));
+            titleEl.textContent = data.title || '';
+            if (data.display_date) { dateEl.textContent = data.display_date; dateEl.classList.remove('hidden'); } else { dateEl.classList.add('hidden'); }
+            if (data.image_url) { imgEl.src = data.image_url.indexOf('/') === 0 ? data.image_url : '/' + data.image_url; imgWrap.classList.remove('hidden'); } else { imgWrap.classList.add('hidden'); }
+            bodyEl.textContent = data.body || '';
+            function closeModal() { modal.classList.add('hidden'); modal.classList.remove('flex'); document.body.style.overflow = ''; }
+            if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1');
+            closeBtn.onclick = function() { if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1'); closeModal(); };
+            confirmBtn.onclick = function() { if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1'); closeModal(); };
+            modal.onclick = function(e) { if (e.target === modal) { if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1'); closeModal(); } };
+            modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.style.overflow = 'hidden';
+        }).catch(function(){});
+    })();
+    </script>
 
     <script>
         function toggleSidebar() {
@@ -1542,6 +1678,111 @@ def admin_messages_template():
         t.body = body
     db.session.commit()
     return jsonify({"success": True, "message": "템플릿이 저장되었습니다."})
+
+
+@app.route('/api/popup/current')
+def api_popup_current():
+    """현재 노출할 알림 팝업 1건. 노출 기간 내·활성만. 없으면 null."""
+    now = datetime.now()
+    q = SitePopup.query.filter(
+        SitePopup.is_active == True,
+        db.or_(SitePopup.start_at.is_(None), SitePopup.start_at <= now),
+        db.or_(SitePopup.end_at.is_(None), SitePopup.end_at >= now)
+    ).order_by(SitePopup.sort_order.asc(), SitePopup.end_at.asc().nullslast())
+    pop = q.first()
+    if not pop:
+        return jsonify(None)
+    return jsonify({
+        'id': pop.id,
+        'title': pop.title or '',
+        'body': pop.body or '',
+        'popup_type': pop.popup_type or 'notice',
+        'image_url': pop.image_url or '',
+        'display_date': pop.display_date or ''
+    })
+
+
+@app.route('/admin/popup/save', methods=['POST'])
+@login_required
+def admin_popup_save():
+    """알림 팝업 저장. id 있으면 수정, 없으면 신규."""
+    if not current_user.is_admin:
+        return jsonify({"success": False, "message": "권한이 없습니다."}), 403
+    data = request.get_json() or request.form
+    pid = data.get('id', type=int)
+    title = (data.get('title') or '').strip()
+    if not title:
+        return jsonify({"success": False, "message": "제목을 입력해 주세요."})
+    body = (data.get('body') or '').strip()
+    popup_type = (data.get('popup_type') or 'notice').strip() or 'notice'
+    image_url = (data.get('image_url') or '').strip() or None
+    display_date = (data.get('display_date') or '').strip() or None
+    start_at = None
+    if data.get('start_at'):
+        try:
+            start_at = datetime.strptime(data.get('start_at')[:19], '%Y-%m-%dT%H:%M:%S')
+        except Exception:
+            try:
+                start_at = datetime.strptime(data.get('start_at')[:16], '%Y-%m-%dT%H:%M')
+            except Exception:
+                pass
+    end_at = None
+    if data.get('end_at'):
+        try:
+            end_at = datetime.strptime(data.get('end_at')[:19], '%Y-%m-%dT%H:%M:%S')
+        except Exception:
+            try:
+                end_at = datetime.strptime(data.get('end_at')[:16], '%Y-%m-%dT%H:%M')
+            except Exception:
+                pass
+    is_active = data.get('is_active') not in (False, 'false', '0', 0)
+    sort_order = int(data.get('sort_order') or 0)
+    if pid:
+        pop = SitePopup.query.get(pid)
+        if not pop:
+            return jsonify({"success": False, "message": "해당 팝업이 없습니다."})
+    else:
+        pop = SitePopup()
+    pop.title = title
+    pop.body = body
+    pop.popup_type = popup_type
+    pop.image_url = image_url
+    pop.display_date = display_date
+    pop.start_at = start_at
+    pop.end_at = end_at
+    pop.is_active = is_active
+    pop.sort_order = sort_order
+    if not pid:
+        db.session.add(pop)
+    db.session.commit()
+    return jsonify({"success": True, "message": "저장되었습니다.", "id": pop.id})
+
+
+@app.route('/admin/popup/delete/<int:pid>', methods=['POST'])
+@login_required
+def admin_popup_delete(pid):
+    if not current_user.is_admin:
+        return jsonify({"success": False}), 403
+    pop = SitePopup.query.get(pid)
+    if pop:
+        db.session.delete(pop)
+        db.session.commit()
+    return jsonify({"success": True})
+
+
+@app.route('/admin/popup/upload', methods=['POST'])
+@login_required
+def admin_popup_upload():
+    """알림 팝업용 이미지 업로드. 반환: { url: /static/uploads/... }"""
+    if not current_user.is_admin:
+        return jsonify({"success": False}), 403
+    f = request.files.get('image')
+    if not f or f.filename == '':
+        return jsonify({"success": False, "message": "이미지 파일을 선택해 주세요."}), 400
+    path = save_uploaded_file(f)
+    if not path:
+        return jsonify({"success": False, "message": "업로드 실패"}), 400
+    return jsonify({"success": True, "url": path})
 
 
 @app.route('/api/push/vapid-public')
@@ -3126,17 +3367,284 @@ def seller_info_page(cid):
     </div>"""
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, cat=cat)
 
+def _find_or_create_social_user(provider, provider_id, email, name):
+    """소셜 로그인: provider+provider_id 또는 email로 회원 찾기, 없으면 생성. 반환: User"""
+    user = User.query.filter_by(auth_provider=provider, auth_provider_id=str(provider_id)).first()
+    if user:
+        if (email and not user.email):
+            user.email = email
+        if name and not user.name:
+            user.name = name
+        db.session.commit()
+        return user
+    if email:
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.auth_provider = provider
+            user.auth_provider_id = str(provider_id)
+            if name and not user.name:
+                user.name = name
+            db.session.commit()
+            return user
+    new_user = User(
+        email=email or (provider + '_' + str(provider_id) + '@social.local'),
+        password=None,
+        name=name or '',
+        auth_provider=provider,
+        auth_provider_id=str(provider_id)
+    )
+    db.session.add(new_user)
+    db.session.commit()
+    return new_user
+
+
+@app.route('/auth/naver')
+def auth_naver():
+    """네이버 로그인 진입: 네이버 인증 페이지로 리다이렉트"""
+    client_id = os.getenv('NAVER_CLIENT_ID')
+    if not client_id:
+        flash("네이버 로그인이 설정되지 않았습니다."); return redirect('/login')
+    redirect_uri = url_for('auth_naver_callback', _external=True)
+    state = os.urandom(16).hex()
+    session['oauth_state'] = state
+    session['oauth_next'] = request.args.get('next') or '/'
+    url = (
+        'https://nid.naver.com/oauth2.0/authorize'
+        '?response_type=code&client_id={}&redirect_uri={}&state={}'
+    ).format(client_id, requests.utils.quote(redirect_uri), state)
+    return redirect(url)
+
+
+@app.route('/auth/naver/callback')
+def auth_naver_callback():
+    """네이버 로그인 콜백: code로 토큰·프로필 조회 후 로그인 처리"""
+    state = request.args.get('state')
+    if not state or state != session.get('oauth_state'):
+        flash("잘못된 요청입니다."); return redirect('/login')
+    session.pop('oauth_state', None)
+    next_url = session.pop('oauth_next', '/')
+    code = request.args.get('code')
+    if not code:
+        flash("네이버 로그인에 실패했습니다."); return redirect('/login')
+    client_id = os.getenv('NAVER_CLIENT_ID')
+    client_secret = os.getenv('NAVER_CLIENT_SECRET')
+    if not client_id or not client_secret:
+        flash("네이버 로그인이 설정되지 않았습니다."); return redirect('/login')
+    redirect_uri = url_for('auth_naver_callback', _external=True)
+    token_res = requests.post(
+        'https://nid.naver.com/oauth2.0/token',
+        data={
+            'grant_type': 'authorization_code',
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'code': code,
+            'state': state,
+            'redirect_uri': redirect_uri
+        },
+        headers={'Accept': 'application/json'}
+    )
+    if token_res.status_code != 200:
+        flash("네이버 로그인(토큰)에 실패했습니다."); return redirect('/login')
+    try:
+        token_data = token_res.json()
+        access_token = token_data.get('access_token')
+    except Exception:
+        flash("네이버 로그인 응답 오류."); return redirect('/login')
+    if not access_token:
+        flash("네이버 로그인에 실패했습니다."); return redirect('/login')
+    profile_res = requests.get(
+        'https://openapi.naver.com/v1/nid/me',
+        headers={'Authorization': 'Bearer ' + access_token}
+    )
+    if profile_res.status_code != 200:
+        flash("프로필 조회에 실패했습니다."); return redirect('/login')
+    try:
+        profile_data = profile_res.json()
+        res = profile_data.get('response') or {}
+        pid = res.get('id')
+        email = (res.get('email') or '').strip() or None
+        name = (res.get('name') or '').strip() or None
+    except Exception:
+        flash("프로필 형식 오류."); return redirect('/login')
+    if not pid:
+        flash("네이버 프로필을 가져올 수 없습니다."); return redirect('/login')
+    user = _find_or_create_social_user('naver', pid, email, name)
+    session.permanent = True
+    login_user(user)
+    if user.email and user.email.endswith('@social.local'):
+        flash("네이버로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+    return redirect(next_url)
+
+
+@app.route('/auth/google')
+def auth_google():
+    """구글 로그인 진입: 구글 인증 페이지로 리다이렉트"""
+    client_id = os.getenv('GOOGLE_CLIENT_ID')
+    if not client_id:
+        flash("구글 로그인이 설정되지 않았습니다."); return redirect('/login')
+    redirect_uri = url_for('auth_google_callback', _external=True)
+    state = os.urandom(16).hex()
+    session['oauth_state'] = state
+    session['oauth_next'] = request.args.get('next') or '/'
+    scope = requests.utils.quote('openid email profile')
+    url = (
+        'https://accounts.google.com/o/oauth2/v2/auth'
+        '?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&access_type=offline&prompt=consent'
+    ).format(client_id, requests.utils.quote(redirect_uri), scope, state)
+    return redirect(url)
+
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    """구글 로그인 콜백"""
+    state = request.args.get('state')
+    if not state or state != session.get('oauth_state'):
+        flash("잘못된 요청입니다."); return redirect('/login')
+    session.pop('oauth_state', None)
+    next_url = session.pop('oauth_next', '/')
+    code = request.args.get('code')
+    if not code:
+        flash("구글 로그인에 실패했습니다."); return redirect('/login')
+    client_id = os.getenv('GOOGLE_CLIENT_ID')
+    client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+    if not client_id or not client_secret:
+        flash("구글 로그인이 설정되지 않았습니다."); return redirect('/login')
+    redirect_uri = url_for('auth_google_callback', _external=True)
+    token_res = requests.post(
+        'https://oauth2.googleapis.com/token',
+        data={
+            'code': code,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'redirect_uri': redirect_uri,
+            'grant_type': 'authorization_code'
+        },
+        headers={'Content-Type': 'application/x-www-form-urlencoded'}
+    )
+    if token_res.status_code != 200:
+        flash("구글 로그인(토큰)에 실패했습니다."); return redirect('/login')
+    try:
+        token_data = token_res.json()
+        access_token = token_data.get('access_token')
+    except Exception:
+        flash("구글 로그인 응답 오류."); return redirect('/login')
+    if not access_token:
+        flash("구글 로그인에 실패했습니다."); return redirect('/login')
+    profile_res = requests.get(
+        'https://www.googleapis.com/oauth2/v2/userinfo',
+        headers={'Authorization': 'Bearer ' + access_token}
+    )
+    if profile_res.status_code != 200:
+        flash("프로필 조회에 실패했습니다."); return redirect('/login')
+    try:
+        res = profile_res.json()
+        pid = res.get('id')
+        email = (res.get('email') or '').strip() or None
+        name = (res.get('name') or '').strip() or None
+    except Exception:
+        flash("프로필 형식 오류."); return redirect('/login')
+    if not pid:
+        flash("구글 프로필을 가져올 수 없습니다."); return redirect('/login')
+    user = _find_or_create_social_user('google', str(pid), email, name)
+    session.permanent = True
+    login_user(user)
+    if user.email and user.email.endswith('@social.local'):
+        flash("구글로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+    return redirect(next_url)
+
+
+@app.route('/auth/kakao')
+def auth_kakao():
+    """카카오 로그인 진입: 카카오 인증 페이지로 리다이렉트"""
+    client_id = os.getenv('KAKAO_REST_API_KEY') or os.getenv('KAKAO_CLIENT_ID')
+    if not client_id:
+        flash("카카오 로그인이 설정되지 않았습니다."); return redirect('/login')
+    redirect_uri = url_for('auth_kakao_callback', _external=True)
+    state = os.urandom(16).hex()
+    session['oauth_state'] = state
+    session['oauth_next'] = request.args.get('next') or '/'
+    url = (
+        'https://kauth.kakao.com/oauth/authorize'
+        '?client_id={}&redirect_uri={}&response_type=code&state={}'
+    ).format(client_id, requests.utils.quote(redirect_uri), state)
+    return redirect(url)
+
+
+@app.route('/auth/kakao/callback')
+def auth_kakao_callback():
+    """카카오 로그인 콜백"""
+    state = request.args.get('state')
+    if not state or state != session.get('oauth_state'):
+        flash("잘못된 요청입니다."); return redirect('/login')
+    session.pop('oauth_state', None)
+    next_url = session.pop('oauth_next', '/')
+    code = request.args.get('code')
+    if not code:
+        flash("카카오 로그인에 실패했습니다."); return redirect('/login')
+    client_id = os.getenv('KAKAO_REST_API_KEY') or os.getenv('KAKAO_CLIENT_ID')
+    client_secret = os.getenv('KAKAO_CLIENT_SECRET', '')  # 카카오는 선택
+    if not client_id:
+        flash("카카오 로그인이 설정되지 않았습니다."); return redirect('/login')
+    redirect_uri = url_for('auth_kakao_callback', _external=True)
+    token_payload = {
+        'grant_type': 'authorization_code',
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'code': code
+    }
+    if client_secret:
+        token_payload['client_secret'] = client_secret
+    token_res = requests.post(
+        'https://kauth.kakao.com/oauth/token',
+        data=token_payload,
+        headers={'Content-Type': 'application/x-www-form-urlencoded'}
+    )
+    if token_res.status_code != 200:
+        flash("카카오 로그인(토큰)에 실패했습니다."); return redirect('/login')
+    try:
+        token_data = token_res.json()
+        access_token = token_data.get('access_token')
+    except Exception:
+        flash("카카오 로그인 응답 오류."); return redirect('/login')
+    if not access_token:
+        flash("카카오 로그인에 실패했습니다."); return redirect('/login')
+    profile_res = requests.get(
+        'https://kapi.kakao.com/v2/user/me',
+        headers={'Authorization': 'Bearer ' + access_token}
+    )
+    if profile_res.status_code != 200:
+        flash("카카오 프로필 조회에 실패했습니다."); return redirect('/login')
+    try:
+        res = profile_res.json()
+        pid = res.get('id')
+        acc = res.get('kakao_account') or {}
+        email = (acc.get('email') or '').strip() or None
+        prof = acc.get('profile') or {}
+        name = (prof.get('nickname') or '').strip() or None
+    except Exception:
+        flash("카카오 프로필 형식 오류."); return redirect('/login')
+    if not pid:
+        flash("카카오 프로필을 가져올 수 없습니다."); return redirect('/login')
+    user = _find_or_create_social_user('kakao', str(pid), email, name)
+    session.permanent = True
+    login_user(user)
+    if user.email and user.email.endswith('@social.local'):
+        flash("카카오로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+    return redirect(next_url)
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """로그인 라우트"""
     if request.method == 'POST':
         user = User.query.filter_by(email=request.form.get('email')).first()
-        if user and check_password_hash(user.password, request.form.get('password')):
-            # --- 세션 고정 활성화 추가 ---
-            session.permanent = True # 앱 설정에서 정한 30분 타이머가 작동하기 시작합니다.
-            # ---------------------------
-            login_user(user); return redirect('/')
+        if user and user.password and check_password_hash(user.password, request.form.get('password')):
+            session.permanent = True
+            login_user(user)
+            return redirect(request.args.get('next') or '/')
         flash("로그인 정보를 다시 한 번 확인해주세요.")
+    next_arg = request.args.get('next', '')
+    next_q = ('?next=' + requests.utils.quote(next_arg)) if next_arg else ''
     return render_template_string(HEADER_HTML + """
     <div class="max-w-md mx-auto mt-24 p-10 md:p-16 bg-white rounded-[3rem] md:rounded-[4rem] shadow-2xl border text-left">
         <h2 class="text-3xl font-black text-center mb-16 text-teal-600 uppercase italic tracking-tighter text-center">Login</h2>
@@ -3151,8 +3659,16 @@ def login():
             </div>
             <button class="w-full bg-teal-600 text-white py-6 rounded-3xl font-black text-lg md:text-xl shadow-xl hover:bg-teal-700 transition active:scale-95 text-center">로그인</button>
         </form>
+        <div class="mt-8 pt-8 border-t border-gray-100">
+            <p class="text-[10px] text-gray-400 font-black uppercase tracking-widest text-center mb-4">네이버 · 구글 · 카카오 통합 로그인</p>
+            <div class="flex flex-col gap-3">
+                <a href="/auth/naver{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#03C75A] text-white hover:opacity-90 transition shadow-sm"><span class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">N</span> 네이버로 로그인</a>
+                <a href="/auth/google{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-white border-2 border-gray-200 text-gray-700 hover:bg-gray-50 transition"><span class="w-5 h-5 rounded-full bg-[#4285F4] flex items-center justify-center text-white text-[10px]">G</span> 구글로 로그인</a>
+                <a href="/auth/kakao{{ next_q }}" class="flex items-center justify-center gap-3 w-full py-4 rounded-2xl font-black text-sm bg-[#FEE500] text-[#191919] hover:opacity-90 transition"><span class="w-5 h-5 rounded-full bg-[#191919] flex items-center justify-center text-[#FEE500] text-[10px]">K</span> 카카오로 로그인</a>
+            </div>
+        </div>
         <div class="text-center mt-10 text-center"><a href="/register" class="text-gray-400 text-xs font-black hover:text-teal-600 transition text-center text-center">아직 회원이 아니신가요? 회원가입</a></div>
-    </div>""" + FOOTER_HTML)
+    </div>""" + FOOTER_HTML, next_q=next_q)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -5060,6 +5576,10 @@ def admin_dashboard():
         history_rows = db.session.query(UserMessage, User).join(User, UserMessage.user_id == User.id).order_by(UserMessage.created_at.desc()).limit(150).all()
         messages_history = [{'msg': m, 'user_email': u.email or '', 'user_name': u.name or ''} for m, u in history_rows]
 
+    popup_list = []
+    if tab == 'popup' and is_master:
+        popup_list = SitePopup.query.order_by(SitePopup.sort_order.asc(), SitePopup.start_at.desc().nullslast()).all()
+
     # 3. HTML 템플릿 코드
     # 3. HTML 템플릿 코드 (카테고리 설정 탭 완벽 복구본)
     admin_html = """
@@ -5084,6 +5604,7 @@ def admin_dashboard():
             {% if is_master %}<a href="/admin?tab=point_manage" class="px-8 py-5 {% if tab == 'point_manage' %}border-b-4 border-orange-500 text-orange-600{% endif %}">포인트 관리</a>{% endif %}
             {% if is_master %}<a href="/admin?tab=members" class="px-8 py-5 {% if tab == 'members' %}border-b-4 border-orange-500 text-orange-600{% endif %}">회원관리</a>{% endif %}
             {% if is_master %}<a href="/admin?tab=messages" class="px-8 py-5 {% if tab == 'messages' %}border-b-4 border-orange-500 text-orange-600{% endif %}">메시지 발송</a>{% endif %}
+            {% if is_master %}<a href="/admin?tab=popup" class="px-8 py-5 {% if tab == 'popup' %}border-b-4 border-orange-500 text-orange-600{% endif %}">알림팝업</a>{% endif %}
         </div>
 
         {% if tab == 'products' %}
@@ -5586,6 +6107,122 @@ def admin_dashboard():
                             if (d.success) { var t = templateData && templateData.find(function(x) { return x.msg_type === fd.get('msg_type'); }); if (t) { t.title = fd.get('title'); t.body = fd.get('body'); } }
                         })
                         .catch(function() { tResult.textContent = '통신 오류'; tResult.className = 'mt-3 text-sm font-bold text-red-600'; tResult.classList.remove('hidden'); });
+                });
+            })();
+            </script>
+
+        {% elif tab == 'popup' %}
+            <div class="mb-12">
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">알림 팝업 관리</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">접속 시 노출할 공지·이벤트·알림 팝업. 표시 기간(시작/종료)과 이미지·날짜 문구를 설정할 수 있습니다.</p>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white rounded-2xl border border-gray-200 p-8">
+                        <p class="text-[10px] text-teal-600 font-black uppercase mb-4">팝업 등록/수정</p>
+                        <form id="popup_form" class="space-y-4 text-left">
+                            <input type="hidden" name="id" id="popup_id" value="">
+                            <label class="block">
+                                <span class="text-[10px] text-gray-600 font-bold">유형</span>
+                                <select name="popup_type" id="popup_type" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black mt-1">
+                                    <option value="notice">공지</option>
+                                    <option value="event">이벤트</option>
+                                    <option value="alert">알림</option>
+                                </select>
+                            </label>
+                            <label class="block">
+                                <span class="text-[10px] text-gray-600 font-bold">제목</span>
+                                <input type="text" name="title" id="popup_title" required class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black mt-1" placeholder="팝업 제목">
+                            </label>
+                            <label class="block">
+                                <span class="text-[10px] text-gray-600 font-bold">내용</span>
+                                <textarea name="body" id="popup_body" rows="4" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black mt-1" placeholder="본문 (줄바꿈 가능)"></textarea>
+                            </label>
+                            <label class="block">
+                                <span class="text-[10px] text-gray-600 font-bold">노출용 날짜/기간 문구</span>
+                                <input type="text" name="display_date" id="popup_display_date" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black mt-1" placeholder="예: 2025.02.22 ~ 02.28">
+                            </label>
+                            <label class="block">
+                                <span class="text-[10px] text-gray-600 font-bold">이미지</span>
+                                <div class="flex gap-2 mt-1">
+                                    <input type="text" name="image_url" id="popup_image_url" class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black" placeholder="/static/uploads/이미지.jpg 또는 URL">
+                                    <input type="file" id="popup_image_file" accept="image/*" class="hidden">
+                                    <button type="button" id="popup_image_upload_btn" class="px-4 py-2.5 bg-gray-200 text-gray-700 rounded-xl font-black text-xs whitespace-nowrap">업로드</button>
+                                </div>
+                            </label>
+                            <div class="grid grid-cols-2 gap-4">
+                                <label class="block">
+                                    <span class="text-[10px] text-gray-600 font-bold">노출 시작일시</span>
+                                    <input type="datetime-local" name="start_at" id="popup_start_at" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black mt-1">
+                                </label>
+                                <label class="block">
+                                    <span class="text-[10px] text-gray-600 font-bold">노출 종료일시</span>
+                                    <input type="datetime-local" name="end_at" id="popup_end_at" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-black mt-1">
+                                </label>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-4">
+                                <label class="flex items-center gap-2">
+                                    <input type="checkbox" name="is_active" id="popup_is_active" checked class="rounded">
+                                    <span class="text-xs font-bold">활성</span>
+                                </label>
+                                <label class="flex items-center gap-2">
+                                    <span class="text-[10px] text-gray-600 font-bold">순서</span>
+                                    <input type="number" name="sort_order" id="popup_sort_order" value="0" class="border border-gray-200 rounded-lg px-2 py-1 w-16 text-xs">
+                                </label>
+                            </div>
+                            <div class="flex gap-3">
+                                <button type="submit" class="px-6 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs">저장</button>
+                                <button type="button" id="popup_form_reset" class="px-6 py-2.5 bg-gray-200 text-gray-700 rounded-xl font-black text-xs">초기화</button>
+                            </div>
+                        </form>
+                        <p id="popup_form_result" class="mt-3 text-sm font-bold hidden"></p>
+                    </div>
+                    <div class="bg-gray-50 rounded-2xl border border-gray-200 p-6">
+                        <p class="text-[10px] text-gray-600 font-black uppercase mb-4">등록된 팝업 목록</p>
+                        <div class="space-y-3 max-h-[500px] overflow-y-auto">
+                            {% for p in popup_list %}
+                            <div class="bg-white rounded-xl border border-gray-100 p-4 flex justify-between items-start gap-3">
+                                <div class="min-w-0 flex-1">
+                                    <span class="text-[10px] px-2 py-0.5 rounded {{ 'bg-amber-100 text-amber-800' if p.popup_type == 'event' else ('bg-blue-100 text-blue-800' if p.popup_type == 'alert' else 'bg-gray-100 text-gray-700') }}">{{ '이벤트' if p.popup_type == 'event' else ('알림' if p.popup_type == 'alert' else '공지') }}</span>
+                                    <p class="font-black text-gray-800 mt-1 truncate">{{ p.title or '-' }}</p>
+                                    <p class="text-[10px] text-gray-500">{% if p.start_at %}{{ p.start_at.strftime('%Y-%m-%d %H:%M') }}{% else %}시작 미설정{% endif %} ~ {% if p.end_at %}{{ p.end_at.strftime('%Y-%m-%d %H:%M') }}{% else %}종료 미설정{% endif %}</p>
+                                </div>
+                                <div class="flex gap-2 flex-shrink-0">
+                                    <button type="button" class="popup-edit-btn px-3 py-1.5 bg-teal-100 text-teal-700 rounded-lg text-[10px] font-black" data-id="{{ p.id }}" data-title="{{ (p.title or '')|e }}" data-body="{{ (p.body or '')|e }}" data-type="{{ p.popup_type or 'notice' }}" data-display-date="{{ (p.display_date or '')|e }}" data-image-url="{{ (p.image_url or '')|e }}" data-start="{{ p.start_at.strftime('%Y-%m-%dT%H:%M') if p.start_at else '' }}" data-end="{{ p.end_at.strftime('%Y-%m-%dT%H:%M') if p.end_at else '' }}" data-active="{{ '1' if p.is_active else '0' }}" data-sort="{{ p.sort_order or 0 }}">수정</button>
+                                    <button type="button" class="popup-del-btn px-3 py-1.5 bg-red-100 text-red-600 rounded-lg text-[10px] font-black" data-id="{{ p.id }}">삭제</button>
+                                </div>
+                            </div>
+                            {% else %}
+                            <p class="text-gray-400 text-sm">등록된 팝업이 없습니다.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <script>
+            (function(){
+                var form = document.getElementById('popup_form');
+                var resultEl = document.getElementById('popup_form_result');
+                function toIsoLocal(d) { if (!d) return ''; var dt = new Date(d); var y=dt.getFullYear(), m=(''+(dt.getMonth()+1)).padStart(2,'0'), day=(''+dt.getDate()).padStart(2,'0'), h=(''+dt.getHours()).padStart(2,'0'), min=(''+dt.getMinutes()).padStart(2,'0'); return y+'-'+m+'-'+day+'T'+h+':'+min; }
+                form.addEventListener('submit', function(e){
+                    e.preventDefault();
+                    var payload = { title: document.getElementById('popup_title').value, body: document.getElementById('popup_body').value, popup_type: document.getElementById('popup_type').value, display_date: document.getElementById('popup_display_date').value || null, image_url: document.getElementById('popup_image_url').value || null, start_at: document.getElementById('popup_start_at').value || null, end_at: document.getElementById('popup_end_at').value || null, is_active: document.getElementById('popup_is_active').checked, sort_order: parseInt(document.getElementById('popup_sort_order').value,10) || 0 };
+                    var id = document.getElementById('popup_id').value; if (id) payload.id = parseInt(id,10);
+                    resultEl.classList.add('hidden');
+                    fetch('/admin/popup/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), credentials: 'same-origin' })
+                        .then(function(r){ return r.json(); })
+                        .then(function(d){ resultEl.textContent = d.success ? '저장되었습니다.' : (d.message || '실패'); resultEl.className = 'mt-3 text-sm font-bold ' + (d.success ? 'text-teal-600' : 'text-red-600'); resultEl.classList.remove('hidden'); if (d.success) { document.getElementById('popup_form_reset').click(); location.reload(); } })
+                        .catch(function(){ resultEl.textContent = '통신 오류'; resultEl.className = 'mt-3 text-sm font-bold text-red-600'; resultEl.classList.remove('hidden'); });
+                });
+                document.getElementById('popup_form_reset').addEventListener('click', function(){ document.getElementById('popup_id').value = ''; document.getElementById('popup_title').value = ''; document.getElementById('popup_body').value = ''; document.getElementById('popup_type').value = 'notice'; document.getElementById('popup_display_date').value = ''; document.getElementById('popup_image_url').value = ''; document.getElementById('popup_start_at').value = ''; document.getElementById('popup_end_at').value = ''; document.getElementById('popup_is_active').checked = true; document.getElementById('popup_sort_order').value = '0'; });
+                document.getElementById('popup_image_upload_btn').addEventListener('click', function(){ document.getElementById('popup_image_file').click(); });
+                document.getElementById('popup_image_file').addEventListener('change', function(){
+                    var fd = new FormData(); fd.append('image', this.files[0]);
+                    fetch('/admin/popup/upload', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){ if (d.success && d.url) document.getElementById('popup_image_url').value = d.url; else if (d.message) alert(d.message); }); this.value = '';
+                });
+                document.querySelectorAll('.popup-edit-btn').forEach(function(btn){
+                    btn.addEventListener('click', function(){ var d=btn.dataset; document.getElementById('popup_id').value = d.id; document.getElementById('popup_title').value = d.title || ''; document.getElementById('popup_body').value = d.body || ''; document.getElementById('popup_type').value = d.type || 'notice'; document.getElementById('popup_display_date').value = d.displayDate || ''; document.getElementById('popup_image_url').value = d.imageUrl || ''; document.getElementById('popup_start_at').value = d.start || ''; document.getElementById('popup_end_at').value = d.end || ''; document.getElementById('popup_is_active').checked = d.active === '1'; document.getElementById('popup_sort_order').value = d.sort || '0'; });
+                });
+                document.querySelectorAll('.popup-del-btn').forEach(function(btn){
+                    btn.addEventListener('click', function(){ if (!confirm('이 팝업을 삭제할까요?')) return; fetch('/admin/popup/delete/' + btn.dataset.id, { method: 'POST', credentials: 'same-origin' }).then(function(){ location.reload(); }); });
                 });
             })();
             </script>
@@ -6590,6 +7227,7 @@ def admin_dashboard():
             {% if is_master %}<a href="/admin?tab=point_manage" class="px-8 py-5 {% if tab == 'point_manage' %}border-b-4 border-orange-500 text-orange-600{% endif %}">포인트 관리</a>{% endif %}
             {% if is_master %}<a href="/admin?tab=members" class="px-8 py-5 {% if tab == 'members' %}border-b-4 border-orange-500 text-orange-600{% endif %}">회원관리</a>{% endif %}
             {% if is_master %}<a href="/admin?tab=messages" class="px-8 py-5 {% if tab == 'messages' %}border-b-4 border-orange-500 text-orange-600{% endif %}">메시지 발송</a>{% endif %}
+            {% if is_master %}<a href="/admin?tab=popup" class="px-8 py-5 {% if tab == 'popup' %}border-b-4 border-orange-500 text-orange-600{% endif %}">알림팝업</a>{% endif %}
         </div>
 
         {% if tab == 'products' %}

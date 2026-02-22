@@ -691,6 +691,7 @@ def logi_driver_work():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="/manifest.json?app=driver">
     <title>B.Uncle Logi - {{ driver_name }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -987,6 +988,61 @@ def logi_driver_work():
             document.getElementById('capture-btn').classList.remove('hidden');
             document.getElementById('confirm-btn').classList.add('hidden');
         };
+    </script>
+    <!-- 기사용: 홈 화면에 추가(바삼기사) 안내 -->
+    <div id="pwa-add-home-banner" class="fixed bottom-0 left-0 right-0 z-40 hidden bg-green-800 text-white shadow-[0_-4px_20px_rgba(0,0,0,0.2)]" style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
+        <div class="max-w-lg mx-auto px-4 py-4 flex items-start gap-3">
+            <div class="flex-1 min-w-0">
+                <p class="font-black text-sm mb-0.5">📱 바삼기사, 홈에서 바로 열기</p>
+                <p class="text-[11px] text-green-200 font-bold mb-1">바로가기 추가하면 홈 화면에 <strong>바삼기사</strong>로 뜹니다</p>
+                <p id="pwa-add-home-text-android" class="text-xs text-green-100 leading-relaxed hidden">Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong></p>
+                <p id="pwa-add-home-text-ios" class="text-xs text-green-100 leading-relaxed hidden">아이폰: Safari <strong>하단 [공유]</strong> → <strong>홈 화면에 추가</strong></p>
+                <button type="button" id="pwa-install-guide-btn" class="mt-2 text-xs font-black text-green-200 underline hover:text-white transition">설치방법</button>
+            </div>
+            <button type="button" id="pwa-add-home-close" class="flex-shrink-0 w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg leading-none">×</button>
+        </div>
+    </div>
+    <div id="pwa-install-guide-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col text-gray-800">
+            <div class="flex justify-between items-center px-5 py-4 border-b border-gray-100">
+                <h3 class="text-lg font-black">홈 화면에 추가하는 방법</h3>
+                <button type="button" id="pwa-install-guide-close" class="w-10 h-10 rounded-xl text-gray-400 hover:bg-gray-100 flex items-center justify-center text-xl leading-none">×</button>
+            </div>
+            <div class="p-5 overflow-y-auto flex-1 text-left text-sm">
+                <div class="mb-6">
+                    <h4 class="font-black text-green-700 text-base mb-3">Android (크롬)</h4>
+                    <ol class="space-y-2 text-gray-700 list-decimal list-inside">
+                        <li>오른쪽 위 <strong>⋮</strong> 메뉴 → <strong>홈 화면에 추가</strong> 또는 <strong>앱 설치</strong></li>
+                        <li><strong>추가</strong> 누르면 홈 화면에 <strong>바삼기사</strong> 아이콘이 생깁니다.</li>
+                    </ol>
+                </div>
+                <div>
+                    <h4 class="font-black text-gray-800 text-base mb-3">아이폰 (Safari)</h4>
+                    <ol class="space-y-2 text-gray-700 list-decimal list-inside">
+                        <li>하단 <strong>공유</strong> 버튼 → 아래로 스크롤 후 <strong>홈 화면에 추가</strong></li>
+                        <li>이름 확인 후 <strong>추가</strong> → 홈 화면에 <strong>바삼기사</strong>로 표시됩니다.</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        var banner=document.getElementById('pwa-add-home-banner');var closeBtn=document.getElementById('pwa-add-home-close');
+        if(!banner||!closeBtn)return;
+        if(sessionStorage.getItem('pwa_add_home_dismissed')==='1'){banner.remove();return;}
+        var ua=navigator.userAgent||'';var isIOS=/iPad|iPhone|iPod/.test(ua);
+        var isMobile=/Mobi|Android/i.test(ua)||window.innerWidth<768;
+        if(!isMobile){banner.remove();return;}
+        document.getElementById('pwa-add-home-text-ios').classList.toggle('hidden',!isIOS);
+        document.getElementById('pwa-add-home-text-android').classList.toggle('hidden',isIOS);
+        banner.classList.remove('hidden');banner.classList.add('flex');
+        closeBtn.onclick=function(){sessionStorage.setItem('pwa_add_home_dismissed','1');banner.remove();};
+        var modal=document.getElementById('pwa-install-guide-modal');var guideBtn=document.getElementById('pwa-install-guide-btn');var modalClose=document.getElementById('pwa-install-guide-close');
+        if(guideBtn&&modal){guideBtn.onclick=function(){modal.classList.remove('hidden');modal.classList.add('flex');};}
+        if(modalClose&&modal){modalClose.onclick=function(){modal.classList.add('hidden');modal.classList.remove('flex');};}
+        if(modal){modal.onclick=function(e){if(e.target===modal){modal.classList.add('hidden');modal.classList.remove('flex');}};}
+    })();
     </script>
 </body>
 </html>
