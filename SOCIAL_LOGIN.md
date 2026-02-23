@@ -92,6 +92,11 @@ KAKAO_REST_API_KEY=발급값
 3. **웹 서비스 URL**: `https://your-domain.com` (로컬 테스트 시 `http://localhost:5000`)
 4. **Callback URL**: `https://your-domain.com/auth/naver/callback` (로컬: `http://localhost:5000/auth/naver/callback`)
 5. 등록 후 **Client ID**, **Client Secret** 확인
+
+**동의 화면 캡처(테스트용):** 한 번 로그인한 뒤에는 네이버가 동의 화면을 건너뛸 수 있습니다. 동의 화면을 다시 보고 싶을 때:
+- `.env`에 `FORCE_NAVER_CONSENT_SCREEN=1` 추가 후 서버 재시작 → 인증 URL에 `auth_type=reprompt&prompt=consent`가 붙습니다. (네이버가 해당 파라미터를 지원하지 않을 수 있어, 동작하지 않을 수 있음)
+- **권장:** [네이버 내정보](https://nid.naver.com/user2/help/myInfo?m=oauth2) → **외부 사이트 연동**에서 해당 앱 연동을 해제한 뒤 다시 로그인하면 동의 화면이 나옵니다.
+- 또는 **시크릿/프라이빗 창**에서 로그인하면 동의 화면이 나올 수 있습니다.
 6. `.env`에 추가:
    ```env
    NAVER_CLIENT_ID=발급받은_클라이언트ID
