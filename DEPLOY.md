@@ -20,6 +20,11 @@
 | `KAKAO_MAP_APP_KEY` | 선택 | 배송구역 지도 |
 | `VAPID_PUBLIC_KEY` | 선택 | 푸시 알림 |
 | `VAPID_PRIVATE_KEY` | 선택 | 푸시 알림 |
+| `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_USE_TLS` | 선택 | 판매자 발주 이메일 발송 (관리자 → 판매자 요청). **이메일 키 받는 방법**: 프로젝트 내 `EMAIL_SETUP.md` 또는 관리자 화면 **이메일 키 설정 안내** 링크 참고 |
+| `SITE_URL` | 선택 | 판매자 확인 링크에 사용 (예: `https://your-app.onrender.com`). 없으면 요청 URL 기준으로 생성 |
+| `GITHUB_BACKUP_TOKEN` | 선택 | GitHub Personal Access Token (repo 권한). 설정 시 백업 zip을 해당 저장소 Release로 업로드 |
+| `GITHUB_BACKUP_REPO` | 선택 | 백업 대상 저장소 (형식: owner/repo). 예: myid/basket-uncle |
+| `BACKUP_CRON_SECRET` | 선택 | 매일 새벽 4시(KST) 외부 cron이 호출할 때 사용. GET /admin/backup/cron?key=비밀값 |
 
 ## 3. GitHub 1차 업로드
 
@@ -61,7 +66,16 @@ git push -u origin main
 - [ ] 관리자 `/admin` 접속
 - [ ] 푸시 알림 (VAPID 설정 시) – 마이페이지에서 「알림 켜기」
 
+## 5-1. 보안 점검 요약
+
+- **비밀키**: `FLASK_SECRET_KEY`는 반드시 환경변수로 설정(랜덤 문자열). 코드에 하드코딩된 기본값은 개발용이며 배포 시 교체 필요.
+- **관리자 라우트**: `/admin/*`, 게시판 댓글·숨김 등은 모두 `@login_required` 후 `current_user.is_admin` 검사로 보호됨.
+- **업로드**: 이미지 업로드(상품·리뷰·게시판·배송증빙·팝업)는 허용 확장자(.jpg, .jpeg, .png, .gif, .webp)만 저장되며, 저장 경로는 서버가 생성한 파일명만 사용해 경로 트래버설 방지.
+- **DB**: 스키마 변경(ALTER)은 고정 목록만 사용하며, 사용자 입력이 SQL에 직접 삽입되지 않음.
+
 ## 6. 참고
 
 - **SQLite만 사용 시**: Render 재시작 시 DB가 초기화될 수 있음. 영구 저장이 필요하면 Render PostgreSQL 생성 후 `DATABASE_URL` 연결.
-- **정적 파일**: `static/uploads/`는 빌드 시 비어 있음. 상품 이미지는 관리자 업로드 또는 외부 URL 사용.
+- **정적 파일·업로드**: `static/uploads/`는 로컬과 동일하게 사용. 배포 후에도 상품 엑셀 업로드 시 **이미지 파일을 서버의 `static/uploads/`에 넣고 엑셀에는 파일명만 입력**하는 방식 유지. 빌드 시 폴더는 비어 있으므로, 상품 이미지는 관리자 업로드 또는 해당 경로에 파일 배치 후 엑셀 업로드.
+- **DB 마이그레이션**: 앱 기동 시 `init_db()`가 실행되어 게시판(제휴문의·맛집요청) 등 누락된 컬럼이 있으면 자동 추가되므로, 배포 후에도 DB 오류 없이 동작.
+- **판매자 발주 이메일**: 관리자 → **판매자 요청** 탭에서 카테고리(판매자)별로 "이메일 보내기" 시 오늘 발주 품목이 메일로 전송되고, 6자리 확인코드·확인 링크가 생성됨. 판매자는 `/seller/confirm`에서 코드 입력 또는 링크 클릭으로 발주 확인 시 **판매자 발주확인**이 체크됨. 이메일 발송을 쓰려면 `EMAIL_SETUP.md` 참고해 SMTP 환경 변수 설정.
