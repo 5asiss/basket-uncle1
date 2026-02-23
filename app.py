@@ -14,6 +14,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import text, or_
 from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint 가져오기
 load_dotenv()
@@ -31,6 +32,8 @@ load_dotenv()
 from delivery_system import logi_bp, db_delivery
 
 app = Flask(__name__)
+# 프록시(Render, nginx 등) 뒤에서 redirect_uri가 올바르게 https·실도메인으로 생성되도록
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_fallback_key")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 
@@ -1109,6 +1112,46 @@ HEADER_HTML = """
 """
 
 FOOTER_HTML = """
+    <!-- 새 메시지 알림 바 (로그인 사용자, 미읽음 있을 때만 상단에서 내려옴) -->
+    <div id="message-notice-bar" class="fixed top-0 left-0 right-0 z-[62] bg-teal-600 text-white shadow-lg transform -translate-y-full transition-transform duration-300 flex items-center justify-center gap-3 px-4 py-3 text-sm font-bold" style="display: none;">
+        <span id="message-notice-text">새 메시지가 있습니다.</span>
+        <a href="/mypage/messages" class="bg-white text-teal-600 px-4 py-1.5 rounded-lg font-black hover:bg-teal-50">확인</a>
+        <button type="button" id="message-notice-close" class="text-white/90 hover:text-white text-xl leading-none" aria-label="닫기">×</button>
+    </div>
+    <script>
+    (function(){
+        var bar = document.getElementById('message-notice-bar');
+        if (!bar) return;
+        var key = 'message_notice_dismissed_at';
+        var dismissMinutes = 10;
+        function shouldShow() {
+            var t = sessionStorage.getItem(key);
+            if (!t) return true;
+            return (Date.now() - parseInt(t, 10)) > dismissMinutes * 60 * 1000;
+        }
+        function dismiss() { sessionStorage.setItem(key, String(Date.now())); bar.style.display = 'none'; bar.classList.add('-translate-y-full'); }
+        function showBar(count) {
+            if (count <= 0 || !shouldShow()) return;
+            var textEl = document.getElementById('message-notice-text');
+            if (textEl) textEl.textContent = count === 1 ? '새 메시지가 1건 있습니다.' : '새 메시지가 ' + count + '건 있습니다.';
+            bar.style.display = 'flex';
+            bar.classList.remove('-translate-y-full');
+        }
+        fetch('/api/messages/unread_count', { credentials: 'same-origin' }).then(function(r) {
+            if (r.status !== 200) return;
+            return r.json();
+        }).then(function(data) {
+            if (data && data.count > 0) showBar(data.count);
+        }).catch(function(){});
+        var closeBtn = document.getElementById('message-notice-close');
+        if (closeBtn) closeBtn.addEventListener('click', dismiss);
+        setInterval(function() {
+            if (!shouldShow()) return;
+            fetch('/api/messages/unread_count', { credentials: 'same-origin' }).then(function(r) { if (r.status !== 200) return; return r.json(); }).then(function(data) { if (data && data.count > 0) showBar(data.count); }).catch(function(){});
+        }, 60000);
+    })();
+    </script>
+
     </main>
 
     <footer class="bg-stone-900 text-stone-400 py-14 md:py-24 mt-24 border-t border-stone-700/50">
@@ -1163,10 +1206,15 @@ FOOTER_HTML = """
                 </button>
                 <p class="font-black text-sm mt-3 mb-0.5" id="pwa-banner-title">📱 상품·배송 알림, 한 번에 받으세요</p>
                 <p class="text-[11px] text-teal-200 font-bold mb-1" id="pwa-banner-desc">바로가기 추가하면 신상품·주문·배송 정보를 놓치지 않아요</p>
-                <div id="pwa-explain-after" class="hidden mt-2 space-y-1">
+                <div id="pwa-explain-after" class="hidden mt-2 space-y-2">
                     <p id="pwa-add-home-text-android" class="text-xs text-teal-100 leading-relaxed hidden">Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong> 또는 <strong>앱 설치</strong></p>
                     <p id="pwa-add-home-text-ios" class="text-xs text-teal-100 leading-relaxed hidden">아이폰: Safari <strong>하단 [공유]</strong> → <strong>홈 화면에 추가</strong></p>
-                    <button type="button" id="pwa-install-guide-btn" class="text-xs font-black text-teal-200 underline hover:text-white transition">자세한 설치방법</button>
+                    <button type="button" id="pwa-install-guide-btn" class="text-xs font-black text-teal-200 underline hover:text-white transition block">자세한 설치방법</button>
+                    <div id="pwa-permission-block" class="pt-2 mt-2 border-t border-teal-600/50">
+                        <p class="text-xs text-teal-100 font-bold mb-2">🔔 주문·배송 알림을 받으시려면 알림 권한을 허용해 주세요.</p>
+                        <button type="button" id="pwa-permission-btn" class="w-full py-2.5 px-3 rounded-xl bg-teal-500 text-white text-xs font-black hover:bg-teal-600 transition">알림 허용하기</button>
+                        <span id="pwa-permission-status" class="block mt-1.5 text-[10px] text-teal-200"></span>
+                    </div>
                 </div>
             </div>
             <button type="button" id="pwa-add-home-close" class="flex-shrink-0 w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white text-lg leading-none" aria-label="닫기">×</button>
@@ -1210,6 +1258,8 @@ FOOTER_HTML = """
         var closeBtn = document.getElementById('pwa-add-home-close');
         if (!banner || !closeBtn) return;
         if (sessionStorage.getItem('pwa_add_home_dismissed') === '1') { banner.remove(); return; }
+        var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || window.matchMedia('(display-mode: minimal-ui)').matches || (navigator.standalone === true);
+        if (isStandalone) { banner.remove(); return; }
         var ua = navigator.userAgent || '';
         var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         var isAndroid = /Android/.test(ua);
@@ -1238,6 +1288,48 @@ FOOTER_HTML = """
                 if (explainAfter) explainAfter.classList.remove('hidden');
             });
         }
+        (function setupPermissionBtn() {
+            var permBtn = document.getElementById('pwa-permission-btn');
+            var permStatus = document.getElementById('pwa-permission-status');
+            if (!permBtn) return;
+            function setStatus(t) { if (permStatus) permStatus.textContent = t; }
+            permBtn.addEventListener('click', function() {
+                if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+                    setStatus('Chrome·Safari 앱에서 직접 열어 주세요. 앱 내 브라우저에서는 지원되지 않습니다.'); return;
+                }
+                if (Notification.permission === 'denied') {
+                    setStatus('알림이 차단되었습니다. 브라우저 설정에서 허용해 주세요.'); return;
+                }
+                if (Notification.permission === 'granted') {
+                    doSubscribe(); return;
+                }
+                setStatus('권한 요청 중...');
+                Notification.requestPermission().then(function(p) {
+                    if (p === 'granted') { doSubscribe(); } else { setStatus('알림 권한을 허용해 주시면 주문·배송 알림을 받을 수 있어요.'); }
+                });
+                function doSubscribe() {
+                    setStatus('등록 중...');
+                    fetch('/api/push/vapid-public').then(function(r) { return r.json(); }).then(function(d) {
+                        if (d.error || !d.publicKey) { setStatus('알림 기능이 설정되지 않았습니다.'); return; }
+                        var key = d.publicKey.replace(/-/g, '+').replace(/_/g, '/');
+                        var keyBytes = new Uint8Array(atob(key).split('').map(function(c) { return c.charCodeAt(0); }));
+                        return (navigator.serviceWorker.controller ? Promise.resolve(navigator.serviceWorker.ready) : navigator.serviceWorker.register('/sw.js').then(function() { return navigator.serviceWorker.ready; })).then(function(reg) {
+                            return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes });
+                        }).then(function(sub) {
+                            function abToB64Url(buf) { var b = new Uint8Array(buf); var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); }
+                            var subJson = { endpoint: sub.endpoint, keys: { p256dh: abToB64Url(sub.getKey('p256dh')), auth: abToB64Url(sub.getKey('auth')) } };
+                            return fetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: subJson }), credentials: 'same-origin' });
+                        }).then(function(r) {
+                            if (r.status === 401 || r.status === 403) { setStatus('로그인한 뒤 알림 허용을 시도해 주세요.'); return; }
+                            return r.json();
+                        }).then(function(d) {
+                            if (!d) return;
+                            if (d.success) { setStatus('알림이 켜졌습니다.'); permBtn.textContent = '알림 켜짐'; permBtn.disabled = true; } else { setStatus(d.message || '등록 실패'); }
+                        });
+                    }).catch(function() { setStatus('등록 중 오류가 났습니다.'); });
+                }
+            });
+        })();
         var guideBtn = document.getElementById('pwa-install-guide-btn');
         var guideModal = document.getElementById('pwa-install-guide-modal');
         var guideClose = document.getElementById('pwa-install-guide-close');
@@ -1304,12 +1396,12 @@ FOOTER_HTML = """
             if (data.display_date) { dateEl.textContent = data.display_date; dateEl.classList.remove('hidden'); } else { dateEl.classList.add('hidden'); }
             if (data.image_url) { imgEl.src = data.image_url.indexOf('/') === 0 ? data.image_url : '/' + data.image_url; imgWrap.classList.remove('hidden'); } else { imgWrap.classList.add('hidden'); }
             bodyEl.textContent = data.body || '';
-            function closeModal() { modal.classList.add('hidden'); modal.classList.remove('flex'); document.body.style.overflow = ''; }
+            function closeModal() { modal.classList.add('hidden'); modal.classList.remove('flex'); modal.style.display = 'none'; document.body.style.overflow = ''; }
             if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1');
             closeBtn.onclick = function() { if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1'); closeModal(); };
             confirmBtn.onclick = function() { if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1'); closeModal(); };
             modal.onclick = function(e) { if (e.target === modal) { if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1'); closeModal(); } };
-            modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.style.overflow = 'hidden';
+            modal.classList.remove('hidden'); modal.classList.add('flex'); modal.style.display = 'flex'; document.body.style.overflow = 'hidden';
         }).catch(function(){});
     })();
     </script>
@@ -1795,6 +1887,14 @@ def admin_messages_template():
     return jsonify({"success": True, "message": "템플릿이 저장되었습니다."})
 
 
+@app.route('/api/messages/unread_count')
+@login_required
+def api_messages_unread_count():
+    """로그인 사용자의 미읽음 메시지 개수 (알림 바 표시용)."""
+    n = UserMessage.query.filter_by(user_id=current_user.id, read_at=None).count()
+    return jsonify({"count": n})
+
+
 @app.route('/api/popup/current')
 def api_popup_current():
     """현재 노출할 알림 팝업 1건. 노출 기간 내·활성만. 없으면 null."""
@@ -1824,7 +1924,11 @@ def admin_popup_save():
     if not current_user.is_admin:
         return jsonify({"success": False, "message": "권한이 없습니다."}), 403
     data = request.get_json() or request.form
-    pid = data.get('id', type=int)
+    try:
+        pid = data.get('id')
+        pid = int(pid) if pid not in (None, '') else None
+    except (TypeError, ValueError):
+        pid = None
     title = (data.get('title') or '').strip()
     if not title:
         return jsonify({"success": False, "message": "제목을 입력해 주세요."})
@@ -3513,13 +3617,21 @@ def _find_or_create_social_user(provider, provider_id, email, name):
     return new_user
 
 
+def _oauth_redirect_base():
+    """OAuth redirect_uri 기준 URL. OAUTH_REDIRECT_BASE 또는 SITE_URL 설정 시 사용(redirect_uri_mismatch 방지)."""
+    base = (os.getenv('OAUTH_REDIRECT_BASE') or os.getenv('SITE_URL') or '').strip().rstrip('/')
+    if base:
+        return base
+    return request.url_root.rstrip('/')
+
+
 @app.route('/auth/naver')
 def auth_naver():
     """네이버 로그인 진입: 네이버 인증 페이지로 리다이렉트"""
     client_id = os.getenv('NAVER_CLIENT_ID')
     if not client_id:
         flash("네이버 로그인이 설정되지 않았습니다."); return redirect('/login')
-    redirect_uri = url_for('auth_naver_callback', _external=True)
+    redirect_uri = _oauth_redirect_base() + '/auth/naver/callback'
     state = os.urandom(16).hex()
     session['oauth_state'] = state
     session['oauth_next'] = request.args.get('next') or '/'
@@ -3545,7 +3657,7 @@ def auth_naver_callback():
     client_secret = os.getenv('NAVER_CLIENT_SECRET')
     if not client_id or not client_secret:
         flash("네이버 로그인이 설정되지 않았습니다."); return redirect('/login')
-    redirect_uri = url_for('auth_naver_callback', _external=True)
+    redirect_uri = _oauth_redirect_base() + '/auth/naver/callback'
     token_res = requests.post(
         'https://nid.naver.com/oauth2.0/token',
         data={
@@ -3599,7 +3711,7 @@ def auth_google():
     client_id = os.getenv('GOOGLE_CLIENT_ID')
     if not client_id:
         flash("구글 로그인이 설정되지 않았습니다."); return redirect('/login')
-    redirect_uri = url_for('auth_google_callback', _external=True)
+    redirect_uri = _oauth_redirect_base() + '/auth/google/callback'
     state = os.urandom(16).hex()
     session['oauth_state'] = state
     session['oauth_next'] = request.args.get('next') or '/'
@@ -3626,7 +3738,7 @@ def auth_google_callback():
     client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
     if not client_id or not client_secret:
         flash("구글 로그인이 설정되지 않았습니다."); return redirect('/login')
-    redirect_uri = url_for('auth_google_callback', _external=True)
+    redirect_uri = _oauth_redirect_base() + '/auth/google/callback'
     token_res = requests.post(
         'https://oauth2.googleapis.com/token',
         data={
@@ -3678,7 +3790,7 @@ def auth_kakao():
     client_id = os.getenv('KAKAO_REST_API_KEY') or os.getenv('KAKAO_CLIENT_ID')
     if not client_id:
         flash("카카오 로그인이 설정되지 않았습니다."); return redirect('/login')
-    redirect_uri = url_for('auth_kakao_callback', _external=True)
+    redirect_uri = _oauth_redirect_base() + '/auth/kakao/callback'
     state = os.urandom(16).hex()
     session['oauth_state'] = state
     session['oauth_next'] = request.args.get('next') or '/'
@@ -3704,7 +3816,7 @@ def auth_kakao_callback():
     client_secret = os.getenv('KAKAO_CLIENT_SECRET', '')  # 카카오는 선택
     if not client_id:
         flash("카카오 로그인이 설정되지 않았습니다."); return redirect('/login')
-    redirect_uri = url_for('auth_kakao_callback', _external=True)
+    redirect_uri = _oauth_redirect_base() + '/auth/kakao/callback'
     token_payload = {
         'grant_type': 'authorization_code',
         'client_id': client_id,
@@ -3756,7 +3868,7 @@ def auth_kakao_callback():
 
 def _auth_status_json():
     """통합 로그인 설정 점검 JSON (관리자 확인 후 반환)."""
-    base = request.url_root.rstrip('/')
+    base = _oauth_redirect_base()
     return jsonify({
         "flask_secret_set": bool(os.getenv("FLASK_SECRET_KEY")),
         "naver": {
@@ -4342,7 +4454,10 @@ def mypage():
             function setStatus(t, isErr) { if (status) { status.textContent = t; status.className = 'ml-3 text-xs ' + (isErr ? 'text-red-600' : 'text-teal-600'); } }
             btn.addEventListener('click', function() {
                 if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-                    setStatus('이 브라우저는 푸시 알림을 지원하지 않습니다.', true); return;
+                    setStatus('Chrome 또는 Safari 앱을 열고, 주소창에 이 사이트 주소를 입력해 접속한 뒤 다시 시도해 주세요. 카카오·네이버 등 앱 안에서 연 창에서는 푸시 알림을 지원하지 않습니다.', true); return;
+                }
+                if (typeof window.isSecureContext !== 'undefined' && !window.isSecureContext) {
+                    setStatus('푸시 알림은 https 주소에서만 사용할 수 있습니다. 주소가 https:// 로 시작하는지 확인해 주세요.', true); return;
                 }
                 if (Notification.permission === 'denied') { setStatus('알림이 차단되었습니다. 브라우저 설정에서 허용해 주세요.', true); return; }
                 setStatus('처리 중...', false);
@@ -8694,6 +8809,7 @@ def admin_orders_excel():
     if not (current_user.is_admin or my_categories):
         flash("엑셀 다운로드 권한이 없습니다.")
         return redirect('/admin')
+
 
     is_master = current_user.is_admin
     now = datetime.now()
