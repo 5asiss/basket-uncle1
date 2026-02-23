@@ -141,6 +141,37 @@ KAKAO_REST_API_KEY=발급값
 
 ---
 
+## 카카오 로그인만 안 될 때 체크할 점
+
+1. **환경 변수**
+   - `.env`(또는 Render 등 Environment)에 **`KAKAO_REST_API_KEY`** 가 있는지 확인. (또는 `KAKAO_CLIENT_ID`에 REST API 키를 넣어도 됨.)
+   - **Client Secret**을 사용한다면 **`KAKAO_CLIENT_SECRET`** 도 설정. 카카오 개발자 콘솔에서 보안 설정 후 발급한 값인지 확인.
+
+2. **카카오 개발자 콘솔**
+   - [내 애플리케이션](https://developers.kakao.com/) → 해당 앱 선택
+   - **앱 설정** → **플랫폼** → **Web**이 추가되어 있고, **사이트 도메인**에 실제 서비스 주소가 등록되어 있는지 (로컬: `http://localhost:5000`, 운영: `https://실제도메인`)
+   - **카카오 로그인** → **활성화**가 **ON**인지
+   - **카카오 로그인** → **Redirect URI**에 **콜백 URL이 한 글자도 틀리지 않게** 등록.  
+     → 서버가 쓰는 정확한 URL은 관리자 로그인 후 **`/auth/status`** 에서 `kakao.redirect_uri` 값으로 확인.
+
+3. **Redirect URI 일치**
+   - 프로토콜(`http`/`https`), 도메인, 경로(`/auth/kakao/callback`), 끝 `/` 유무까지 **콘솔과 동일**해야 함.
+   - 운영 서버에서 주소가 달라지면 `.env`에 **`OAUTH_REDIRECT_BASE=https://실제도메인`** (끝 `/` 없이) 설정 후 재시작.
+
+4. **FLASK_SECRET_KEY**
+   - 없거나 비어 있으면 콜백 시 **"잘못된 요청입니다."** 가 나옴. 반드시 설정 후 서버 재시작.
+
+5. **오류 메시지별로**
+   - **"카카오 로그인이 설정되지 않았습니다."** → `KAKAO_REST_API_KEY`(또는 `KAKAO_CLIENT_ID`)가 설정되지 않음.
+   - **"잘못된 요청입니다."** → 세션 문제. `FLASK_SECRET_KEY` 확인, 같은 도메인/브라우저에서 로그인·콜백 진행했는지 확인.
+   - **"카카오 로그인(토큰)에 실패했습니다."** → redirect_uri 불일치 또는 Client Secret 오타. `/auth/status`의 `redirect_uri`를 콘솔에 그대로 등록했는지 확인.
+   - **"프로필 조회에 실패했습니다."** → 토큰은 받았으나 프로필 API 실패. 카카오 앱 상태·동의 항목 확인.
+
+6. **Client Secret 사용 시**
+   - 카카오 개발자: **카카오 로그인** → **보안** → **Client Secret** 사용 ON 후 발급한 값을 `KAKAO_CLIENT_SECRET`에 넣기.
+
+---
+
 ## 통합 로그인 오류 점검 (전체 오류 시)
 
 통합 로그인이 전부 오류일 때 아래 순서로 확인하세요.

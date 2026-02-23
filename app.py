@@ -1011,7 +1011,7 @@ HEADER_HTML = """
                     <button onclick="toggleSidebar()" class="w-10 h-10 rounded-xl text-stone-500 hover:text-teal-600 hover:bg-stone-50 flex items-center justify-center transition">
                         <i class="fas fa-bars text-lg"></i>
                     </button>
-                    <a href="/" class="flex items-center gap-2.5 group">
+                    <a href="/" id="admin-shortcut-header" class="flex items-center gap-2.5 group">
                         <img src="/static/logo/side1.jpg" alt="바구니삼촌" class="h-8 md:h-9 w-auto rounded-lg shadow-sm group-hover:opacity-90 transition" onerror="this.style.display='none'">
                         <span class="font-extrabold text-teal-600 text-base md:text-lg tracking-tight group-hover:text-teal-700 transition">바구니삼촌</span>
                     </a>
@@ -1120,6 +1120,7 @@ FOOTER_HTML = """
     </div>
     <script>
     (function(){
+        if (!{{ 'true' if current_user.is_authenticated else 'false' }}) return;
         var bar = document.getElementById('message-notice-bar');
         if (!bar) return;
         var key = 'message_notice_dismissed_at';
@@ -1158,8 +1159,8 @@ FOOTER_HTML = """
         <div class="max-w-7xl mx-auto px-6">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-10 pb-12 mb-12 border-b border-stone-700/50">
                 <div class="text-left">
-                    <p class="text-teal-400 font-extrabold text-2xl tracking-tight mb-2">바구니삼촌</p>
-                    <p class="text-xs text-amber-400/90 font-semibold tracking-wide">인천 연수구 송도동 전용 구매대행 및 배송 서비스</p>
+                    <p id="admin-shortcut-footer" class="text-teal-400 font-extrabold text-2xl tracking-tight mb-2 cursor-pointer select-none">바구니삼촌</p>
+                    <p id="admin-shortcut-tagline" class="text-xs text-amber-400/90 font-semibold tracking-wide cursor-pointer select-none">인천 연수구 송도동 전용 구매대행 및 배송 서비스</p>
                 </div>
                 <div class="flex flex-col md:items-end gap-4 w-full md:w-auto">
                     <p class="text-stone-300 font-bold text-sm tracking-wide">Customer Center</p>
@@ -1196,16 +1197,37 @@ FOOTER_HTML = """
             </div>
         </div>
     </footer>
+    <script>
+    (function(){
+        var ADMIN_CLICKS = 5, RESET_MS = 2000, count = 0, t;
+        function goAdmin() { location.href = '/admin'; }
+        function reset() { count = 0; }
+        function onClick(e) {
+            if (e.currentTarget.id === 'admin-shortcut-header') e.preventDefault();
+            count++;
+            clearTimeout(t);
+            if (count >= ADMIN_CLICKS) goAdmin();
+            else t = setTimeout(reset, RESET_MS);
+        }
+        ['admin-shortcut-header','admin-shortcut-footer','admin-shortcut-tagline'].forEach(function(id){
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('click', onClick);
+        });
+    })();
+    </script>
 
-    <!-- 모바일 전용: 홈 화면에 추가(바로가기). 버튼 클릭 시 즉시 추가 시도, 설명은 그다음 -->
+    <!-- 모바일 전용: 홈 화면에 추가(앱 설치). 홈화면 설치하기 / 자세히보기 -->
     <div id="pwa-add-home-banner" class="fixed bottom-0 left-0 right-0 z-40 hidden bg-teal-700 text-white shadow-[0_-4px_20px_rgba(0,0,0,0.15)]" style="padding-bottom: max(0.25rem, env(safe-area-inset-bottom));">
         <div class="max-w-lg mx-auto px-4 py-4 flex items-start gap-3">
             <div class="flex-1 min-w-0">
-                <button type="button" id="pwa-add-home-btn" class="w-full py-3.5 px-4 rounded-xl bg-white text-teal-700 font-black text-sm shadow-lg hover:bg-teal-50 transition active:scale-[0.98] flex items-center justify-center gap-2">
-                    <i class="fas fa-plus-circle text-base"></i> 바로가기 추가
-                </button>
+                <div class="flex gap-2">
+                    <button type="button" id="pwa-add-home-btn" class="flex-1 py-3.5 px-4 rounded-xl bg-white text-teal-700 font-black text-sm shadow-lg hover:bg-teal-50 transition active:scale-[0.98] flex items-center justify-center gap-2">
+                        <i class="fas fa-download text-base"></i> 홈화면 설치하기
+                    </button>
+                    <button type="button" id="pwa-detail-guide-btn" class="py-3.5 px-4 rounded-xl bg-teal-600 text-white font-black text-sm border border-teal-500 hover:bg-teal-500 transition active:scale-[0.98] whitespace-nowrap">자세히보기</button>
+                </div>
                 <p class="font-black text-sm mt-3 mb-0.5" id="pwa-banner-title">📱 상품·배송 알림, 한 번에 받으세요</p>
-                <p class="text-[11px] text-teal-200 font-bold mb-1" id="pwa-banner-desc">바로가기 추가하면 신상품·주문·배송 정보를 놓치지 않아요</p>
+                <p class="text-[11px] text-teal-200 font-bold mb-1" id="pwa-banner-desc">홈 화면에 앱을 설치하면 신상품·주문·배송 정보를 놓치지 않아요</p>
                 <div id="pwa-explain-after" class="hidden mt-2 space-y-2">
                     <p id="pwa-add-home-text-android" class="text-xs text-teal-100 leading-relaxed hidden">Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong> 또는 <strong>앱 설치</strong></p>
                     <p id="pwa-add-home-text-ios" class="text-xs text-teal-100 leading-relaxed hidden">아이폰: Safari <strong>하단 [공유]</strong> → <strong>홈 화면에 추가</strong></p>
@@ -1256,6 +1278,8 @@ FOOTER_HTML = """
     (function() {
         var banner = document.getElementById('pwa-add-home-banner');
         var closeBtn = document.getElementById('pwa-add-home-close');
+        var guideModal = document.getElementById('pwa-install-guide-modal');
+        var guideClose = document.getElementById('pwa-install-guide-close');
         if (!banner || !closeBtn) return;
         if (sessionStorage.getItem('pwa_add_home_dismissed') === '1') { banner.remove(); return; }
         var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || window.matchMedia('(display-mode: minimal-ui)').matches || (navigator.standalone === true);
@@ -1275,7 +1299,16 @@ FOOTER_HTML = """
         banner.classList.add('flex');
         closeBtn.addEventListener('click', function() { sessionStorage.setItem('pwa_add_home_dismissed', '1'); banner.remove(); });
         var p=window.location.pathname; var title=document.getElementById('pwa-banner-title'); var desc=document.getElementById('pwa-banner-desc');
-        if(p.indexOf('/admin')===0&&title&&desc){ title.textContent='📱 바삼관리자, 홈에서 바로 열기'; desc.textContent='바로가기 추가하면 홈 화면에 바삼관리자로 뜹니다'; }
+        if(p.indexOf('/admin')===0&&title&&desc){ title.textContent='📱 바삼관리자, 홈에서 바로 열기'; desc.textContent='홈 화면에 앱을 설치하면 바삼관리자로 바로 열 수 있어요'; }
+        function openInstallGuideModal() {
+            if (guideModal) { guideModal.classList.remove('hidden'); guideModal.classList.add('flex'); document.body.style.overflow = 'hidden'; }
+        }
+        if (guideClose && guideModal) {
+            guideClose.addEventListener('click', function() { guideModal.classList.add('hidden'); guideModal.classList.remove('flex'); document.body.style.overflow = ''; });
+            guideModal.addEventListener('click', function(e) { if (e.target === guideModal) { guideModal.classList.add('hidden'); guideModal.classList.remove('flex'); document.body.style.overflow = ''; } });
+        }
+        var detailGuideBtn = document.getElementById('pwa-detail-guide-btn');
+        if (detailGuideBtn) detailGuideBtn.addEventListener('click', openInstallGuideModal);
         var deferredPrompt = null;
         window.addEventListener('beforeinstallprompt', function(e) { e.preventDefault(); deferredPrompt = e; });
         var addHomeBtn = document.getElementById('pwa-add-home-btn');
@@ -1283,9 +1316,19 @@ FOOTER_HTML = """
             addHomeBtn.addEventListener('click', function() {
                 if (deferredPrompt) {
                     deferredPrompt.prompt();
-                    deferredPrompt.userChoice.then(function(r) { if (r.outcome === 'accepted') deferredPrompt = null; });
+                    deferredPrompt.userChoice.then(function(r) {
+                        if (r.outcome === 'accepted') {
+                            deferredPrompt = null;
+                            sessionStorage.setItem('pwa_add_home_dismissed', '1');
+                            banner.remove();
+                        } else if (explainAfter) {
+                            explainAfter.classList.remove('hidden');
+                        }
+                    });
+                } else {
+                    if (explainAfter) explainAfter.classList.remove('hidden');
+                    openInstallGuideModal();
                 }
-                if (explainAfter) explainAfter.classList.remove('hidden');
             });
         }
         (function setupPermissionBtn() {
@@ -1331,13 +1374,7 @@ FOOTER_HTML = """
             });
         })();
         var guideBtn = document.getElementById('pwa-install-guide-btn');
-        var guideModal = document.getElementById('pwa-install-guide-modal');
-        var guideClose = document.getElementById('pwa-install-guide-close');
-        if (guideBtn && guideModal) {
-            guideBtn.addEventListener('click', function() { guideModal.classList.remove('hidden'); guideModal.classList.add('flex'); document.body.style.overflow = 'hidden'; });
-            if (guideClose) guideClose.addEventListener('click', function() { guideModal.classList.add('hidden'); guideModal.classList.remove('flex'); document.body.style.overflow = ''; });
-            guideModal.addEventListener('click', function(e) { if (e.target === guideModal) { guideModal.classList.add('hidden'); guideModal.classList.remove('flex'); document.body.style.overflow = ''; } });
-        }
+        if (guideBtn) guideBtn.addEventListener('click', openInstallGuideModal);
     })();
     </script>
 
@@ -5833,6 +5870,56 @@ def admin_point_log():
     return jsonify({'logs': out})
 
 
+@app.route('/admin/api/member/<int:uid>/message', methods=['POST'])
+@login_required
+def admin_member_send_message(uid):
+    """관리자: 특정 회원에게 메시지 발송 (제목·내용). 푸시 알림 포함."""
+    if not current_user.is_admin:
+        return jsonify({"success": False, "message": "권한이 없습니다."}), 403
+    u = User.query.get(uid)
+    if not u:
+        return jsonify({"success": False, "message": "회원을 찾을 수 없습니다."}), 404
+    data = request.get_json() or request.form
+    title = (data.get('title') or '').strip()
+    body = (data.get('body') or '').strip()
+    if not title:
+        return jsonify({"success": False, "message": "제목을 입력해 주세요."})
+    mid = send_message(uid, title, body, 'custom', None)
+    if mid:
+        db.session.commit()
+        return jsonify({"success": True, "message": "메시지를 발송했습니다."})
+    return jsonify({"success": False, "message": "발송에 실패했습니다."}), 500
+
+
+@app.route('/admin/api/member/<int:uid>/delete', methods=['POST'])
+@login_required
+def admin_member_delete(uid):
+    """관리자: 회원 삭제. 주문 이력이 있으면 삭제 불가. 관리자 계정은 삭제 불가."""
+    if not current_user.is_admin:
+        return jsonify({"success": False, "message": "권한이 없습니다."}), 403
+    u = User.query.get(uid)
+    if not u:
+        return jsonify({"success": False, "message": "회원을 찾을 수 없습니다."}), 404
+    if u.is_admin:
+        return jsonify({"success": False, "message": "관리자 계정은 삭제할 수 없습니다."}), 400
+    if uid == current_user.id:
+        return jsonify({"success": False, "message": "본인 계정은 삭제할 수 없습니다."}), 400
+    order_count = Order.query.filter_by(user_id=uid).count()
+    if order_count > 0:
+        return jsonify({"success": False, "message": f"주문 이력이 있는 회원({order_count}건)은 삭제할 수 없습니다."}), 400
+    try:
+        PointLog.query.filter_by(user_id=uid).delete()
+        PushSubscription.query.filter_by(user_id=uid).delete()
+        UserMessage.query.filter_by(user_id=uid).delete()
+        Cart.query.filter_by(user_id=uid).delete()
+        db.session.delete(u)
+        db.session.commit()
+        return jsonify({"success": True, "message": "회원이 삭제되었습니다."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e) or "삭제 중 오류가 발생했습니다."}), 500
+
+
 @app.route('/admin')
 @login_required
 def admin_dashboard():
@@ -7037,11 +7124,12 @@ def admin_dashboard():
                                 <th class="p-3 border border-gray-600 w-14 text-center">등급</th>
                                 <th class="p-3 border border-gray-600 w-14 text-center">직접설정</th>
                                 <th class="p-3 border border-gray-600 w-20 text-right">포인트</th>
+                                <th class="p-3 border border-gray-600 w-32 text-center">관리</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for u in admin_members %}
-                            <tr class="border-b border-gray-100 hover:bg-gray-50/50">
+                            <tr class="border-b border-gray-100 hover:bg-gray-50/50" data-member-id="{{ u.id }}" data-member-name="{{ (u.name or u.email or '')|e }}">
                                 <td class="p-3 border border-gray-100 text-center text-gray-500">{{ u.id }}</td>
                                 <td class="p-3 border border-gray-100">{{ u.email or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ u.name or '-' }}</td>
@@ -7055,14 +7143,110 @@ def admin_dashboard():
                                 <td class="p-3 border border-gray-100 text-center">{{ u.member_grade or 1 }}</td>
                                 <td class="p-3 border border-gray-100 text-center">{% if u.member_grade_overridden|default(false) %}Y{% else %}-{% endif %}</td>
                                 <td class="p-3 border border-gray-100 text-right">{{ "{:,}".format(u.points or 0) }}원</td>
+                                <td class="p-3 border border-gray-100 text-center">
+                                    <button type="button" class="member-msg-btn px-2 py-1.5 rounded-lg bg-teal-600 text-white text-[10px] font-black hover:bg-teal-700 transition" data-uid="{{ u.id }}" data-uname="{{ (u.name or u.email or '')|e }}">메시지</button>
+                                    {% if not u.is_admin and u.id != current_user.id %}
+                                    <button type="button" class="member-del-btn px-2 py-1.5 rounded-lg bg-red-500 text-white text-[10px] font-black hover:bg-red-600 transition ml-1" data-uid="{{ u.id }}">삭제</button>
+                                    {% else %}
+                                    <span class="text-gray-300 text-[10px]">-</span>
+                                    {% endif %}
+                                </td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="13" class="p-8 text-center text-gray-400 font-bold">등록된 회원이 없습니다.</td></tr>
+                            <tr><td colspan="14" class="p-8 text-center text-gray-400 font-bold">등록된 회원이 없습니다.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
             </div>
+            <!-- 회원 메시지 발송 모달 (회원관리 탭) -->
+            <div id="member-msg-modal" class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/50 p-4">
+                <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-5">
+                    <h3 class="text-lg font-black text-gray-800 mb-3">회원에게 메시지 보내기</h3>
+                    <p class="text-xs text-gray-500 mb-3" id="member-msg-target">대상: </p>
+                    <input type="hidden" id="member-msg-uid" value="">
+                    <div class="mb-3">
+                        <label class="block text-[10px] font-black text-gray-500 mb-1">제목</label>
+                        <input type="text" id="member-msg-title" class="w-full border border-gray-200 p-3 rounded-xl text-sm font-bold" placeholder="제목 입력" maxlength="200">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-[10px] font-black text-gray-500 mb-1">내용</label>
+                        <textarea id="member-msg-body" class="w-full border border-gray-200 p-3 rounded-xl text-sm font-bold min-h-[100px]" placeholder="내용 입력"></textarea>
+                    </div>
+                    <div class="flex gap-2">
+                        <button type="button" id="member-msg-submit" class="flex-1 py-3 bg-teal-600 text-white rounded-xl font-black text-sm hover:bg-teal-700 transition">발송</button>
+                        <button type="button" id="member-msg-cancel" class="px-4 py-3 bg-gray-100 text-gray-600 rounded-xl font-black text-sm hover:bg-gray-200 transition">취소</button>
+                    </div>
+                    <p id="member-msg-status" class="mt-2 text-xs font-bold hidden"></p>
+                </div>
+            </div>
+            <script>
+            (function(){
+                var modal = document.getElementById('member-msg-modal');
+                var targetEl = document.getElementById('member-msg-target');
+                var uidEl = document.getElementById('member-msg-uid');
+                var titleEl = document.getElementById('member-msg-title');
+                var bodyEl = document.getElementById('member-msg-body');
+                var statusEl = document.getElementById('member-msg-status');
+                var submitBtn = document.getElementById('member-msg-submit');
+                var cancelBtn = document.getElementById('member-msg-cancel');
+                if (!modal || !uidEl) return;
+                function showModal(uid, uname) {
+                    uidEl.value = uid;
+                    targetEl.textContent = '대상: ' + (uname || '회원 #' + uid);
+                    titleEl.value = '';
+                    bodyEl.value = '';
+                    statusEl.classList.add('hidden');
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                    if (titleEl) titleEl.focus();
+                }
+                function hideModal() {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                }
+                document.querySelectorAll('.member-msg-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var uid = this.getAttribute('data-uid');
+                        var uname = this.getAttribute('data-uname') || '';
+                        showModal(uid, uname);
+                    });
+                });
+                if (cancelBtn) cancelBtn.addEventListener('click', hideModal);
+                modal.addEventListener('click', function(e) { if (e.target === modal) hideModal(); });
+                if (submitBtn) submitBtn.addEventListener('click', function() {
+                    var uid = uidEl.value;
+                    var title = (titleEl && titleEl.value) ? titleEl.value.trim() : '';
+                    if (!title) { statusEl.textContent = '제목을 입력해 주세요.'; statusEl.classList.remove('hidden'); statusEl.className = 'mt-2 text-xs font-bold text-red-600'; return; }
+                    statusEl.textContent = '발송 중...';
+                    statusEl.classList.remove('hidden');
+                    statusEl.className = 'mt-2 text-xs font-bold text-gray-600';
+                    submitBtn.disabled = true;
+                    fetch('/admin/api/member/' + uid + '/message', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({ title: title, body: (bodyEl && bodyEl.value) ? bodyEl.value.trim() : '' }),
+                        credentials: 'same-origin'
+                    }).then(function(r) { return r.json(); }).then(function(d) {
+                        if (d.success) { statusEl.textContent = d.message || '발송되었습니다.'; statusEl.className = 'mt-2 text-xs font-bold text-teal-600'; setTimeout(hideModal, 1200); }
+                        else { statusEl.textContent = d.message || '발송 실패'; statusEl.className = 'mt-2 text-xs font-bold text-red-600'; }
+                    }).catch(function() { statusEl.textContent = '요청 실패'; statusEl.className = 'mt-2 text-xs font-bold text-red-600'; }).finally(function() { submitBtn.disabled = false; });
+                });
+                document.querySelectorAll('.member-del-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var uid = this.getAttribute('data-uid');
+                        if (!confirm('이 회원을 정말 삭제할까요? 주문 이력이 있으면 삭제되지 않습니다.')) return;
+                        fetch('/admin/api/member/' + uid + '/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                if (d.success) { var row = document.querySelector('tr[data-member-id="' + uid + '"]'); if (row) row.remove(); alert(d.message); }
+                                else { alert(d.message || '삭제에 실패했습니다.'); }
+                            })
+                            .catch(function() { alert('요청 실패'); });
+                    });
+                });
+            })();
+            </script>
 
         {% elif tab == 'sellers' %}
             <div class="mb-12">
@@ -9145,8 +9329,8 @@ with app.app_context():
         db.session.rollback()
     init_db() # 기존 쇼핑몰 초기화 함수 호출
     
-    # 로컬 테스트 및 Render 배포 호환 포트 설정 (기본 5001, 기존 5000 사용 시 PORT=5001 또는 다른 포트로 실행)
-    port = int(os.environ.get("PORT", 5001))
+    # 로컬 테스트 및 Render 배포 호환 포트 설정 (기본 5000)
+    port = int(os.environ.get("PORT", 5000))
     root = os.path.dirname(os.path.abspath(__file__))
     extra_files = [
         os.path.join(root, "app.py"),
