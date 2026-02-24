@@ -38,6 +38,9 @@ class User(db.Model, UserMixin):
     member_grade = db.Column(db.Integer, default=1)
     member_grade_overridden = db.Column(db.Boolean, default=False)
     points = db.Column(db.Integer, default=0)
+    points_accumulated = db.Column(db.Integer, default=0)   # 적립포인트 (구매/배송완료 등)
+    points_event = db.Column(db.Integer, default=0)         # 이벤트포인트
+    points_cash = db.Column(db.Integer, default=0)          # 캐시충전포인트
     auth_provider = db.Column(db.String(20), nullable=True)
     auth_provider_id = db.Column(db.String(100), nullable=True)
     utm_source = db.Column(db.String(100), nullable=True)
@@ -50,6 +53,7 @@ class Category(db.Model):
     """카테고리 및 판매 사업자 정보 모델"""
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
+    category_type = db.Column(db.String(20), default='입점형')
     tax_type = db.Column(db.String(20), default='과세')
     manager_email = db.Column(db.String(120), nullable=True)
     seller_name = db.Column(db.String(100), nullable=True)
@@ -276,6 +280,18 @@ class DeliveryRequestVote(db.Model):
     __table_args__ = (db.UniqueConstraint('user_id', 'delivery_request_id', name='uq_delivery_request_vote_user_post'),)
 
 
+class BoardComment(db.Model):
+    """게시판 공통 댓글 (전국맛집요청·배송요청·제휴문의·자유게시판)"""
+    __tablename__ = "board_comment"
+    id = db.Column(db.Integer, primary_key=True)
+    board_type = db.Column(db.String(30), nullable=False)  # restaurant, delivery, partnership, free
+    post_id = db.Column(db.Integer, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    user_name = db.Column(db.String(50), nullable=True)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
 class DailyStat(db.Model):
     __tablename__ = "daily_stat"
     id = db.Column(db.Integer, primary_key=True)
@@ -350,11 +366,18 @@ class PointConfig(db.Model):
     value = db.Column(db.String(50), nullable=True)
 
 
+# 포인트 유형: accumulated(적립), event(이벤트), cash(캐시충전)
+POINT_TYPE_ACCUMULATED = "accumulated"
+POINT_TYPE_EVENT = "event"
+POINT_TYPE_CASH = "cash"
+
+
 class PointLog(db.Model):
     __tablename__ = "point_log"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     amount = db.Column(db.Integer, nullable=False)
+    point_type = db.Column(db.String(20), default=POINT_TYPE_ACCUMULATED, nullable=True)  # accumulated / event / cash
     order_id = db.Column(db.Integer, nullable=True)
     order_item_id = db.Column(db.Integer, nullable=True)
     memo = db.Column(db.String(200), nullable=True)
@@ -419,6 +442,7 @@ class Settlement(db.Model):
     order_item_id = db.Column(db.Integer, nullable=True)
     sale_dt = db.Column(db.DateTime, nullable=False)
     category = db.Column(db.String(50), nullable=False)
+    category_type = db.Column(db.String(20), default='입점형')
     tax_exempt = db.Column(db.Boolean, default=False)
     product_name = db.Column(db.String(200), nullable=False)
     sales_amount = db.Column(db.Integer, default=0)

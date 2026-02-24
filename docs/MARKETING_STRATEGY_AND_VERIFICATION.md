@@ -15,10 +15,18 @@
 - `scripts/run_reengagement_alimtalk.py`: CLI 실행 스크립트
 
 ### 환경 변수 (config.py / .env)
-- `KAKAO_REST_API_KEY`: 카카오 REST API 키
-- `KAKAO_ALIMTALK_SENDER_KEY`: 발신 프로필 키
-- `KAKAO_ALIMTALK_TEMPLATE_CODE_RECOVERY`: 재방문 유도 템플릿 코드
-- `KAKAO_ALIMTALK_API_URL`: 실제 발송 API URL (NHN/카페24 등 업체별 상이)
+
+**솔라피(Solapi) 사용 시 (권장)** — [solapi.com](https://solapi.com) 가입 후:
+- `SOLAPI_API_KEY`, `SOLAPI_API_SECRET`: 솔라피 API 인증
+- `SOLAPI_KAKAO_PF_ID`: 솔라피에 연동한 카카오 비즈니스 채널 ID (pfId)
+- `SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY`: 재방문 유도용 알림톡 템플릿 ID
+- `SOLAPI_KAKAO_TEMPLATE_ID_ORDER_CREATED`: 주문 완료 알림 템플릿 ID (선택)
+- `SOLAPI_KAKAO_TEMPLATE_ID_DELIVERY_COMPLETE`: 배송 완료 알림 템플릿 ID (선택)
+- `SOLAPI_SENDER_PHONE`: 대체발송(SMS/LMS)용 발신번호 (사전 등록 필수)
+
+**기타 업체(NHN/카페24 등) 사용 시**:
+- `KAKAO_REST_API_KEY`, `KAKAO_ALIMTALK_SENDER_KEY`, `KAKAO_ALIMTALK_TEMPLATE_CODE_RECOVERY`
+- `KAKAO_ALIMTALK_API_URL`: 해당 업체 발송 API URL
 - `KAKAO_ALIMTALK_COST_PER_MSG`: 건당 비용(원, ROAS 계산용, 선택)
 
 ### 실행 방법
@@ -29,6 +37,17 @@ python scripts/run_reengagement_alimtalk.py --dry-run --weeks=2 --limit=100
 # 실제 발송 (최근 2주 미주문 송도 고객, 최대 100명)
 python scripts/run_reengagement_alimtalk.py --weeks=2 --limit=100 --coupon=WELCOME2WEEKS
 ```
+
+### 솔라피 카카오 알림톡 구현 요약
+- **패키지**: `pip install solapi` (requirements.txt 포함)
+- **발송 함수** (`utils.py`):
+  - `send_solapi_kakao_alimtalk(phone, template_id, variables, from_phone)` — 1건 발송
+  - `send_kakao_alimtalk(phone, customer_name, coupon_code)` — 재방문 쿠폰 (솔라피 우선)
+  - `send_alimtalk_order_event(msg_type, phone, customer_name, order_id)` — 주문/배송 알림
+- **자동 발송 시점** (`app.py`):
+  - **주문 완료** 직후: `send_alimtalk_order_event('order_created', ...)` (템플릿 ID 설정 시)
+  - **배송 완료** 처리 시: `send_alimtalk_order_event('delivery_complete', ...)`
+- **템플릿 변수**: `#{고객명}`, `#{주문번호}` 등 카카오 비즈니스센터에 등록한 변수명과 동일하게 설정
 
 ### SQL 개념 (송도 휴면 고객)
 - `order` 테이블에서 `delivery_address LIKE '%송도%'`, `status NOT IN ('결제취소')` 조건으로 주문 집계

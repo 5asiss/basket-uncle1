@@ -32,7 +32,7 @@ def get_admin_nav():
                 <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="{% if request.path == '/logi/' %}text-green-600 border-b-2 border-green-600{% else %}hover:text-green-600{% endif %} pb-1 transition">배송관제</a>
                 <a href="{{ url_for('logi.logi_driver_mgmt') }}" class="{% if '/drivers' in request.path %}text-green-600 border-b-2 border-green-600{% else %}hover:text-green-600{% endif %} pb-1 transition">기사관리</a>
                 <a href="{{ url_for('logi.logi_driver_path_map') }}" class="{% if '/map' in request.path %}text-blue-500 border-b-2 border-blue-500{% else %}hover:text-blue-500{% endif %} pb-1 transition">배송지도</a>
-                {% if session['admin_username'] == 'admin' %}
+                {% if session.get('admin_username') in ('admin', 'admin@uncle.com') %}
                 <a href="{{ url_for('logi.logi_admin_users_mgmt') }}" class="{% if '/users' in request.path %}text-red-500 border-b-2 border-red-500{% else %}hover:text-red-500{% endif %} pb-1 transition">설정</a>
                 {% endif %}
             </div>
@@ -1094,11 +1094,18 @@ def logi_update_task_status(tid, new_status):
 
 @logi_bp.route('/complete_action/<int:tid>', methods=['POST'])
 def logi_complete_action(tid):
-    t = DeliveryTask.query.get(tid); d = request.json
+    t = DeliveryTask.query.get(tid); d = request.json or {}
     if t:
         t.status, t.completed_at, t.photo_data = '완료', datetime.now(), d.get('photo')
         logi_add_log(t.id, t.order_id, '완료', '기사 배송 완료 및 안내 전송')
         db_delivery.session.commit()
+        # 메인 앱에 배송완료 반영 및 고객 메시지(사진 포함) 발송
+        try:
+            url = (request.host_url or request.url_root or '').rstrip('/') + '/api/logi/delivery-complete'
+            if url.startswith('http'):
+                r = requests.post(url, json={'order_id': t.order_id, 'category': t.category or '', 'photo': t.photo_data}, timeout=10)
+        except Exception:
+            pass
         return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone})
     return jsonify({"success": False})
 

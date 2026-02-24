@@ -16,6 +16,9 @@ from config import (
     GITHUB_BACKUP_TOKEN, GITHUB_BACKUP_REPO,
     KAKAO_REST_API_KEY, KAKAO_ALIMTALK_SENDER_KEY, KAKAO_ALIMTALK_TEMPLATE_CODE_RECOVERY,
     KAKAO_ALIMTALK_API_URL, KAKAO_ALIMTALK_COST_PER_MSG,
+    SOLAPI_API_KEY, SOLAPI_API_SECRET, SOLAPI_KAKAO_PF_ID,
+    SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY, SOLAPI_KAKAO_TEMPLATE_ID_ORDER_CREATED,
+    SOLAPI_KAKAO_TEMPLATE_ID_DELIVERY_COMPLETE, SOLAPI_SENDER_PHONE,
 )
 from delivery_system import db_delivery
 from models import Product
@@ -95,17 +98,89 @@ def get_inactive_songdo_customers(weeks=2, limit=500):
         return []
 
 
-def send_kakao_alimtalk(phone, customer_name, coupon_code=None, template_code=None):
+def send_solapi_kakao_alimtalk(phone, template_id, variables=None, from_phone=None):
     """
-    카카오 알림톡 발송 (할인 쿠폰 등). API URL·키 설정 시에만 실제 발송.
+    솔라피(Solapi)를 이용해 카카오 알림톡 1건 발송.
+    variables: 템플릿 변수 dict. 키는 카카오 템플릿의 치환문구와 일치 (예: {"#{고객명}": "홍길동"}).
+    from_phone: 대체발송(SMS/LMS)용 발신번호. 미설정 시 SOLAPI_SENDER_PHONE 사용.
     반환: (성공 여부, 에러 메시지 또는 None)
     """
-    template_code = template_code or KAKAO_ALIMTALK_TEMPLATE_CODE_RECOVERY
-    if not (KAKAO_ALIMTALK_API_URL and KAKAO_REST_API_KEY and template_code):
-        return False, "KAKAO_ALIMTALK_API_URL, KAKAO_REST_API_KEY, 템플릿 코드 중 하나가 비어 있습니다."
+    if not (SOLAPI_API_KEY and SOLAPI_API_SECRET and SOLAPI_KAKAO_PF_ID and template_id):
+        return False, "SOLAPI_API_KEY, SOLAPI_API_SECRET, SOLAPI_KAKAO_PF_ID, template_id 중 하나가 비어 있습니다."
     phone_clean = re.sub(r"\D", "", str(phone).strip())
     if len(phone_clean) < 10:
         return False, "전화번호 형식이 올바르지 않습니다."
+    variables = variables or {}
+    # Solapi 변수는 문자열만 허용
+    variables = {k: str(v)[:1000] for k, v in variables.items()}
+    from_ = (from_phone or SOLAPI_SENDER_PHONE or "").strip().replace("-", "").replace(" ", "")
+    try:
+        from solapi import SolapiMessageService
+        from solapi.model import RequestMessage
+        from solapi.model.kakao.kakao_option import KakaoOption
+        message_service = SolapiMessageService(api_key=SOLAPI_API_KEY, api_secret=SOLAPI_API_SECRET)
+        kakao_option = KakaoOption(
+            pf_id=SOLAPI_KAKAO_PF_ID,
+            template_id=template_id,
+            variables=variables if variables else None,
+        )
+        message = RequestMessage(
+            from_=from_ or None,
+            to=phone_clean,
+            kakao_options=kakao_option,
+        )
+        response = message_service.send(message)
+        try:
+            c = getattr(response, "group_info", None) and getattr(response.group_info, "count", None)
+            success = (getattr(c, "registered_success", 0) or getattr(c, "registered", 0)) >= 1
+        except Exception:
+            success = True  # 요청 수락 시 성공으로 간주
+        return success, None
+    except Exception as e:
+        return False, str(e)
+
+
+def send_kakao_alimtalk(phone, customer_name, coupon_code=None, template_code=None):
+    """
+    카카오 알림톡 발송 (할인 쿠폰 등).
+    솔라피(SOLAPI_*) 설정이 있으면 솔라피로 발송, 없으면 기존 KAKAO_ALIMTALK_API_URL 사용.
+    반환: (성공 여부, 에러 메시지 또는 None)
+    """
+    phone_clean = re.sub(r"\D", "", str(phone).strip())
+    if len(phone_clean) < 10:
+        return False, "전화번호 형식이 올바르지 않습니다."
+    template_code = template_code or KAKAO_ALIMTALK_TEMPLATE_CODE_RECOVERY
+
+    # 1) 솔라피 사용 (우선)
+    if SOLAPI_API_KEY and SOLAPI_API_SECRET and SOLAPI_KAKAO_PF_ID and SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY:
+        variables = {"#{고객명}": (customer_name or "고객")[:20], "#{쿠폰}": (coupon_code or "WELCOME2WEEKS")[:20]}
+        # 템플릿에 맞게 변수명 조정 (솔라피/카카오에 등록한 변수명에 맞춤)
+        ok, err = send_solapi_kakao_alimtalk(
+            phone_clean,
+            SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY,
+            variables=variables,
+        )
+        try:
+            from flask import current_app
+            with current_app.app_context():
+                from models import MarketingAlimtalkLog
+                log = MarketingAlimtalkLog(
+                    phone=phone_clean,
+                    customer_name=customer_name,
+                    template_code=SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY,
+                    coupon_code=(coupon_code or "WELCOME2WEEKS"),
+                    success=ok,
+                    memo=err,
+                )
+                db.session.add(log)
+                db.session.commit()
+        except Exception:
+            pass
+        return ok, err
+
+    # 2) 기존 API (NHN/카페24 등) — 솔라피 미설정 시에만
+    if not (KAKAO_ALIMTALK_API_URL and KAKAO_REST_API_KEY and template_code):
+        return False, "알림톡 발송 설정이 없습니다. 솔라피(SOLAPI_*) 또는 KAKAO_ALIMTALK_API_URL·KAKAO_REST_API_KEY·템플릿 코드를 설정해 주세요."
     payload = {
         "sender_key": KAKAO_ALIMTALK_SENDER_KEY or "",
         "template_code": template_code,
@@ -144,6 +219,27 @@ def send_kakao_alimtalk(phone, customer_name, coupon_code=None, template_code=No
         return False, str(e)
 
 
+def send_alimtalk_order_event(msg_type, phone, customer_name, order_id, **extra_variables):
+    """
+    주문/배송 이벤트에 따른 솔라피 카카오 알림톡 발송 (템플릿이 등록된 경우만).
+    msg_type: 'order_created' | 'delivery_complete'
+    extra_variables: 템플릿 변수 추가 (예: {"#{상품명}": "사과 2kg"})
+    반환: (성공 여부, 에러 메시지 또는 None)
+    """
+    if not (SOLAPI_API_KEY and SOLAPI_API_SECRET and SOLAPI_KAKAO_PF_ID):
+        return False, None
+    template_id = None
+    if msg_type == "order_created":
+        template_id = SOLAPI_KAKAO_TEMPLATE_ID_ORDER_CREATED
+    elif msg_type == "delivery_complete":
+        template_id = SOLAPI_KAKAO_TEMPLATE_ID_DELIVERY_COMPLETE
+    if not template_id:
+        return False, None
+    variables = {"#{주문번호}": (order_id or "")[:50], "#{고객명}": (customer_name or "고객")[:20]}
+    variables.update(extra_variables)
+    return send_solapi_kakao_alimtalk(phone, template_id, variables=variables)
+
+
 def run_reengagement_alimtalk(weeks=2, dry_run=True, limit=100, coupon_code="WELCOME2WEEKS"):
     """
     휴면 송도 고객에게 할인 쿠폰 알림톡 일괄 발송.
@@ -169,6 +265,14 @@ def run_reengagement_alimtalk(weeks=2, dry_run=True, limit=100, coupon_code="WEL
         else:
             failed += 1
     return {"sent": sent, "failed": failed, "list": [c["customer_phone"] for c in customers]}
+
+
+def send_alimtalk_welcome(phone, customer_name, coupon_code="WELCOME2WEEKS"):
+    """
+    신규 회원 환영 알림톡 발송용 헬퍼.
+    내부적으로 기존 쿠폰 알림톡 함수(send_kakao_alimtalk)를 재사용한다.
+    """
+    return send_kakao_alimtalk(phone, customer_name, coupon_code=coupon_code)
 
 
 def get_roas_metrics(days_since=30):

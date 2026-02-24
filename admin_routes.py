@@ -59,6 +59,7 @@ def register_admin_routes(app):
         admin_backup_run,
         admin_backup_cron,
         admin_review_delete,
+        admin_board_comment_delete,
         admin_seed_test_data,
         admin_delete_test_data,
         admin_seed_virtual_reviews,
@@ -72,9 +73,13 @@ def register_admin_routes(app):
         admin_category_edit,
         admin_category_move,
         admin_category_delete,
+        admin_delete_products_by_category,
         admin_sellers_excel,
         admin_orders_sales_excel,
+        admin_orders_sales_detail_image,
+        admin_orders_delivery_summary_image,
         admin_orders_sales_summary_excel,
+        admin_orders_sales_summary_image,
         admin_orders_settlement_detail_excel,
         admin_settlement_category_excel,
         admin_orders_excel,
@@ -165,6 +170,8 @@ def register_admin_routes(app):
 
     # review
     admin_bp.add_url_rule('/admin/review/delete/<int:rid>', view_func=login_required(admin_review_delete))
+    # board comment
+    admin_bp.add_url_rule('/admin/board/comment/delete/<int:cid>', view_func=login_required(admin_board_comment_delete), methods=['POST'])
 
     # seed / test
     admin_bp.add_url_rule('/admin/seed_test_data', view_func=login_required(admin_seed_test_data))
@@ -184,11 +191,15 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/category/edit/<int:cid>', view_func=login_required(admin_category_edit), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/category/move/<int:cid>/<string:direction>', view_func=login_required(admin_category_move))
     admin_bp.add_url_rule('/admin/category/delete/<int:cid>', view_func=login_required(admin_category_delete))
+    admin_bp.add_url_rule('/admin/category/delete_products', view_func=login_required(admin_delete_products_by_category))
 
     # excel
     admin_bp.add_url_rule('/admin/sellers/excel', view_func=login_required(admin_sellers_excel))
     admin_bp.add_url_rule('/admin/orders/sales_excel', view_func=login_required(admin_orders_sales_excel))
+    admin_bp.add_url_rule('/admin/orders/sales_detail_image', view_func=login_required(admin_orders_sales_detail_image))
+    admin_bp.add_url_rule('/admin/orders/delivery_summary_image', view_func=login_required(admin_orders_delivery_summary_image))
     admin_bp.add_url_rule('/admin/orders/sales_summary_excel', view_func=login_required(admin_orders_sales_summary_excel))
+    admin_bp.add_url_rule('/admin/orders/sales_summary_image', view_func=login_required(admin_orders_sales_summary_image))
     admin_bp.add_url_rule('/admin/orders/settlement_detail_excel', view_func=login_required(admin_orders_settlement_detail_excel))
     admin_bp.add_url_rule('/admin/settlement/category_excel', view_func=login_required(admin_settlement_category_excel))
     admin_bp.add_url_rule('/admin/orders/excel', view_func=login_required(admin_orders_excel))
