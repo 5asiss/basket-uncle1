@@ -83,6 +83,7 @@ def register_admin_routes(app):
         admin_orders_settlement_detail_excel,
         admin_settlement_category_excel,
         admin_orders_excel,
+        admin_revenue_report_download,
     )
 
     # /admin/logi
@@ -131,6 +132,9 @@ def register_admin_routes(app):
     # api member
     admin_bp.add_url_rule('/admin/api/member/<int:uid>/message', view_func=login_required(admin_member_send_message), methods=['POST'])
     admin_bp.add_url_rule('/admin/api/member/<int:uid>/delete', view_func=login_required(admin_member_delete), methods=['POST'])
+
+    # 수익통계 리포트 다운로드 (catch-all 전에 등록)
+    admin_bp.add_url_rule('/admin/revenue_report/download', view_func=login_required(admin_revenue_report_download))
 
     # 대시보드: /admin, /admin/, /admin/<path> (나머지는 위의 구체 라우트가 처리)
     def _admin_dashboard_with_path(path=''):

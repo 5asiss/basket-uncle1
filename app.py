@@ -11,7 +11,7 @@ import uuid
 from urllib.parse import quote
 
 import pandas as pd
-from flask import Flask, render_template_string, request, redirect, url_for, session, send_file, flash, jsonify, abort
+from flask import Flask, render_template_string, request, redirect, url_for, session, send_file, flash, jsonify, abort, Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -365,7 +365,11 @@ def is_address_in_main_polygon(address_str):
             return False
         lat, lng = coords[0], coords[1]
         px, py = _polygon_point_as_xy(polygon, lat, lng)
-        return _point_in_polygon(px, py, polygon)
+        if _point_in_polygon(px, py, polygon):
+            return True
+        if _point_in_polygon(py, px, polygon):
+            return True
+        return False
     except Exception:
         return False
 
@@ -385,7 +389,11 @@ def is_address_in_quick_polygon(address_str):
             return False
         lat, lng = coords[0], coords[1]
         px, py = _polygon_point_as_xy(quick_poly, lat, lng)
-        return _point_in_polygon(px, py, quick_poly)
+        if _point_in_polygon(px, py, quick_poly):
+            return True
+        if _point_in_polygon(py, px, quick_poly):
+            return True
+        return False
     except Exception:
         return False
 
@@ -445,6 +453,10 @@ def is_address_in_delivery_zone(address_str):
     quick = _get_quick_region_list(zone) if zone else []
     if quick:
         return any(name in addr for name in quick)
+    # 배송권역 이름(예: 연수구)이 주소에 있으면 배송가능으로 처리 (지오코딩/폴리곤 오차 보정)
+    if zone and getattr(zone, 'name', None) and (zone.name or '').strip():
+        if (zone.name or '').strip() in addr:
+            return True
     if zone and zone.polygon_json:
         try:
             polygon = json.loads(zone.polygon_json)
@@ -453,7 +465,11 @@ def is_address_in_delivery_zone(address_str):
                 if coords:
                     lat, lng = coords[0], coords[1]
                     px, py = _polygon_point_as_xy(polygon, lat, lng)
-                    return _point_in_polygon(px, py, polygon)
+                    if _point_in_polygon(px, py, polygon):
+                        return True
+                    # 폴리곤이 [lng,lat]인데 [lat,lng]로 추정된 경우 등 좌표 순서 반대 시 한 번 더 시도
+                    if _point_in_polygon(py, px, polygon):
+                        return True
         except Exception:
             pass
     return False
@@ -815,7 +831,7 @@ HEADER_HTML = """
         }
       };
     </script>
-    <script src="//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 <style>
     :root {
@@ -1480,8 +1496,9 @@ FOOTER_HTML = """
         updateCountdowns();
         
         function execDaumPostcode() {
-            if (typeof daum === 'undefined' || !daum.Postcode) { alert('주소 검색 서비스를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
-            new daum.Postcode({
+            var Postcode = (typeof kakao !== 'undefined' && kakao.Postcode) ? kakao.Postcode : (typeof daum !== 'undefined' && daum.Postcode) ? daum.Postcode : null;
+            if (!Postcode) { alert('주소 검색 서비스를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
+            new Postcode({
                 oncomplete: function(data) {
                     var addr = data.userSelectedType === 'R' ? data.roadAddress : data.jibunAddress;
                     if (data.buildingName) addr += (addr ? ' ' : '') + data.buildingName;
@@ -2020,12 +2037,15 @@ def api_check_delivery_zone():
     addr = (request.args.get('address') or '').strip()
     if not addr:
         return jsonify({'in_delivery_zone': False})
-    out = {'in_delivery_zone': is_address_in_delivery_zone(addr)}
-    if request.args.get('debug') in ('1', 'true', 'yes'):
-        coords = _geocode_address(addr)
-        out['geocoded'] = {'lat': coords[0], 'lng': coords[1]} if coords else None
-        out['zone_type'] = get_delivery_zone_type(addr)
-    return jsonify(out)
+    try:
+        out = {'in_delivery_zone': is_address_in_delivery_zone(addr)}
+        if request.args.get('debug') in ('1', 'true', 'yes'):
+            coords = _geocode_address(addr)
+            out['geocoded'] = {'lat': coords[0], 'lng': coords[1]} if coords else None
+            out['zone_type'] = get_delivery_zone_type(addr)
+        return jsonify(out)
+    except Exception:
+        return jsonify({'in_delivery_zone': False})
 
 
 @app.route('/api/push/vapid-public')
@@ -8236,6 +8256,64 @@ def admin_member_delete(uid):
 
 
 @login_required
+def admin_revenue_report_download():
+    """수익통계 탭과 동일 기간·로직으로 결제넘버별 상세 CSV 다운로드 (마스터 전용)."""
+    if not current_user.is_admin:
+        return redirect('/admin')
+    rev_start_str = request.args.get('revenue_start', '').strip()
+    rev_end_str = request.args.get('revenue_end', '').strip()
+    revenue_report_start = revenue_report_end = None
+    if rev_start_str:
+        try:
+            revenue_report_start = datetime.strptime(rev_start_str, '%Y-%m-%d')
+        except Exception:
+            pass
+    if rev_end_str:
+        try:
+            revenue_report_end = datetime.strptime(rev_end_str + ' 23:59:59', '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            pass
+    if not revenue_report_start:
+        revenue_report_end = datetime.now()
+        revenue_report_start = revenue_report_end - timedelta(days=30)
+    if not revenue_report_end:
+        revenue_report_end = datetime.now()
+    if revenue_report_start and revenue_report_end and revenue_report_start > revenue_report_end:
+        revenue_report_start, revenue_report_end = revenue_report_end, revenue_report_start
+    orders_in_range = Order.query.filter(
+        Order.created_at >= revenue_report_start, Order.created_at <= revenue_report_end
+    ).order_by(Order.created_at.desc()).all()
+    order_ids = [o.id for o in orders_in_range]
+    settlement_by_order = {}
+    if order_ids:
+        sett_rows = db.session.query(Settlement.order_id, db.func.sum(Settlement.settlement_total).label('s')).filter(
+            Settlement.order_id.in_(order_ids), Settlement.settlement_status == '입금완료'
+        ).group_by(Settlement.order_id).all()
+        for sid, s in sett_rows:
+            settlement_by_order[sid] = int(s or 0)
+    import csv
+    from io import StringIO
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['결제넘버', '주문일시', '상태', '주문원금', '포인트사용', '실제수입', '정산지급'])
+    for o in orders_in_range:
+        pay_rec = (o.total_price or 0) - (o.points_used or 0) if o.status != '결제취소' else 0
+        writer.writerow([
+            o.order_id or '-',
+            o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '-',
+            o.status or '-',
+            o.total_price or 0,
+            o.points_used or 0,
+            pay_rec,
+            settlement_by_order.get(o.id, 0),
+        ])
+    filename = 'revenue_report_{}_{}.csv'.format(
+        revenue_report_start.strftime('%Y%m%d'), revenue_report_end.strftime('%Y%m%d'))
+    body = '\ufeff' + buf.getvalue()
+    return Response(body, mimetype='text/csv; charset=utf-8', headers={'Content-Disposition': 'attachment; filename="%s"' % filename})
+
+
+@login_required
 def admin_dashboard():
     """관리자 대시보드 - [매출+물류+카테고리+리뷰] 전체 기능 통합 복구본"""
     categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
@@ -8665,6 +8743,84 @@ def admin_dashboard():
             })
         marketing_cost_total = db.session.query(db.func.coalesce(db.func.sum(MarketingCost.amount), 0)).scalar() or 0
 
+    revenue_report_start = revenue_report_end = None
+    revenue_summary = {}
+    revenue_detail_rows = []
+    if tab == 'revenue_report' and is_master:
+        rev_start_str = request.args.get('revenue_start', '').strip()
+        rev_end_str = request.args.get('revenue_end', '').strip()
+        if rev_start_str:
+            try:
+                revenue_report_start = datetime.strptime(rev_start_str, '%Y-%m-%d')
+            except Exception:
+                pass
+        if rev_end_str:
+            try:
+                revenue_report_end = datetime.strptime(rev_end_str + ' 23:59:59', '%Y-%m-%d %H:%M:%S')
+            except Exception:
+                pass
+        if not revenue_report_start:
+            revenue_report_end = datetime.now()
+            revenue_report_start = revenue_report_end - timedelta(days=30)
+        if not revenue_report_end:
+            revenue_report_end = datetime.now()
+        if revenue_report_start and revenue_report_end and revenue_report_start > revenue_report_end:
+            revenue_report_start, revenue_report_end = revenue_report_end, revenue_report_start
+        # 수입: 결제완료 등 주문 원금, 포인트 사용, 실제 수입(원금 - 포인트)
+        q_completed = db.session.query(
+            db.func.coalesce(db.func.sum(Order.total_price), 0).label('total'),
+            db.func.coalesce(db.func.sum(Order.points_used), 0).label('points')
+        ).filter(Order.status != '결제취소', Order.created_at >= revenue_report_start, Order.created_at <= revenue_report_end)
+        row_completed = q_completed.first()
+        order_total = int(row_completed.total or 0)
+        points_used_sum = int(row_completed.points or 0)
+        payment_received = order_total - points_used_sum
+        # 환불(취소)
+        refund_sum = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(
+            Order.status == '결제취소', Order.created_at >= revenue_report_start, Order.created_at <= revenue_report_end
+        ).scalar() or 0
+        refund_sum = int(refund_sum)
+        # 정산 지급(입금완료)
+        settlement_paid = db.session.query(db.func.coalesce(db.func.sum(Settlement.settlement_total), 0)).join(
+            Order, Settlement.order_id == Order.id
+        ).filter(
+            Settlement.settlement_status == '입금완료',
+            Order.created_at >= revenue_report_start, Order.created_at <= revenue_report_end
+        ).scalar() or 0
+        settlement_paid = int(settlement_paid)
+        revenue_summary = {
+            'order_total': order_total,
+            'points_used': points_used_sum,
+            'payment_received': payment_received,
+            'refund': refund_sum,
+            'settlement_paid': settlement_paid,
+            'net_profit': payment_received - refund_sum - settlement_paid,
+        }
+        # 상세: 주문별 (결제넘버 기준)
+        orders_in_range = Order.query.filter(
+            Order.created_at >= revenue_report_start, Order.created_at <= revenue_report_end
+        ).order_by(Order.created_at.desc()).all()
+        order_ids = [o.id for o in orders_in_range]
+        settlement_by_order = {}
+        if order_ids:
+            sett_rows = db.session.query(Settlement.order_id, db.func.sum(Settlement.settlement_total).label('s')).filter(
+                Settlement.order_id.in_(order_ids), Settlement.settlement_status == '입금완료'
+            ).group_by(Settlement.order_id).all()
+            for sid, s in sett_rows:
+                settlement_by_order[sid] = int(s or 0)
+        for o in orders_in_range:
+            pay_rec = (o.total_price or 0) - (o.points_used or 0) if o.status != '결제취소' else 0
+            revenue_detail_rows.append({
+                'payment_no': o.order_id or '-',
+                'order_id': o.id,
+                'created_at': o.created_at,
+                'status': o.status or '-',
+                'total_price': o.total_price or 0,
+                'points_used': o.points_used or 0,
+                'payment_received': pay_rec,
+                'settlement_paid': settlement_by_order.get(o.id, 0),
+            })
+
     admin_members = []
     member_provider = ''
     if tab == 'members' and is_master:
@@ -8910,6 +9066,7 @@ def admin_dashboard():
             <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
                 <span class="text-[10px] text-gray-500 font-black uppercase w-28 shrink-0">3. 기타</span>
                 {% if is_master %}<a href="/admin?tab=marketing_cost" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'marketing_cost' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">마케팅비 사용내역</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=delivery_request" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_request' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송요청</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
@@ -10417,6 +10574,88 @@ def admin_dashboard():
                 <p class="text-[10px] text-gray-500 mt-2">최근 500건만 표시됩니다. 전체 합계는 상단 금액을 참고하세요.</p>
             </div>
 
+        {% elif tab == 'revenue_report' %}
+            <div class="mb-12">
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">수익·지출 종합 통계 (결제넘버 기준)</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">주문 원금, 포인트·캐시 사용, 정산 지급을 반영한 수익/지출 요약 및 결제넘버별 상세입니다.</p>
+                <form action="/admin" method="GET" class="flex flex-wrap items-end gap-3 mb-6">
+                    <input type="hidden" name="tab" value="revenue_report">
+                    <div class="flex flex-col">
+                        <label class="text-[10px] text-gray-500 font-black uppercase">시작일</label>
+                        <input type="date" name="revenue_start" value="{{ revenue_report_start.strftime('%Y-%m-%d') if revenue_report_start else '' }}" class="border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-[10px] text-gray-500 font-black uppercase">종료일</label>
+                        <input type="date" name="revenue_end" value="{{ revenue_report_end.strftime('%Y-%m-%d') if revenue_report_end else '' }}" class="border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold">
+                    </div>
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-teal-600 text-white text-xs font-black">조회</button>
+                </form>
+                {% if revenue_summary %}
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-emerald-700 font-black uppercase mb-1">주문 원금 (결제완료)</p>
+                        <p class="text-lg font-black text-emerald-800">{{ "{:,}".format(revenue_summary.order_total) }}원</p>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-amber-700 font-black uppercase mb-1">포인트·캐시 사용</p>
+                        <p class="text-lg font-black text-amber-800">{{ "{:,}".format(revenue_summary.points_used) }}원</p>
+                    </div>
+                    <div class="bg-teal-50 border border-teal-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-teal-700 font-black uppercase mb-1">실제 수입 (원금 − 포인트)</p>
+                        <p class="text-lg font-black text-teal-800">{{ "{:,}".format(revenue_summary.payment_received) }}원</p>
+                    </div>
+                    <div class="bg-red-50 border border-red-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-red-700 font-black uppercase mb-1">환불 (취소)</p>
+                        <p class="text-lg font-black text-red-800">{{ "{:,}".format(revenue_summary.refund) }}원</p>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-slate-700 font-black uppercase mb-1">정산 지급 (입금완료)</p>
+                        <p class="text-lg font-black text-slate-800">{{ "{:,}".format(revenue_summary.settlement_paid) }}원</p>
+                    </div>
+                    <div class="bg-indigo-50 border-2 border-indigo-300 rounded-2xl p-4">
+                        <p class="text-[10px] text-indigo-700 font-black uppercase mb-1">순이익</p>
+                        <p class="text-xl font-black text-indigo-800">{{ "{:,}".format(revenue_summary.net_profit) }}원</p>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="font-black text-gray-700 text-sm">결제넘버별 상세</h4>
+                    {% if revenue_report_start and revenue_report_end %}
+                    <a href="/admin/revenue_report/download?revenue_start={{ revenue_report_start.strftime('%Y-%m-%d') }}&revenue_end={{ revenue_report_end.strftime('%Y-%m-%d') }}" class="px-3 py-2 rounded-xl bg-gray-800 text-white text-[11px] font-black">리포트 다운로드 (CSV)</a>
+                    {% endif %}
+                </div>
+                <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto -mx-3 md:mx-0">
+                    <table class="w-full text-left min-w-[800px] text-[11px] font-bold border-collapse">
+                        <thead class="bg-gray-800 text-white">
+                            <tr>
+                                <th class="p-3 border border-gray-600">결제넘버</th>
+                                <th class="p-3 border border-gray-600 w-36">주문일시</th>
+                                <th class="p-3 border border-gray-600 w-20">상태</th>
+                                <th class="p-3 border border-gray-600 w-28 text-right">주문원금</th>
+                                <th class="p-3 border border-gray-600 w-24 text-right">포인트사용</th>
+                                <th class="p-3 border border-gray-600 w-28 text-right">실제수입</th>
+                                <th class="p-3 border border-gray-600 w-28 text-right">정산지급</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in revenue_detail_rows %}
+                            <tr class="border-b border-gray-100">
+                                <td class="p-3"><a href="/admin/order/{{ r.order_id }}/items" class="text-teal-600 hover:underline font-black">{{ r.payment_no }}</a></td>
+                                <td class="p-3">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
+                                <td class="p-3">{{ r.status }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(r.total_price) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(r.points_used) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(r.payment_received) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(r.settlement_paid) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if not revenue_detail_rows and revenue_summary %}<p class="text-gray-400 text-sm mt-4">해당 기간 주문이 없습니다.</p>{% endif %}
+                {% if not revenue_summary and tab == 'revenue_report' %}<p class="text-gray-400 text-sm mt-4">기간을 선택한 뒤 조회해 주세요.</p>{% endif %}
+            </div>
+
         {% elif tab == 'members' %}
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">회원관리</h3>
@@ -11590,6 +11829,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
             <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
                 <span class="text-[10px] text-gray-500 font-black uppercase w-28 shrink-0">3. 기타</span>
                 {% if is_master %}<a href="/admin?tab=marketing_cost" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'marketing_cost' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">마케팅비 사용내역</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=delivery_request" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_request' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송요청</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
