@@ -125,6 +125,8 @@ class Order(db.Model):
     order_id = db.Column(db.String(100))
     payment_key = db.Column(db.String(200))
     delivery_address = db.Column(db.String(500))
+    delivery_lat = db.Column(db.Float, nullable=True)
+    delivery_lng = db.Column(db.Float, nullable=True)
     request_memo = db.Column(db.String(500))
     created_at = db.Column(db.DateTime, default=datetime.now)
     points_used = db.Column(db.Integer, default=0)

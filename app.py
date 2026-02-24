@@ -78,7 +78,7 @@ def admin_logi_redirect():
 # 설정·상수 (config.py에서 로드)
 from config import (
     TOSS_CLIENT_KEY, TOSS_SECRET_KEY, TOSS_CONFIRM_KEY,
-    KAKAO_MAP_APP_KEY, MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_USE_TLS, DEFAULT_MAIL_FROM,
+    KAKAO_MAP_APP_KEY, KAKAO_REST_API_KEY, MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_USE_TLS, DEFAULT_MAIL_FROM,
     GITHUB_BACKUP_TOKEN, GITHUB_BACKUP_REPO,
 )
 UPLOAD_FOLDER = os.path.join("static", "uploads")
@@ -237,29 +237,101 @@ def _point_in_polygon(px, py, polygon):
     for i in range(n):
         xi, yi = polygon[i][0], polygon[i][1]
         xj, yj = polygon[j][0], polygon[j][1]
+        if yi == yj:
+            j = i
+            continue
         if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
             inside = not inside
         j = i
     return inside
 
 
+def _polygon_point_as_xy(polygon, point_lat, point_lng):
+    """폴리곤이 [lat,lng] vs [lng,lat] 중 어떤 형식인지 추정해, 점을 (x,y)로 반환. 한국 위도 33~43, 경도 124~132."""
+    if not polygon or len(polygon) < 1:
+        return (point_lat, point_lng)
+    a0, a1 = polygon[0][0], polygon[0][1]
+    if 124 <= a0 <= 132 and 33 <= a1 <= 43:
+        return (point_lng, point_lat)
+    if 124 <= a1 <= 132 and 33 <= a0 <= 43:
+        return (point_lat, point_lng)
+    return (point_lat, point_lng)
+
+
 def _geocode_address(address_str):
-    """주소 문자열을 (lat, lng)로 변환. 실패 시 None."""
+    """주소 문자열을 (lat, lng)로 변환. Nominatim 시도 후 실패 시 Photon(무료) 폴백."""
     if not address_str or not address_str.strip():
         return None
+    addr = address_str.strip()
+    # 한국 주소는 국가명 포함 시 성공률 상승
+    q_nominatim = addr if ("대한민국" in addr or "한국" in addr or "South Korea" in addr) else (addr + " 대한민국")
+
+    # 1) Nominatim (OpenStreetMap)
     try:
         r = requests.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": address_str.strip(), "format": "json", "limit": 1},
-            headers={"User-Agent": "BasketUncle/1.0"},
-            timeout=5,
+            params={"q": q_nominatim, "format": "json", "limit": 1},
+            headers={"User-Agent": "BasketUncle/1.0 (https://github.com/basket-uncle; address-check)"},
+            timeout=10,
         )
-        if r.status_code != 200 or not r.json():
-            return None
-        data = r.json()[0]
-        return (float(data["lat"]), float(data["lon"]))
+        if r.status_code == 200:
+            data = r.json()
+            if data and len(data) > 0 and data[0].get("lat") and data[0].get("lon"):
+                return (float(data[0]["lat"]), float(data[0]["lon"]))
     except Exception:
+        pass
+
+    # 2) Photon (Komoot, 무료·API키 불필요, OSM 기반)
+    try:
+        r = requests.get(
+            "https://photon.komoot.io/api/",
+            params={"q": addr, "limit": 1, "lang": "ko"},
+            headers={"User-Agent": "BasketUncle/1.0"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            features = data.get("features") or []
+            if features:
+                coords = features[0].get("geometry", {}).get("coordinates")
+                if coords and len(coords) >= 2:
+                    return (float(coords[1]), float(coords[0]))
+    except Exception:
+        pass
+    return None
+
+
+def _bunji_code_from_address(address_str):
+    """주소에서 번지(예: 1-1, 123-45) 추출 후 표기. 1-1 → 00001_1, 123-45 → 123_45 (한 자리 수는 5자리 패딩, 그 외는 그대로)."""
+    if not address_str or not address_str.strip():
         return None
+    s = address_str.strip()
+    m = re.search(r'(\d+)\s*-\s*(\d+)', s)
+    if not m:
+        return None
+    try:
+        first, second = int(m.group(1)), int(m.group(2))
+        first_str = f"{first:05d}" if first < 10 else str(first)
+        return f"{first_str}_{second}"
+    except (ValueError, TypeError):
+        return None
+
+
+def _make_order_virt_id(delivery_address):
+    """order_virt + 번지 7자리 주문번호 생성. 중복 시 _01, _02 붙여 유일 보장."""
+    prefix = "order_virt"
+    code = _bunji_code_from_address(delivery_address or "")
+    if not code:
+        code = "00000_0"
+    base = prefix + code
+    existing = Order.query.filter_by(order_id=base).first()
+    if not existing:
+        return base
+    for n in range(1, 100):
+        candidate = base + "_" + str(n).zfill(2)
+        if not Order.query.filter_by(order_id=candidate).first():
+            return candidate
+    return base + "_" + datetime.now().strftime("%H%M%S")
 
 
 def _get_quick_region_list(zone):
@@ -279,7 +351,7 @@ def _get_zone():
 
 
 def is_address_in_main_polygon(address_str):
-    """주소가 기본 권역안에 있으면 True (배송권역 기본 추가요금 없음)."""
+    """주소가 기본 권역안에 있으면 True (배송권역 기본 추가요금 없음). 폴리곤 [lat,lng]/[lng,lat] 자동 보정."""
     zone = _get_zone()
     addr = (address_str or "").strip()
     if not addr or not zone or not zone.polygon_json:
@@ -289,13 +361,17 @@ def is_address_in_main_polygon(address_str):
         if not polygon or len(polygon) < 3:
             return False
         coords = _geocode_address(addr)
-        return bool(coords and _point_in_polygon(coords[0], coords[1], polygon))
+        if not coords:
+            return False
+        lat, lng = coords[0], coords[1]
+        px, py = _polygon_point_as_xy(polygon, lat, lng)
+        return _point_in_polygon(px, py, polygon)
     except Exception:
         return False
 
 
 def is_address_in_quick_polygon(address_str):
-    """주소가 퀵 권역안에 있으면 True (추가요금 있는 퀵 배송)."""
+    """주소가 퀵 권역안에 있으면 True (추가요금 있는 퀵 배송). 폴리곤 좌표 순서 자동 보정."""
     zone = _get_zone()
     addr = (address_str or "").strip()
     if not addr or not zone or not getattr(zone, 'quick_region_polygon_json', None):
@@ -305,21 +381,33 @@ def is_address_in_quick_polygon(address_str):
         if not quick_poly or len(quick_poly) < 3:
             return False
         coords = _geocode_address(addr)
-        return bool(coords and _point_in_polygon(coords[0], coords[1], quick_poly))
+        if not coords:
+            return False
+        lat, lng = coords[0], coords[1]
+        px, py = _polygon_point_as_xy(quick_poly, lat, lng)
+        return _point_in_polygon(px, py, quick_poly)
     except Exception:
         return False
 
 
 def get_delivery_zone_type(address_str):
-    """주소 기준 권역 판별. 'normal'=기본권역 배송가능, 'quick'=퀵권역만 추가요금 있는 것, 'unavailable'=배송불가."""
+    """주소 기준 권역 판별. 'normal'=기본권역 배송가능, 'quick'=퀵권역만 추가요금 있는 것, 'unavailable'=배송불가. use_quick_region_only 시 기본권역 없음."""
+    zone = _get_zone()
     addr = (address_str or "").strip()
     if not addr:
+        return 'unavailable'
+    use_quick_only = bool(getattr(zone, 'use_quick_region_only', False)) if zone else False
+    if use_quick_only:
+        if is_address_in_quick_polygon(addr):
+            return 'quick'
+        quick = _get_quick_region_list(zone)
+        if quick and any(name in addr for name in quick):
+            return 'quick'
         return 'unavailable'
     if is_address_in_main_polygon(addr):
         return 'normal'
     if is_address_in_quick_polygon(addr):
         return 'quick'
-    zone = _get_zone()
     quick = _get_quick_region_list(zone) if zone else []
     if quick and any(name in addr for name in quick):
         return 'normal'
@@ -339,11 +427,17 @@ def get_quick_extra_config():
 
 
 def is_address_in_delivery_zone(address_str):
-    """주소가 배송 가능한지 (기본 권역이든 퀵 권역이든 포함). 둘 다 아니면 배송불가."""
+    """주소가 배송 가능한지 (기본 권역이든 퀵 권역이든 포함). use_quick_region_only 시 퀵권역만 배송가능."""
     zone = _get_zone()
     addr = (address_str or "").strip()
     if not addr:
         return False
+    use_quick_only = bool(getattr(zone, 'use_quick_region_only', False)) if zone else False
+    if use_quick_only:
+        if is_address_in_quick_polygon(addr):
+            return True
+        quick = _get_quick_region_list(zone)
+        return bool(quick and any(name in addr for name in quick))
     if is_address_in_main_polygon(addr):
         return True
     if is_address_in_quick_polygon(addr):
@@ -357,7 +451,9 @@ def is_address_in_delivery_zone(address_str):
             if polygon and len(polygon) >= 3:
                 coords = _geocode_address(addr)
                 if coords:
-                    return _point_in_polygon(coords[0], coords[1], polygon)
+                    lat, lng = coords[0], coords[1]
+                    px, py = _polygon_point_as_xy(polygon, lat, lng)
+                    return _point_in_polygon(px, py, polygon)
         except Exception:
             pass
     return False
@@ -1390,7 +1486,7 @@ FOOTER_HTML = """
                     var addr = data.userSelectedType === 'R' ? data.roadAddress : data.jibunAddress;
                     if (data.buildingName) addr += (addr ? ' ' : '') + data.buildingName;
                     var el = document.getElementById('address');
-                    if (el) { el.value = addr; el.blur(); }
+                    if (el) { el.value = addr; el.blur(); if (typeof window.updateDeliveryZoneBadge === 'function') window.updateDeliveryZoneBadge(addr); }
                     var detail = document.getElementById('address_detail');
                     if (detail) { setTimeout(function() { detail.focus(); }, 150); }
                 }
@@ -1718,7 +1814,9 @@ def admin_settlement_item_status():
 
 @login_required
 def admin_settlement_bulk_item_status():
-    """정산 상세에서 선택한 품목들(OrderItem) 입금상태 일괄 변경"""
+    """정산 상세에서 선택한 품목들 입금상태 일괄 변경 — 관리자(admin) 전용, 카테고리 관리자 불가."""
+    if not current_user.is_admin:
+        return jsonify({"success": False, "message": "선택 항목 입금상태 변경은 관리자만 가능합니다."}), 403
     data = request.get_json() or {}
     item_ids = data.get('order_item_ids') or data.get('item_ids') or []
     if isinstance(item_ids, str):
@@ -1729,7 +1827,7 @@ def admin_settlement_bulk_item_status():
         return jsonify({"success": False, "message": "유효한 입금상태가 아닙니다."}), 400
     if not item_ids:
         return jsonify({"success": False, "message": "선택한 품목이 없습니다."}), 400
-    is_master = current_user.is_admin
+    is_master = True
     my_cats = [] if is_master else [c.name for c in Category.query.filter_by(manager_email=current_user.email).all()]
     updated = 0
     for oi_id in item_ids:
@@ -1914,6 +2012,20 @@ def admin_popup_upload():
     if not path:
         return jsonify({"success": False, "message": "업로드 실패"}), 400
     return jsonify({"success": True, "url": path})
+
+
+@app.route('/api/check_delivery_zone')
+def api_check_delivery_zone():
+    """주소 배송가능 여부 확인. 쿼리: address=... → { in_delivery_zone, ... }. debug=1 시 geocoded 좌표·구역 정보 포함."""
+    addr = (request.args.get('address') or '').strip()
+    if not addr:
+        return jsonify({'in_delivery_zone': False})
+    out = {'in_delivery_zone': is_address_in_delivery_zone(addr)}
+    if request.args.get('debug') in ('1', 'true', 'yes'):
+        coords = _geocode_address(addr)
+        out['geocoded'] = {'lat': coords[0], 'lng': coords[1]} if coords else None
+        out['zone_type'] = get_delivery_zone_type(addr)
+    return jsonify(out)
 
 
 @app.route('/api/push/vapid-public')
@@ -5285,7 +5397,9 @@ def login():
     <div class="max-w-sm mx-auto mt-12 md:mt-16 mb-16 p-6 md:p-8 bg-white rounded-2xl md:rounded-3xl shadow-lg border border-gray-100 text-left">
         <h2 class="text-xl md:text-2xl font-black text-center mb-6 text-teal-600 uppercase italic tracking-tight">Login</h2>
         {% for message in get_flashed_messages() %}
+        {% if '로그인 정보를' in message or '가입이 완료되었습니다' in message %}
         <div class="mb-5 p-4 rounded-2xl text-sm font-bold {% if '완료' in message or '로그인했습니다' in message %}bg-teal-50 border border-teal-200 text-teal-800{% else %}bg-amber-50 border border-amber-200 text-amber-800{% endif %}">{{ message }}</div>
+        {% endif %}
         {% endfor %}
         <div class="mb-5">
             <p class="text-[10px] text-gray-400 font-black uppercase tracking-widest text-center mb-3">네이버 · 구글 · 카카오 통합 로그인</p>
@@ -5321,6 +5435,7 @@ def login():
             </form>
             </div>
         </div>
+        <p class="mt-4 p-3 rounded-xl bg-gray-50 border border-gray-100 text-[10px] text-gray-500 font-bold text-center">배송 불가 지역도 회원가입 가능합니다. 로그인 후 마이페이지에서 배송지를 수정할 수 있습니다.</p>
         <div class="text-center mt-6"><a href="/register" class="text-gray-400 text-[11px] font-bold hover:text-teal-600 transition">아직 회원이 아니신가요? 회원가입</a></div>
     </div>""" + FOOTER_HTML, next_q=next_q, recent_login=recent_login)
 
@@ -5330,10 +5445,9 @@ def register():
     if request.method == 'POST':
         name, email, pw, phone = request.form['name'], request.form['email'], request.form['password'], request.form['phone']
         addr, addr_d, ent_pw, memo = request.form['address'], request.form['address_detail'], request.form['entrance_pw'], request.form['request_memo']
+        apt_name = (request.form.get('address_apt_name') or '').strip()[:100]
         
-        # 배송구역 체크 (관리자 설정 폴리곤 또는 기본 송도동)
-        if not is_address_in_delivery_zone(addr or ""):
-            flash("해당 주소는 배송 가능 구역이 아닙니다. 설정된 퀵지역 내 주소만 가입 가능하며, 그 외 지역은 배송 불가입니다."); return redirect('/register')
+        # 배송 불가 지역도 회원가입 가능 (주문/결제 단계에서 배송 불가 안내)
 
         if not request.form.get('consent_e_commerce'):
             flash("전자상거래 이용 약관 및 유의사항에 동의해야 합니다."); return redirect('/register')
@@ -5341,7 +5455,7 @@ def register():
         if User.query.filter_by(email=email).first(): flash("이미 가입된 이메일입니다."); return redirect('/register')
         new_user = User(
             email=email, password=generate_password_hash(pw), name=name, phone=phone,
-            address=addr, address_detail=addr_d, entrance_pw=ent_pw, request_memo=memo,
+            address=addr, address_apt_name=apt_name or None, address_detail=addr_d, entrance_pw=ent_pw, request_memo=memo,
             utm_source=session.get('utm_source'), utm_medium=session.get('utm_medium'), utm_campaign=session.get('utm_campaign')
         )
         db.session.add(new_user)
@@ -5358,6 +5472,7 @@ def register():
     return render_template_string(HEADER_HTML + """
     <div class="max-w-md mx-auto mt-12 mb-24 p-10 md:p-16 bg-white rounded-[3rem] md:rounded-[4rem] shadow-2xl border text-left">
         <h2 class="text-2xl md:text-3xl font-black mb-12 tracking-tighter uppercase text-teal-600 text-left">Join Us</h2>
+        <p class="mb-6 p-4 rounded-2xl bg-teal-50 border border-teal-200 text-teal-800 text-[11px] font-bold">배송 불가 지역도 회원가입 가능합니다. 해당 주소로는 배송이 되지 않을 수 있으며, 배송 가능 지역으로 변경 시 주문이 가능합니다.</p>
         {% for message in get_flashed_messages() %}
         <div class="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-sm font-bold">{{ message }}</div>
         {% endfor %}
@@ -5374,6 +5489,8 @@ def register():
                     <input id="address" name="address" placeholder="인천광역시 연수구 송도동..." class="flex-1 p-5 bg-gray-100 rounded-2xl font-black text-xs md:text-sm text-left" readonly onclick="execDaumPostcode()">
                     <button type="button" onclick="execDaumPostcode()" class="bg-gray-800 text-white px-6 rounded-2xl font-black text-xs text-center">검색</button>
                 </div>
+                <p id="register-delivery-zone-badge" class="text-[10px] font-black uppercase tracking-wide text-gray-400"></p>
+                <input name="address_apt_name" placeholder="아파트/건물명 (선택)" class="w-full p-5 bg-gray-50 rounded-2xl font-black text-sm text-left">
                 <input id="address_detail" name="address_detail" placeholder="상세주소 (동/호수)" class="w-full p-5 bg-gray-50 rounded-2xl font-black text-sm text-left" required>
                 <input name="entrance_pw" placeholder="공동현관 비밀번호 (필수)" class="w-full p-5 bg-red-50 rounded-2xl font-black border border-red-100 text-sm text-left" required>
                 <textarea name="request_memo" placeholder="배송 시 요청사항을 남겨주세요" class="w-full p-5 bg-white border border-gray-100 rounded-2xl font-black h-28 text-sm text-left"></textarea>
@@ -5390,6 +5507,17 @@ def register():
 
             <button type="submit" class="w-full bg-teal-600 text-white py-6 rounded-3xl font-black text-lg shadow-xl mt-6 hover:bg-teal-700 transition active:scale-95 text-center">가입 완료</button>
         </form>
+        <script>
+        window.updateDeliveryZoneBadge = function(addr) {
+            if (!addr || !addr.trim()) { var el = document.getElementById('register-delivery-zone-badge'); if (el) el.textContent = ''; return; }
+            fetch('/api/check_delivery_zone?address=' + encodeURIComponent(addr)).then(function(r){ return r.json(); }).then(function(d){
+                var el = document.getElementById('register-delivery-zone-badge');
+                if (!el) return;
+                if (d.in_delivery_zone) { el.innerHTML = '<i class=\"fas fa-check-circle mr-1\"></i> 배송가능 지역'; el.className = 'text-[10px] font-black uppercase tracking-wide text-teal-600'; }
+                else { el.innerHTML = '<i class=\"fas fa-times-circle mr-1\"></i> 배송 불가 지역'; el.className = 'text-[10px] font-black uppercase tracking-wide text-red-500'; }
+            }).catch(function(){});
+        };
+        </script>
     </div>""" + FOOTER_HTML)
 
 @app.route('/logout')
@@ -5403,6 +5531,7 @@ def update_address():
     name = (request.form.get('name') or '').strip()[:50]
     phone = (request.form.get('phone') or '').strip()[:20]
     addr = (request.form.get('address') or '').strip()
+    addr_apt = (request.form.get('address_apt_name') or '').strip()[:100]
     addr_d = request.form.get('address_detail')
     ent_pw = request.form.get('entrance_pw')
     # 폼에서 오지 않았을 수 있으므로 None이면 기존값 유지
@@ -5427,6 +5556,7 @@ def update_address():
         current_user.name = name or None
         current_user.phone = phone or None
         current_user.address = addr
+        current_user.address_apt_name = addr_apt or None
         current_user.address_detail = addr_d
         current_user.entrance_pw = ent_pw
         current_user.request_memo = request_memo or None
@@ -5791,7 +5921,9 @@ def mypage():
     mypage_email = getattr(current_user, "email", None) or ""
     mypage_phone = getattr(current_user, "phone", None) or ""
     mypage_address = getattr(current_user, "address", None) or ""
+    mypage_address_apt_name = getattr(current_user, "address_apt_name", None) or ""
     mypage_address_detail = getattr(current_user, "address_detail", None) or ""
+    mypage_address_in_delivery_zone = bool(mypage_address and is_address_in_delivery_zone(mypage_address))
     mypage_entrance_pw = getattr(current_user, "entrance_pw", None) or ""
     mypage_request_memo = getattr(current_user, "request_memo", None) or ""
     mypage_points = getattr(current_user, "points", 0) or 0
@@ -5931,9 +6063,12 @@ def mypage():
                         <div class="bg-gray-50/50 p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-50 text-left">
                             <p class="text-[10px] text-gray-400 uppercase mb-2 tracking-widest font-black">기본 배송지</p>
                             <p class="text-gray-700 text-sm md:text-base leading-snug font-black break-keep">
-                                {{ mypage_address or '정보 없음' }}<br>
+                                {{ mypage_address or '정보 없음' }}{% if mypage_address_apt_name %}<br><span class="text-teal-600 font-bold">{{ mypage_address_apt_name }}</span>{% endif %}<br>
                                 <span class="text-gray-400 text-xs md:text-sm font-bold">{{ mypage_address_detail or '' }}</span>
                             </p>
+                            {% if mypage_address_in_delivery_zone %}
+                            <p class="mt-2 text-[10px] font-black text-teal-600 uppercase tracking-wide"><i class="fas fa-check-circle mr-1"></i> 배송가능 지역</p>
+                            {% endif %}
                         </div>
                         <div class="bg-orange-50/30 p-5 md:p-6 rounded-2xl md:rounded-3xl border border-orange-50 text-left">
                             <p class="text-[10px] text-orange-400 uppercase mb-2 tracking-widest font-black">공동현관 비밀번호</p>
@@ -5960,6 +6095,8 @@ def mypage():
                                     <input id="address" name="address" value="{{ mypage_address or '' }}" class="flex-1 min-w-0 p-4 md:p-5 bg-gray-50 rounded-xl md:rounded-2xl text-xs md:text-sm font-black border border-gray-100" readonly onclick="execDaumPostcode()" placeholder="주소 검색">
                                     <button type="button" onclick="execDaumPostcode()" class="touch-target shrink-0 bg-gray-800 text-white px-4 md:px-6 rounded-xl md:rounded-2xl text-xs font-black">검색</button>
                                 </div>
+                                <p id="mypage-delivery-zone-badge" class="text-[10px] font-black uppercase tracking-wide {% if mypage_address_in_delivery_zone %}text-teal-600{% else %}text-gray-400{% endif %}">{% if mypage_address_in_delivery_zone %}<i class="fas fa-check-circle mr-1"></i> 배송가능 지역{% else %}{% if mypage_address %}<i class="fas fa-times-circle mr-1"></i> 배송 불가 지역{% endif %}{% endif %}</p>
+                                <input name="address_apt_name" value="{{ mypage_address_apt_name or '' }}" class="w-full p-4 md:p-5 bg-gray-50 rounded-xl md:rounded-2xl text-xs md:text-sm font-black border border-gray-100" placeholder="아파트/건물명 (선택)">
                                 <input id="address_detail" name="address_detail" value="{{ mypage_address_detail or '' }}" class="w-full p-4 md:p-5 bg-gray-50 rounded-xl md:rounded-2xl text-xs md:text-sm font-black border border-gray-100" required placeholder="상세주소 (동/호수)">
                             </div>
                         </div>
@@ -6285,6 +6422,15 @@ def mypage():
             d.classList.toggle('hidden', isHidden);
             b.innerHTML = isHidden ? '<i class="fas fa-times"></i> 취소' : '<i class="fas fa-edit mr-1"></i> 주소 수정';
         }
+        window.updateDeliveryZoneBadge = function(addr) {
+            var el = document.getElementById('mypage-delivery-zone-badge');
+            if (!el) return;
+            if (!addr || !addr.trim()) { el.innerHTML = ''; el.className = 'text-[10px] font-black uppercase tracking-wide text-gray-400'; return; }
+            fetch('/api/check_delivery_zone?address=' + encodeURIComponent(addr)).then(function(r){ return r.json(); }).then(function(d){
+                if (d.in_delivery_zone) { el.innerHTML = '<i class=\"fas fa-check-circle mr-1\"></i> 배송가능 지역'; el.className = 'text-[10px] font-black uppercase tracking-wide text-teal-600'; }
+                else { el.innerHTML = '<i class=\"fas fa-times-circle mr-1\"></i> 배송 불가 지역'; el.className = 'text-[10px] font-black uppercase tracking-wide text-red-500'; }
+            }).catch(function(){});
+        };
 
         function openReceiptModal(id, items, total, address, orderFullId, deliveryFee) {
             document.getElementById('modal-order-id').innerText = orderFullId || ('ORD-' + id);
@@ -6415,7 +6561,7 @@ def mypage():
         })();
     </script>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, recent_orders=recent_orders, older_orders=older_orders, recent_items_with_date=recent_items_with_date, Review=Review, unread_message_count=unread_message_count, push_already_set=push_already_set, need_address=need_address, from_cart=from_cart, mypage_name=mypage_name, mypage_email=mypage_email, mypage_phone=mypage_phone, mypage_address=mypage_address, mypage_address_detail=mypage_address_detail, mypage_entrance_pw=mypage_entrance_pw, mypage_request_memo=mypage_request_memo, mypage_points=mypage_points)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, recent_orders=recent_orders, older_orders=older_orders, recent_items_with_date=recent_items_with_date, Review=Review, unread_message_count=unread_message_count, push_already_set=push_already_set, need_address=need_address, from_cart=from_cart, mypage_name=mypage_name, mypage_email=mypage_email, mypage_phone=mypage_phone, mypage_address=mypage_address, mypage_address_apt_name=mypage_address_apt_name, mypage_address_detail=mypage_address_detail, mypage_address_in_delivery_zone=mypage_address_in_delivery_zone, mypage_entrance_pw=mypage_entrance_pw, mypage_request_memo=mypage_request_memo, mypage_points=mypage_points)
 def _recalc_order_from_items(order):
     """OrderItem 기준으로 주문 합계·배송비·product_details 재계산 (취소 반영)"""
     remaining = OrderItem.query.filter_by(order_id=order.id, cancelled=False).all()
@@ -6760,13 +6906,14 @@ def order_confirm():
                 <p class="text-sm text-gray-500 mb-3 font-bold leading-relaxed">주소 수정은 마이페이지에서 가능합니다.</p>
                 <p class="text-lg md:text-xl text-gray-800 font-black leading-snug" id="display-address-text">
                     { (current_user.address or '정보 없음').replace('<', '&lt;').replace('>', '&gt;') }<br>
+                    { f'<span class="text-teal-600 font-bold">{(getattr(current_user, "address_apt_name", None) or "").replace("<", "&lt;").replace(">", "&gt;")}</span><br>' if getattr(current_user, 'address_apt_name', None) else '' }
                     <span class="text-gray-500">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
                 </p>
                 <p class="mt-3 text-sm text-teal-700 font-bold"><span class="text-[10px] text-teal-500 uppercase">요청사항</span> { (getattr(current_user, 'request_memo', None) or '').replace('<', '&lt;').replace('>', '&gt;') or '없음' }</p>
                 <a href="/mypage?from=cart" class="inline-flex items-center gap-2 mt-4 px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">
                     <i class="fas fa-edit"></i> 마이페이지에서 주소 수정
                 </a>
-                <p class="mt-4 font-black text-sm text-teal-600 flex items-center gap-2"><i class="fas fa-check-circle"></i> 일반 배송 구역입니다.</p>
+                <p class="mt-4 font-black text-sm text-teal-600 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송가능</p>
             </div>
 
             <div class="space-y-4 pt-4">
@@ -6823,6 +6970,7 @@ def order_confirm():
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
                 <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
                 <input type="hidden" name="order_address" id="order_address_hidden" value="{ (current_user.address or '').replace('&', '&amp;').replace('"', '&quot;') }">
+                <input type="hidden" name="order_address_apt" value="{ (getattr(current_user, 'address_apt_name', None) or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="order_address_detail" id="order_address_detail_hidden" value="{ (current_user.address_detail or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="order_entrance_pw" id="order_entrance_pw_hidden" value="{ (current_user.entrance_pw or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="save_address_to_profile" id="save_address_to_profile_hidden" value="0">
@@ -6879,6 +7027,7 @@ def order_confirm():
                 <div id="address-display-block">
                     <p class="text-lg md:text-xl text-gray-800 font-black leading-snug" id="display-address-text">
                         { (current_user.address or '정보 없음').replace('<', '&lt;').replace('>', '&gt;') }<br>
+                        { f'<span class="text-teal-600 font-bold">{(getattr(current_user, "address_apt_name", None) or "").replace("<", "&lt;").replace(">", "&gt;")}</span><br>' if getattr(current_user, 'address_apt_name', None) else '' }
                         <span class="text-gray-500">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
                     </p>
                     <p class="mt-3 text-sm text-teal-700 font-bold"><span class="text-[10px] text-teal-500 uppercase">요청사항</span> { (getattr(current_user, 'request_memo', None) or '').replace('<', '&lt;').replace('>', '&gt;') or '없음' }</p>
@@ -6887,13 +7036,13 @@ def order_confirm():
                     </a>
                 </div>
                 <p class="mt-4 font-black text-sm" id="zone-status-msg">
-                    {'<span class="text-amber-700 flex items-center gap-2"><i class="fas fa-truck-fast"></i> 2차 확인: 퀵 지정 구역입니다. 추가 배송료 동의 시 주문 가능.</span>' if zone_type == 'quick' else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 2차: 퀵 지정 구역도 아닙니다. 배송 불가.</span>'}
+                    {'<span class="text-amber-700 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송가능 (퀵 추가료 동의 시 주문 가능)</span>' if zone_type == 'quick' else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 배송 불가</span>'}
                 </p>
             </div>
 
             {f'<div class="p-6 bg-red-100 rounded-2xl text-red-700 text-xs md:text-sm font-bold leading-relaxed">⚠️ 1차·2차 모두 해당 구역이 없습니다. 배송 가능 주소로 수정해 주세요.</div>' if zone_type == 'unavailable' else ''}
             {f'''<div class="p-6 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs md:text-sm font-bold leading-relaxed">
-                <p class="mb-2 font-black">2차: 퀵 지정 구역 — 추가 배송료 적용</p>
+                <p class="mb-2 font-black">배송가능 (퀵 구역 — 추가 배송료 적용)</p>
                 <p class="mb-3">{ quick_extra_message }</p>
                 <p class="mb-3">퀵 추가 배송료: <strong>{ "{:,}".format(quick_extra_fee) }원</strong></p>
                 <label class="flex items-start gap-3 cursor-pointer mt-4">
@@ -6963,6 +7112,7 @@ def order_confirm():
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
                 <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
                 <input type="hidden" name="order_address" id="order_address_hidden" value="{ (current_user.address or '').replace('&', '&amp;').replace('"', '&quot;') }">
+                <input type="hidden" name="order_address_apt" value="{ (getattr(current_user, 'address_apt_name', None) or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="order_address_detail" id="order_address_detail_hidden" value="{ (current_user.address_detail or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="order_entrance_pw" id="order_entrance_pw_hidden" value="{ (current_user.entrance_pw or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="save_address_to_profile" id="save_address_to_profile_hidden" value="0">
@@ -7042,9 +7192,13 @@ def order_payment():
         if zone_type == 'quick' and not quick_agree:
             return redirect('/order/confirm')
         session['order_address'] = effective_address
+        session['order_address_apt'] = (request.form.get('order_address_apt') or '').strip() or (getattr(current_user, 'address_apt_name', None) or '')
         session['order_address_detail'] = order_address_detail if order_address else (current_user.address_detail or "")
         session['order_entrance_pw'] = order_entrance_pw if order_address else (current_user.entrance_pw or "")
         session['save_address_to_profile'] = save_address_to_profile
+        coords = _geocode_address(effective_address)
+        session['delivery_lat'] = float(coords[0]) if coords else None
+        session['delivery_lng'] = float(coords[1]) if coords else None
         subtotal = sum(i.price * i.quantity for i in items)
         cat_price_sums = {}
         for i in items:
@@ -7080,7 +7234,7 @@ def order_payment():
     total_before_points = int(subtotal + delivery_fee + quick_extra_fee_val)
     total = total_before_points - points_used  # 토스에 넘길 실제 결제 금액
     tax_free = int(sum(i.price * i.quantity for i in items if i.tax_type == '면세'))
-    order_id = f"ORDER_{datetime.now().strftime('%Y%m%d%H%M%S')}_{current_user.id}"
+    order_id = _make_order_virt_id(effective_addr)
     order_name = f"{items[0].product_name} 외 {len(items)-1}건" if len(items) > 1 else items[0].product_name
     
     content = f"""
@@ -7189,16 +7343,27 @@ def payment_success():
 
         # 주문 시 변경한 배송지가 있으면 session 값 사용, 없으면 회원 기본 주소 사용
         delivery_addr = session.get('order_address') or current_user.address or ""
+        delivery_apt = (session.get('order_address_apt') or getattr(current_user, 'address_apt_name', None) or "").strip()
         delivery_addr_detail = session.get('order_address_detail') or current_user.address_detail or ""
         delivery_entrance_pw = session.get('order_entrance_pw') or current_user.entrance_pw or ""
-        delivery_address_str = f"({delivery_addr}) {delivery_addr_detail} (현관:{delivery_entrance_pw})"
+        apt_part = f" {delivery_apt} " if delivery_apt else " "
+        delivery_address_str = f"({delivery_addr}){apt_part}{delivery_addr_detail} (현관:{delivery_entrance_pw})"
+
+        delivery_lat = session.get('delivery_lat')
+        delivery_lng = session.get('delivery_lng')
+        if (delivery_lat is None or delivery_lng is None) and delivery_addr:
+            coords = _geocode_address(delivery_addr)
+            if coords:
+                delivery_lat, delivery_lng = float(coords[0]), float(coords[1])
 
         # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록. UTM 유입 경로 저장.
         try:
             order = Order(
                 user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email,
                 product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'),
-                order_id=oid, payment_key=pk, delivery_address=delivery_address_str, request_memo=current_user.request_memo,
+                order_id=oid, payment_key=pk, delivery_address=delivery_address_str,
+                delivery_lat=delivery_lat, delivery_lng=delivery_lng,
+                request_memo=current_user.request_memo,
                 status='결제완료', points_used=points_used, quick_extra_fee=quick_extra,
                 utm_source=session.get('utm_source'), utm_medium=session.get('utm_medium'), utm_campaign=session.get('utm_campaign')
             )
@@ -7246,11 +7411,13 @@ def payment_success():
             apply_order_points(current_user, original_total, points_used, order.id)
             if session.get('save_address_to_profile') and delivery_addr:
                 current_user.address = delivery_addr
+                current_user.address_apt_name = delivery_apt or None
                 current_user.address_detail = delivery_addr_detail
                 current_user.entrance_pw = delivery_entrance_pw
             session.pop('points_used', None)
             session.pop('quick_extra_fee', None)
             session.pop('order_address', None)
+            session.pop('order_address_apt', None)
             session.pop('order_address_detail', None)
             session.pop('order_entrance_pw', None)
             session.pop('save_address_to_profile', None)
@@ -8373,8 +8540,12 @@ def admin_dashboard():
         settlement_detail_orders = []
             
     elif tab == 'reviews':
-        reviews = Review.query.order_by(Review.created_at.desc()).all()
-        category_names = {c.id: c.name for c in Category.query.all()}  # 리뷰 테이블에서 판매자명 표시용
+        category_names = {c.id: c.name for c in Category.query.all()}
+        if is_master:
+            reviews = Review.query.order_by(Review.created_at.desc()).all()
+        else:
+            my_category_ids = [c.id for c in categories if c.manager_email == current_user.email]
+            reviews = Review.query.filter(Review.category_id.in_(my_category_ids)).order_by(Review.created_at.desc()).all() if my_category_ids else []
 
     delivery_zone_polygon = []
     delivery_zone_quick_polygon = []
@@ -8623,63 +8794,85 @@ def admin_dashboard():
         now = datetime.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today_start - timedelta(days=7)
-        # DailyStat: 오늘 / 최근 7일 / 전체
-        all_daily = DailyStat.query.order_by(DailyStat.stat_date.desc()).limit(365).all()
-        for row in all_daily:
-            d = row.stat_date
-            main = (row.main_views or 0)
-            cat = (row.category_views or 0)
-            prod = (row.product_views or 0)
-            cart = (row.cart_views or 0)
-            if d == today_start.date():
-                stats_page_views_today['main'] += main
-                stats_page_views_today['category'] += cat
-                stats_page_views_today['product'] += prod
-                stats_page_views_today['cart'] += cart
-            if d >= week_start.date():
-                stats_page_views_week['main'] += main
-                stats_page_views_week['category'] += cat
-                stats_page_views_week['product'] += prod
-                stats_page_views_week['cart'] += cart
-            stats_page_views_total['main'] += main
-            stats_page_views_total['category'] += cat
-            stats_page_views_total['product'] += prod
-            stats_page_views_total['cart'] += cart
-            stats_daily_table.append({'date': d, 'main': main, 'category': cat, 'product': prod, 'cart': cart})
-        # 주문 (결제취소 제외)
-        q_order = Order.query.filter(Order.status != '결제취소')
-        stats_orders_today = q_order.filter(Order.created_at >= today_start).count()
-        stats_orders_week = q_order.filter(Order.created_at >= week_start).count()
-        stats_orders_total = q_order.count()
-        rev_today = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(Order.status != '결제취소', Order.created_at >= today_start).scalar()
-        rev_week = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(Order.status != '결제취소', Order.created_at >= week_start).scalar()
-        rev_all = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(Order.status != '결제취소').scalar()
-        stats_revenue_today = int(rev_today or 0)
-        stats_revenue_week = int(rev_week or 0)
-        stats_revenue_total = int(rev_all or 0)
-        # 상품
-        stats_products_total = Product.query.count()
-        stats_categories_total = Category.query.count()
-        stats_low_stock_count = Product.query.filter(Product.is_active == True, Product.stock < 5).count()
-        # 인기 상품: OrderItem 기준 판매 수량 상위
         from sqlalchemy import func
-        sold_q = db.session.query(OrderItem.product_id, OrderItem.product_name, func.sum(OrderItem.quantity).label('qty')).filter(OrderItem.cancelled == False).group_by(OrderItem.product_id, OrderItem.product_name).order_by(func.sum(OrderItem.quantity).desc()).limit(15).all()
-        stats_top_products_by_sold = [{'product_id': r.product_id, 'product_name': r.product_name, 'qty': r.qty} for r in sold_q]
-        # 조회수 많은 상품
-        stats_top_products_by_views = Product.query.order_by(Product.view_count.desc().nullslast()).limit(10).all()
-        stats_product_views_total = db.session.query(db.func.coalesce(db.func.sum(Product.view_count), 0)).scalar() or 0
-        # 회원 (관리자 제외). User에 created_at 없으면 신규 집계는 0
-        stats_members_total = User.query.filter(User.is_admin == False).count()
-        stats_members_today = 0
-        stats_members_week = 0
-        if hasattr(User, 'created_at'):
-            try:
-                stats_members_today = User.query.filter(User.is_admin == False, User.created_at >= today_start).count()
-                stats_members_week = User.query.filter(User.is_admin == False, User.created_at >= week_start).count()
-            except Exception:
-                pass
-        stats_reviews_total = Review.query.count()
-        stats_cart_items_total = db.session.query(db.func.coalesce(db.func.sum(Cart.quantity), 0)).scalar() or 0
+        if is_master:
+            # DailyStat: 오늘 / 최근 7일 / 전체
+            all_daily = DailyStat.query.order_by(DailyStat.stat_date.desc()).limit(365).all()
+            for row in all_daily:
+                d = row.stat_date
+                main = (row.main_views or 0)
+                cat = (row.category_views or 0)
+                prod = (row.product_views or 0)
+                cart = (row.cart_views or 0)
+                if d == today_start.date():
+                    stats_page_views_today['main'] += main
+                    stats_page_views_today['category'] += cat
+                    stats_page_views_today['product'] += prod
+                    stats_page_views_today['cart'] += cart
+                if d >= week_start.date():
+                    stats_page_views_week['main'] += main
+                    stats_page_views_week['category'] += cat
+                    stats_page_views_week['product'] += prod
+                    stats_page_views_week['cart'] += cart
+                stats_page_views_total['main'] += main
+                stats_page_views_total['category'] += cat
+                stats_page_views_total['product'] += prod
+                stats_page_views_total['cart'] += cart
+                stats_daily_table.append({'date': d, 'main': main, 'category': cat, 'product': prod, 'cart': cart})
+            q_order = Order.query.filter(Order.status != '결제취소')
+            stats_orders_today = q_order.filter(Order.created_at >= today_start).count()
+            stats_orders_week = q_order.filter(Order.created_at >= week_start).count()
+            stats_orders_total = q_order.count()
+            rev_today = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(Order.status != '결제취소', Order.created_at >= today_start).scalar()
+            rev_week = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(Order.status != '결제취소', Order.created_at >= week_start).scalar()
+            rev_all = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(Order.status != '결제취소').scalar()
+            stats_revenue_today = int(rev_today or 0)
+            stats_revenue_week = int(rev_week or 0)
+            stats_revenue_total = int(rev_all or 0)
+            stats_products_total = Product.query.count()
+            stats_categories_total = Category.query.count()
+            stats_low_stock_count = Product.query.filter(Product.is_active == True, Product.stock < 5).count()
+            sold_q = db.session.query(OrderItem.product_id, OrderItem.product_name, func.sum(OrderItem.quantity).label('qty')).filter(OrderItem.cancelled == False).group_by(OrderItem.product_id, OrderItem.product_name).order_by(func.sum(OrderItem.quantity).desc()).limit(15).all()
+            stats_top_products_by_sold = [{'product_id': r.product_id, 'product_name': r.product_name, 'qty': r.qty} for r in sold_q]
+            stats_top_products_by_views = Product.query.order_by(Product.view_count.desc().nullslast()).limit(10).all()
+            stats_product_views_total = db.session.query(db.func.coalesce(db.func.sum(Product.view_count), 0)).scalar() or 0
+            stats_members_total = User.query.filter(User.is_admin == False).count()
+            stats_members_today = 0
+            stats_members_week = 0
+            if hasattr(User, 'created_at'):
+                try:
+                    stats_members_today = User.query.filter(User.is_admin == False, User.created_at >= today_start).count()
+                    stats_members_week = User.query.filter(User.is_admin == False, User.created_at >= week_start).count()
+                except Exception:
+                    pass
+            stats_reviews_total = Review.query.count()
+            stats_cart_items_total = db.session.query(db.func.coalesce(db.func.sum(Cart.quantity), 0)).scalar() or 0
+        else:
+            # 카테고리 관리자: 권한 있는 카테고리만. 회원/전체통계 미제공
+            my_cats = my_categories
+            my_cat_ids = [c.id for c in categories if c.manager_email == current_user.email]
+            stats_members_total = stats_members_today = stats_members_week = 0
+            stats_products_total = Product.query.filter(Product.category.in_(my_cats)).count() if my_cats else 0
+            stats_categories_total = len(my_cats)
+            stats_low_stock_count = Product.query.filter(Product.category.in_(my_cats), Product.is_active == True, Product.stock < 5).count() if my_cats else 0
+            stats_reviews_total = Review.query.filter(Review.category_id.in_(my_cat_ids)).count() if my_cat_ids else 0
+            stats_product_views_total = db.session.query(db.func.coalesce(db.func.sum(Product.view_count), 0)).filter(Product.category.in_(my_cats)).scalar() or 0 if my_cats else 0
+            sold_q = db.session.query(OrderItem.product_id, OrderItem.product_name, func.sum(OrderItem.quantity).label('qty')).filter(OrderItem.cancelled == False, OrderItem.product_category.in_(my_cats)).group_by(OrderItem.product_id, OrderItem.product_name).order_by(func.sum(OrderItem.quantity).desc()).limit(15).all() if my_cats else []
+            stats_top_products_by_sold = [{'product_id': r.product_id, 'product_name': r.product_name, 'qty': r.qty} for r in sold_q]
+            stats_top_products_by_views = Product.query.filter(Product.category.in_(my_cats)).order_by(Product.view_count.desc().nullslast()).limit(10).all() if my_cats else []
+            order_ids_today = db.session.query(Order.id).join(OrderItem, OrderItem.order_id == Order.id).filter(Order.status != '결제취소', Order.created_at >= today_start, OrderItem.product_category.in_(my_cats), OrderItem.cancelled == False).distinct().all() if my_cats else []
+            order_ids_week = db.session.query(Order.id).join(OrderItem, OrderItem.order_id == Order.id).filter(Order.status != '결제취소', Order.created_at >= week_start, OrderItem.product_category.in_(my_cats), OrderItem.cancelled == False).distinct().all() if my_cats else []
+            order_ids_all = db.session.query(Order.id).join(OrderItem, OrderItem.order_id == Order.id).filter(Order.status != '결제취소', OrderItem.product_category.in_(my_cats), OrderItem.cancelled == False).distinct().all() if my_cats else []
+            stats_orders_today = len(order_ids_today)
+            stats_orders_week = len(order_ids_week)
+            stats_orders_total = len(order_ids_all)
+            rev_today = db.session.query(db.func.coalesce(db.func.sum(OrderItem.price * OrderItem.quantity), 0)).join(Order, Order.id == OrderItem.order_id).filter(Order.status != '결제취소', Order.created_at >= today_start, OrderItem.product_category.in_(my_cats), OrderItem.cancelled == False).scalar() if my_cats else 0
+            rev_week = db.session.query(db.func.coalesce(db.func.sum(OrderItem.price * OrderItem.quantity), 0)).join(Order, Order.id == OrderItem.order_id).filter(Order.status != '결제취소', Order.created_at >= week_start, OrderItem.product_category.in_(my_cats), OrderItem.cancelled == False).scalar() if my_cats else 0
+            rev_all = db.session.query(db.func.coalesce(db.func.sum(OrderItem.price * OrderItem.quantity), 0)).join(Order, Order.id == OrderItem.order_id).filter(Order.status != '결제취소', OrderItem.product_category.in_(my_cats), OrderItem.cancelled == False).scalar() if my_cats else 0
+            stats_revenue_today = int(rev_today or 0)
+            stats_revenue_week = int(rev_week or 0)
+            stats_revenue_total = int(rev_all or 0)
+            stats_cart_items_total = db.session.query(db.func.coalesce(db.func.sum(Cart.quantity), 0)).scalar() or 0
 
     # 3. HTML 템플릿 코드
     # 3. HTML 템플릿 코드 (카테고리 설정 탭 완벽 복구본)
@@ -8817,7 +9010,8 @@ def admin_dashboard():
 
         {% elif tab == 'stats' %}
             <div class="mb-12">
-                <h3 class="text-lg font-black text-gray-800 italic mb-6">📊 페이지뷰 · 주문 · 상품 통계</h3>
+                <h3 class="text-lg font-black text-gray-800 italic mb-6">📊 {% if is_master %}페이지뷰 · 주문 · 상품 통계{% else %}내 카테고리 통계{% endif %}</h3>
+                {% if is_master %}
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                     <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                         <p class="text-[10px] text-gray-500 font-black uppercase mb-1">오늘 조회수</p>
@@ -8837,45 +9031,55 @@ def admin_dashboard():
                         <p class="text-xl font-black text-blue-600">{{ stats_product_views_total }}</p>
                     </div>
                 </div>
+                {% else %}
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                        <p class="text-[10px] text-gray-500 font-black uppercase mb-1">내 카테고리 상품 조회수 합계</p>
+                        <p class="text-xl font-black text-blue-600">{{ stats_product_views_total }}</p>
+                    </div>
+                </div>
+                {% endif %}
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                     <div class="bg-white p-5 rounded-2xl border border-orange-100 shadow-sm">
-                        <p class="text-[10px] text-orange-600 font-black uppercase mb-1">오늘 주문</p>
+                        <p class="text-[10px] text-orange-600 font-black uppercase mb-1">{% if is_master %}오늘 주문{% else %}내 카테고리 오늘 주문{% endif %}</p>
                         <p class="text-xl font-black text-orange-600">{{ stats_orders_today }}건</p>
                         <p class="text-[10px] text-gray-600 font-bold">{{ "{:,}".format(stats_revenue_today) }}원</p>
                     </div>
                     <div class="bg-white p-5 rounded-2xl border border-orange-100 shadow-sm">
-                        <p class="text-[10px] text-orange-600 font-black uppercase mb-1">이번 주 주문</p>
+                        <p class="text-[10px] text-orange-600 font-black uppercase mb-1">{% if is_master %}이번 주 주문{% else %}내 카테고리 이번 주 주문{% endif %}</p>
                         <p class="text-xl font-black text-orange-600">{{ stats_orders_week }}건</p>
                         <p class="text-[10px] text-gray-600 font-bold">{{ "{:,}".format(stats_revenue_week) }}원</p>
                     </div>
                     <div class="bg-white p-5 rounded-2xl border border-orange-100 shadow-sm">
-                        <p class="text-[10px] text-orange-600 font-black uppercase mb-1">전체 주문</p>
+                        <p class="text-[10px] text-orange-600 font-black uppercase mb-1">{% if is_master %}전체 주문{% else %}내 카테고리 전체 주문{% endif %}</p>
                         <p class="text-xl font-black text-orange-700">{{ stats_orders_total }}건</p>
                         <p class="text-[10px] text-gray-600 font-bold">{{ "{:,}".format(stats_revenue_total) }}원</p>
                     </div>
                     <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-                        <p class="text-[10px] text-gray-500 font-black uppercase mb-1">리뷰 수</p>
+                        <p class="text-[10px] text-gray-500 font-black uppercase mb-1">{% if is_master %}리뷰 수{% else %}내 카테고리 리뷰 수{% endif %}</p>
                         <p class="text-xl font-black text-gray-800">{{ stats_reviews_total }}개</p>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                     <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-                        <p class="text-[10px] text-gray-500 font-black uppercase mb-1">상품 수</p>
+                        <p class="text-[10px] text-gray-500 font-black uppercase mb-1">{% if is_master %}상품 수{% else %}내 카테고리 상품 수{% endif %}</p>
                         <p class="text-xl font-black text-gray-800">{{ stats_products_total }}개</p>
                     </div>
                     <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-                        <p class="text-[10px] text-gray-500 font-black uppercase mb-1">카테고리 수</p>
+                        <p class="text-[10px] text-gray-500 font-black uppercase mb-1">{% if is_master %}카테고리 수{% else %}관리 카테고리 수{% endif %}</p>
                         <p class="text-xl font-black text-gray-800">{{ stats_categories_total }}개</p>
                     </div>
                     <div class="bg-white p-5 rounded-2xl border border-amber-100 shadow-sm">
                         <p class="text-[10px] text-amber-600 font-black uppercase mb-1">재고 부족 (5개 미만)</p>
                         <p class="text-xl font-black text-amber-600">{{ stats_low_stock_count }}개</p>
                     </div>
+                    {% if is_master %}
                     <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                         <p class="text-[10px] text-gray-500 font-black uppercase mb-1">회원 수</p>
                         <p class="text-xl font-black text-gray-800">{{ stats_members_total }}명</p>
                         {% if stats_members_today or stats_members_week %}<p class="text-[9px] text-gray-400">오늘 {{ stats_members_today }} · 이번 주 {{ stats_members_week }}</p>{% endif %}
                     </div>
+                    {% endif %}
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -8909,6 +9113,7 @@ def admin_dashboard():
                           </div>
                       </div>
                   </div>
+                  {% if is_master %}
                   <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-8">
                       <h4 class="p-4 border-b border-gray-100 text-sm font-black text-gray-800">일별 페이지뷰 (최근 30일)</h4>
                       <div class="overflow-x-auto max-h-64 overflow-y-auto">
@@ -8931,6 +9136,7 @@ def admin_dashboard():
                           </table>
                       </div>
                   </div>
+                  {% endif %}
                   <div class="bg-gray-50 rounded-2xl p-4 border border-gray-100 text-[11px] text-gray-600">
                       <p class="font-black text-gray-700 mb-1">통계 안내</p>
                       <p>조회수는 메인·카테고리·상품상세·장바구니 페이지 방문 시 일별로 집계됩니다. 주문·매출은 결제취소를 제외한 건수와 결제금액 합계입니다. 장바구니 담긴 수: {{ stats_cart_items_total }}개(현재 담긴 수량 합계).</p>
@@ -10811,6 +11017,7 @@ def admin_dashboard():
                 <div>
                     <h3 class="text-lg font-black text-gray-800 mb-4 italic">📊 정산 상세 (n넘버 기준)</h3>
                     <p class="text-[11px] text-gray-500 font-bold mb-4">고객 결제 시 품목별 고유 n넘버가 부여되며, 해당 번호를 기준으로 정산합니다.</p>
+                    {% if is_master %}
                     <div class="flex items-center gap-4 mb-4 flex-wrap">
                         <span class="text-[11px] font-bold text-gray-600">선택 항목 입금상태 변경:</span>
                         <select id="settlement-bulk-status" class="border border-gray-200 rounded-xl px-3 py-2 text-xs font-black bg-white">
@@ -10821,11 +11028,12 @@ def admin_dashboard():
                         </select>
                         <button type="button" id="settlement-bulk-status-btn" class="bg-teal-600 text-white px-5 py-2 rounded-xl text-xs font-black shadow">적용</button>
                     </div>
+                    {% endif %}
                     <div id="settlement-detail-table-wrap" class="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-x-auto overflow-y-auto max-h-[32rem]">
                         <table class="w-full text-left min-w-[900px] text-[10px] font-black">
                             <thead class="bg-gray-800 text-white">
                                 <tr>
-                                    <th class="p-3 w-12"><input type="checkbox" id="selectAllSettlement" title="전체선택" class="rounded"></th>
+                                    {% if is_master %}<th class="p-3 w-12"><input type="checkbox" id="selectAllSettlement" title="전체선택" class="rounded"></th>{% endif %}
                                     <th class="p-3">정산번호(n)</th>
                                     <th class="p-3">판매일시</th>
                                     <th class="p-3">카테고리</th>
@@ -10842,7 +11050,7 @@ def admin_dashboard():
                             <tbody>
                                 {% for r in settlement_detail_rows %}
                                 <tr class="border-b border-gray-50 hover:bg-teal-50/20">
-                                    <td class="p-3"><input type="checkbox" class="settlement-row-checkbox rounded" value="{{ r.order_item_id }}" data-order-item-id="{{ r.order_item_id }}"></td>
+                                    {% if is_master %}<td class="p-3"><input type="checkbox" class="settlement-row-checkbox rounded" value="{{ r.order_item_id }}" data-order-item-id="{{ r.order_item_id }}"></td>{% endif %}
                                     <td class="p-3 font-mono text-gray-700">{{ (r.settlement_no or '-')[-7:] }}</td>
                                     <td class="p-3 text-gray-700">{{ r.sale_dt }}</td>
                                     <td class="p-3 text-gray-600">{{ r.category }}</td>
@@ -10856,7 +11064,7 @@ def admin_dashboard():
                                     <td class="p-3 text-center align-top"><span class="{% if r.settlement_status == '입금완료' %}bg-green-100 text-green-700{% else %}bg-orange-100 text-orange-600{% endif %} px-2 py-1 rounded-full text-[9px]">{{ r.settlement_status }}</span>{% if r.settled_at %}<div class="text-[8px] text-gray-500 mt-1">{{ r.settled_at }}</div>{% endif %}</td>
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="11" class="p-10 text-center text-gray-400 font-bold text-sm">해당 기간 정산 내역이 없습니다.</td></tr>
+                                <tr><td colspan="{{ 12 if is_master else 11 }}" class="p-10 text-center text-gray-400 font-bold text-sm">해당 기간 정산 내역이 없습니다.</td></tr>
                                 {% endfor %}
                             </tbody>
                         </table>
@@ -11623,6 +11831,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 mb-4 italic">📊 정산 상세 (n넘버 기준)</h3>
                 <p class="text-[11px] text-gray-500 font-bold mb-4">고객 결제 시 품목별 고유 n넘버가 부여되며, 해당 번호를 기준으로 정산합니다.</p>
+                {% if is_master %}
                 <div class="flex items-center gap-4 mb-4 flex-wrap">
                     <span class="text-[11px] font-bold text-gray-600">선택 항목 입금상태 변경:</span>
                     <select id="settlement-bulk-status-2" class="border border-gray-200 rounded-xl px-3 py-2 text-xs font-black bg-white">
@@ -11633,11 +11842,12 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                     </select>
                     <button type="button" id="settlement-bulk-status-btn-2" class="bg-teal-600 text-white px-5 py-2 rounded-xl text-xs font-black shadow">적용</button>
                 </div>
+                {% endif %}
                 <div id="settlement-detail-table-wrap-2" class="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-x-auto">
                     <table class="w-full text-left min-w-[900px] text-[10px] font-black">
                         <thead class="bg-gray-800 text-white">
                             <tr>
-                                <th class="p-3 w-12"><input type="checkbox" id="selectAllSettlement2" title="전체선택" class="rounded"></th>
+                                {% if is_master %}<th class="p-3 w-12"><input type="checkbox" id="selectAllSettlement2" title="전체선택" class="rounded"></th>{% endif %}
                                 <th class="p-3">정산번호(n)</th>
                                 <th class="p-3">판매일시</th>
                                 <th class="p-3">카테고리</th>
@@ -11653,7 +11863,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                         <tbody>
                             {% for r in settlement_detail_rows %}
                             <tr class="border-b border-gray-50 hover:bg-teal-50/20">
-                                <td class="p-3"><input type="checkbox" class="settlement-row-checkbox-2 rounded" value="{{ r.order_item_id }}" data-order-item-id="{{ r.order_item_id }}"></td>
+                                {% if is_master %}<td class="p-3"><input type="checkbox" class="settlement-row-checkbox-2 rounded" value="{{ r.order_item_id }}" data-order-item-id="{{ r.order_item_id }}"></td>{% endif %}
                                 <td class="p-3 font-mono text-gray-700">{{ (r.settlement_no or '-')[-7:] }}</td>
                                 <td class="p-3 text-gray-700">{{ r.sale_dt }}</td>
                                 <td class="p-3 text-gray-600">{{ r.category }}</td>
@@ -11666,7 +11876,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                                 <td class="p-3 text-center align-top"><span class="{% if r.settlement_status == '입금완료' %}bg-green-100 text-green-700{% else %}bg-orange-100 text-orange-600{% endif %} px-2 py-1 rounded-full text-[9px]">{{ r.settlement_status }}</span>{% if r.settled_at %}<div class="text-[8px] text-gray-500 mt-1">{{ r.settled_at }}</div>{% endif %}</td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="11" class="p-10 text-center text-gray-400 font-bold text-sm">해당 기간 정산 내역이 없습니다.</td></tr>
+                            <tr><td colspan="{{ 11 if is_master else 10 }}" class="p-10 text-center text-gray-400 font-bold text-sm">해당 기간 정산 내역이 없습니다.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -12448,6 +12658,11 @@ def admin_review_delete(rid):
     if not (current_user.is_admin or Category.query.filter_by(manager_email=current_user.email).first()):
         return redirect('/')
     r = Review.query.get_or_404(rid)
+    if not current_user.is_admin:
+        my_cat_ids = [c.id for c in Category.query.filter_by(manager_email=current_user.email).all()]
+        if r.category_id not in my_cat_ids:
+            flash("해당 리뷰에 대한 삭제 권한이 없습니다.")
+            return redirect('/admin?tab=reviews')
     db.session.delete(r)
     db.session.commit()
     flash("리뷰가 삭제되었습니다.")
