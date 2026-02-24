@@ -82,9 +82,7 @@ class DeliveryLog(db_delivery.Model):
     order_id = db_delivery.Column(db_delivery.String(100))
     status = db_delivery.Column(db_delivery.String(50))
     message = db_delivery.Column(db_delivery.String(500))
-    # default 값을 get_kst 함수로 변경
     created_at = db_delivery.Column(db_delivery.DateTime, default=get_kst)
-    created_at = db_delivery.Column(db_delivery.DateTime, default=datetime.now)
 
 # --------------------------------------------------------------------------------
 # 4. 유틸리티 함수 (함수명 겹침 방지 접두어 사용)
@@ -214,19 +212,19 @@ def logi_admin_dashboard():
             <button onclick="changeFontSize(-1)" class="w-full h-full text-xs text-center">A-</button>
             <button onclick="changeFontSize(1)" class="w-full h-full text-xs text-center">A+</button>
         </div>
-        <nav class="bg-white border-b h-16 flex items-center justify-between px-6 sticky top-0 z-50 shadow-sm">
-            <div class="flex items-center gap-8">
-                <h1 class="text-xl font-black text-green-600 italic">B.UNCLE</h1>
-                <div class="flex gap-6 font-bold text-slate-400 text-[11px]">
-                    <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 border-b-2 border-green-600 pb-1">배송관제</a>
-                    <a href="{{ url_for('logi.logi_driver_mgmt') }}" class="hover:text-green-600 transition">기사관리</a>
-                    <a href="{{ url_for('logi.logi_driver_path_map') }}" class="hover:text-blue-500 transition">배송지도</a>
-                    {% if session['admin_username'] == 'admin' %}<a href="{{ url_for('logi.logi_admin_users_mgmt') }}" class="hover:text-red-500 transition">설정</a>{% endif %}
+        <nav class="bg-white border-b min-h-14 flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 sticky top-0 z-50 shadow-sm">
+            <div class="flex items-center gap-4 sm:gap-8 flex-wrap">
+                <h1 class="text-lg sm:text-xl font-black text-green-600 italic">B.UNCLE</h1>
+                <div class="flex flex-wrap gap-3 sm:gap-6 font-bold text-slate-400 text-[11px]">
+                    <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="min-h-[44px] flex items-center text-green-600 border-b-2 border-green-600 pb-1 touch-manipulation">배송관제</a>
+                    <a href="{{ url_for('logi.logi_driver_mgmt') }}" class="min-h-[44px] flex items-center hover:text-green-600 transition touch-manipulation">기사관리</a>
+                    <a href="{{ url_for('logi.logi_driver_path_map') }}" class="min-h-[44px] flex items-center hover:text-blue-500 transition touch-manipulation">배송지도</a>
+                    {% if session['admin_username'] == 'admin' %}<a href="{{ url_for('logi.logi_admin_users_mgmt') }}" class="min-h-[44px] flex items-center hover:text-red-500 transition touch-manipulation">설정</a>{% endif %}
                 </div>
             </div>
-            <div class="flex items-center gap-4">
-                <button onclick="syncNow()" id="sync-btn" class="bg-red-600 text-white px-5 py-2 rounded-xl font-black text-[11px] shadow-lg hover:bg-red-700 transition ring-2 ring-red-300 ring-offset-2">신규 주문 가져오기</button>
-                <a href="{{ url_for('logi.logi_admin_logout') }}" class="text-slate-300 font-bold hover:text-red-500"><i class="fas fa-sign-out-alt"></i></a>
+            <div class="flex items-center gap-2 sm:gap-4">
+                <button type="button" onclick="syncNow()" id="sync-btn" class="min-h-[44px] px-4 sm:px-5 py-2 rounded-xl font-black text-[11px] shadow-lg hover:bg-red-700 transition bg-red-600 text-white ring-2 ring-red-300 ring-offset-2 touch-manipulation">신규 주문 가져오기</button>
+                <a href="{{ url_for('logi.logi_admin_logout') }}" class="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-300 font-bold hover:text-red-500 touch-manipulation"><i class="fas fa-sign-out-alt"></i></a>
             </div>
         </nav>
 
@@ -301,8 +299,8 @@ def logi_admin_dashboard():
                 </div>
             </div>
 
-            <div class="bg-white rounded-[2rem] shadow-xl border border-slate-50 overflow-hidden mb-12">
-                <table class="w-full text-left">
+            <div class="bg-white rounded-[2rem] shadow-xl border border-slate-50 overflow-hidden mb-12 overflow-x-auto">
+                <table class="w-full text-left min-w-[640px]">
                     <thead class="bg-slate-800 border-b text-slate-400 font-black text-[10px] uppercase tracking-widest">
                         <tr>
                             <th class="p-4 w-12 text-center"><input type="checkbox" id="check-all" onclick="toggleAll()" class="w-4 h-4 rounded border-none"></th>
@@ -335,18 +333,16 @@ def logi_admin_dashboard():
                                     <span class="text-[9px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-black border border-slate-200">
                                         <i class="fas fa-truck mr-0.5 text-slate-300"></i>{{ t.driver_name }}
                                     </span>
-                                   <div class="flex gap-3 items-center">
-    <button onclick="viewTaskLog('{{t.id}}')" class="text-[9px] text-blue-500 font-black flex items-center gap-0.5">
-        <i class="fas fa-history"></i> Log보기
-    </button>
-    
-    {% if t.photo_data %}
-    <button onclick="viewPhoto('{{t.id}}')" class="text-[9px] text-green-600 font-black flex items-center gap-0.5">
-        <i class="fas fa-camera"></i> 사진보기
-    </button>
-    {% endif %}
-</div>
+                                   <div class="flex gap-3 items-center flex-wrap">
+                                    <button type="button" onclick="viewTaskLog('{{t.id}}')" class="text-[9px] text-blue-500 font-black flex items-center gap-0.5 min-h-[32px] touch-manipulation">
+                                        <i class="fas fa-history"></i> Log보기
                                     </button>
+                                    {% if t.photo_data %}
+                                    <button type="button" onclick="viewPhoto('{{t.id}}')" class="text-[9px] text-green-600 font-black flex items-center gap-0.5 min-h-[32px] touch-manipulation">
+                                        <i class="fas fa-camera"></i> 사진보기
+                                    </button>
+                                    {% endif %}
+                                </div>
                                 </div>
                                 <div id="log-view-{{t.id}}" class="hidden mt-2 p-3 bg-slate-50 rounded-xl text-[9px] text-slate-500 border border-dashed border-slate-200 leading-normal"></div>
                             </td>
@@ -472,83 +468,38 @@ def logi_admin_dashboard():
     </div>
 </div>
 
-<script>
-    // 사진 데이터 가져오기 및 모달 띄우기
-    // 수정 후: 강력한 에러 체크 및 모달 제어
-async function viewPhoto(tid) {
-    try {
-        // url_for를 사용하여 경로를 정확히 잡습니다.
-        const res = await fetch('{{ url_for("logi.logi_get_photo", tid=0) }}'.replace('0', tid));
-        const data = await res.json();
-        
-        if(data.success && data.photo) {
-            const modalImg = document.getElementById('modal-img');
-            const modal = document.getElementById('photo-modal');
-            
-            modalImg.src = data.photo; // Base64 데이터를 이미지 소스에 주입
-            modal.classList.remove('hidden'); // 모달 보이기
-            document.body.style.overflow = 'hidden'; // 배경 스크롤 방지
-        } else {
-            alert("저장된 배송 사진을 찾을 수 없습니다.");
+        <div id="photo-modal" class="fixed inset-0 bg-black/90 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
+            <div class="relative max-w-2xl w-full" onclick="event.stopPropagation()">
+                <img id="modal-img" src="" alt="배송 사진" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/10">
+                <button type="button" onclick="closePhoto()" class="absolute -top-12 right-0 text-white text-xl font-black min-h-[44px] touch-manipulation">
+                    <i class="fas fa-times mr-1"></i> 닫기
+                </button>
+            </div>
+        </div>
+
+        <script>
+        async function viewPhoto(tid) {
+            try {
+                const res = await fetch('{{ url_for("logi.logi_get_photo", tid=0) }}'.replace('0', tid));
+                const data = await res.json();
+                if (data.success && data.photo) {
+                    document.getElementById('modal-img').src = data.photo;
+                    document.getElementById('photo-modal').classList.remove('hidden');
+                    document.body.style.overflow = 'hidden';
+                } else {
+                    alert("저장된 배송 사진을 찾을 수 없습니다.");
+                }
+            } catch(e) {
+                console.error(e);
+                alert("사진을 불러오는 중 오류가 발생했습니다.");
+            }
         }
-    } catch(e) {
-        console.error(e);
-        alert("사진을 불러오는 중 네트워크 오류가 발생했습니다.");
-    }
-}
-
-function closePhoto() {
-    document.getElementById('photo-modal').classList.add('hidden');
-    document.getElementById('modal-img').src = "";
-    document.body.style.overflow = 'auto'; // 스크롤 재개
-}
-</script>
-<div id="photo-modal" class="fixed inset-0 bg-black/90 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
-    <div class="relative max-w-2xl w-full" onclick="event.stopPropagation()">
-        <img id="modal-img" src="" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/10">
-        
-        <button onclick="closePhoto()" class="absolute -top-12 right-0 text-white text-xl font-black">
-            <i class="fas fa-times mr-1"></i> 닫기
-        </button>
-    </div>
-</div>
-<div id="photo-modal" class="fixed inset-0 bg-black/90 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
-    <div class="relative max-w-2xl w-full" onclick="event.stopPropagation()">
-        <img id="modal-img" src="" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/10">
-        <button onclick="closePhoto()" class="absolute -top-12 right-0 text-white text-xl font-black">
-            <i class="fas fa-times mr-1"></i> 닫기
-        </button>
-    </div>
-</div>
-
-<script>
-async function viewPhoto(tid) {
-    try {
-        // API 경로를 Flask url_for를 통해 정확히 매칭합니다.
-        const res = await fetch('{{ url_for("logi.logi_get_photo", tid=0) }}'.replace('0', tid));
-        const data = await res.json();
-        
-        if(data.success && data.photo) {
-            const modalImg = document.getElementById('modal-img');
-            const modal = document.getElementById('photo-modal');
-            
-            modalImg.src = data.photo; // Base64 이미지를 로드
-            modal.classList.remove('hidden'); // 모달 표시
-            document.body.style.overflow = 'hidden'; // 배경 스크롤 차단
-        } else {
-            alert("저장된 배송 사진이 없습니다.");
+        function closePhoto() {
+            document.getElementById('photo-modal').classList.add('hidden');
+            document.getElementById('modal-img').src = "";
+            document.body.style.overflow = 'auto';
         }
-    } catch(e) {
-        alert("사진을 불러오는 중 오류가 발생했습니다.");
-    }
-}
-
-function closePhoto() {
-    document.getElementById('photo-modal').classList.add('hidden');
-    document.getElementById('modal-img').src = "";
-    document.body.style.overflow = 'auto'; // 스크롤 다시 허용
-}
-</script>
+        </script>
     </body>
     </html>
     """
@@ -602,18 +553,26 @@ def logi_driver_work():
     # 3. 인증 실패 또는 최초 접속 시 로그인 화면 표시
     if not driver:
         return render_template_string("""
-        <script src="https://cdn.tailwindcss.com"></script>
-        <body class="bg-[#0f172a] text-white flex items-center justify-center min-h-screen p-8 text-center">
-            <div class="w-full max-w-sm bg-[#1e293b] p-12 rounded-[3.5rem] shadow-2xl border border-slate-700">
-                <h1 class="text-2xl font-black text-green-500 mb-8 italic uppercase tracking-widest">Driver Login</h1>
-                <p class="text-slate-400 mb-10 font-bold leading-relaxed text-sm">등록된 성함과 전화번호를<br>입력하여 접속하세요.</p>
-                <form action="{{ url_for('logi.logi_driver_work') }}" method="GET" class="space-y-6">
-                    <input type="text" name="driver_name" placeholder="성함 입력" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
-                    <input type="tel" name="auth_phone" placeholder="전화번호 (01000000000)" class="w-full p-6 rounded-3xl bg-slate-900 border-none text-center text-xl font-black text-white outline-none" required>
-                    <button class="w-full bg-green-600 py-6 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">업무 시작하기</button>
+        <!DOCTYPE html>
+        <html lang="ko">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <title>기사 로그인 - B.UNCLE Logi</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="bg-[#0f172a] text-white flex items-center justify-center min-h-screen min-h-[100dvh] p-6 safe-area-pb text-center">
+            <div class="w-full max-w-sm bg-[#1e293b] p-8 sm:p-12 rounded-[3rem] sm:rounded-[3.5rem] shadow-2xl border border-slate-700">
+                <h1 class="text-xl sm:text-2xl font-black text-green-500 mb-6 sm:mb-8 italic uppercase tracking-widest">기사 로그인</h1>
+                <p class="text-slate-400 mb-8 sm:mb-10 font-bold leading-relaxed text-sm">등록된 성함과 전화번호를 입력하여 접속하세요.</p>
+                <form action="{{ url_for('logi.logi_driver_work') }}" method="GET" class="space-y-5">
+                    <input type="text" name="driver_name" placeholder="성함 입력" class="w-full p-5 sm:p-6 min-h-[48px] rounded-3xl bg-slate-900 border-none text-center text-lg sm:text-xl font-black text-white outline-none focus:ring-2 focus:ring-green-500" required autocomplete="name">
+                    <input type="tel" name="auth_phone" placeholder="전화번호 (숫자만)" class="w-full p-5 sm:p-6 min-h-[48px] rounded-3xl bg-slate-900 border-none text-center text-lg sm:text-xl font-black text-white outline-none focus:ring-2 focus:ring-green-500" required autocomplete="tel">
+                    <button type="submit" class="w-full bg-green-600 py-5 sm:py-6 min-h-[52px] rounded-3xl font-black text-lg sm:text-xl shadow-xl active:scale-95 transition-all touch-manipulation">업무 시작하기</button>
                 </form>
             </div>
         </body>
+        </html>
         """)
 
     # --- 이후 배송 목록 출력 로직은 기존과 동일함 ---
@@ -645,18 +604,16 @@ def logi_driver_work():
     since_date = datetime.now().replace(hour=0, minute=0, second=0) - timedelta(days=selected_days-1)
 
     # 3. 탭별 데이터 필터링
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    start_date_str = request.args.get('start_date', today_str)
+    end_date_str = request.args.get('end_date', today_str)
     base_query = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id)
     if view_status == 'assigned': 
         tasks = base_query.filter(DeliveryTask.status.in_(['배정완료', '대기'])).all()
     elif view_status == 'pickup': 
         tasks = base_query.filter(DeliveryTask.status == '픽업').all()
     elif view_status == 'complete':
-        # 기사가 직접 지정한 시작일과 종료일 가져오기 (기본값은 오늘)
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        start_date_str = request.args.get('start_date', today_str)
-        end_date_str = request.args.get('end_date', today_str)
-        
-        # 조회 범위 설정 (시작일 00:00:00 ~ 종료일 23:59:59)
+        # 조회 범위 설정 (start_date_str, end_date_str는 위에서 이미 설정됨) (시작일 00:00:00 ~ 종료일 23:59:59)
         start_dt = datetime.strptime(start_date_str, '%Y-%m-%d')
         end_dt = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
         
@@ -719,74 +676,61 @@ def logi_driver_work():
     display: inline-block; /* 테두리 겹침 방지를 위해 한 줄 차지 방지 */
     border: none; /* 겹쳐 보이는 초록 테두리 제거 */
 }
-        .bottom-ctrl { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; z-index: 1000; }
+        .bottom-ctrl { 
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 420px; z-index: 1000;
+            padding-bottom: env(safe-area-inset-bottom, 0);
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
     </style>
 </head>
-<body class="pb-32 px-3">
-    <div class="grid grid-cols-3 bg-slate-900 text-white rounded-b-[2.5rem] shadow-2xl mb-6 border-b border-slate-800 py-6 sticky top-0 z-50 backdrop-blur-md bg-opacity-95">
-        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned" class="text-center border-r border-slate-800">
+<body id="driver-body" class="pb-36 px-3" style="padding-bottom: calc(8rem + env(safe-area-inset-bottom, 0px));">
+    <div class="grid grid-cols-3 bg-slate-900 text-white rounded-b-[2.5rem] shadow-2xl mb-6 border-b border-slate-800 py-5 sm:py-6 sticky top-0 z-50 backdrop-blur-md bg-opacity-95">
+        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=assigned" class="min-h-[56px] sm:min-h-[64px] flex flex-col items-center justify-center text-center border-r border-slate-800 touch-manipulation py-2">
             <div class="text-[10px] text-slate-500 font-black uppercase mb-1">배정대기</div>
             <div class="text-2xl font-black {% if view_status=='assigned' %}text-blue-400{% else %}text-slate-600{% endif %}">{{ assigned_count }}</div>
         </a>
-        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=pickup" class="text-center border-r border-slate-800">
+        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=pickup" class="min-h-[56px] sm:min-h-[64px] flex flex-col items-center justify-center text-center border-r border-slate-800 touch-manipulation py-2">
             <div class="text-[10px] text-slate-500 font-black uppercase mb-1">배송중</div>
             <div class="text-2xl font-black {% if view_status=='pickup' %}text-orange-400{% else %}text-slate-600{% endif %}">{{ picking_count }}</div>
         </a>
-        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=complete" class="text-center">
+        <a href="?driver_name={{driver_name}}&auth_phone={{auth_phone}}&view=complete" class="min-h-[56px] sm:min-h-[64px] flex flex-col items-center justify-center text-center touch-manipulation py-2">
             <div class="text-[10px] text-slate-500 font-black uppercase mb-1">오늘완료</div>
             <div class="text-2xl font-black {% if view_status=='complete' %}text-green-400{% else %}text-slate-600{% endif %}">{{ complete_today }}</div>
         </a>
     </div>
 
     {% if view_status == 'complete' %}
-    <div class="bg-slate-800/50 p-5 rounded-3xl mb-6 border border-slate-700">
-        {% if view_status == 'complete' %}
-<div class="bg-slate-800/50 p-5 rounded-3xl mb-6 border border-slate-700 mx-2">
-    <p class="text-slate-400 text-[10px] font-black mb-3 uppercase tracking-widest text-left">배송 실적 직접 조회</p>
-    
-    <form action="" method="GET" class="space-y-3">
-        <input type="hidden" name="driver_name" value="{{ driver_name }}">
-        <input type="hidden" name="auth_phone" value="{{ auth_phone }}">
-        <input type="hidden" name="view" value="complete">
-        
-        <div class="grid grid-cols-2 gap-2">
-            <div>
-                <span class="text-[9px] text-slate-500 ml-1">시작일</span>
-                <input type="date" name="start_date" value="{{ start_date_str }}" class="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white font-bold text-sm outline-none focus:border-green-500">
+    <div class="bg-slate-800/50 p-5 rounded-3xl mb-6 border border-slate-700 mx-2">
+        <p class="text-slate-400 text-[10px] font-black mb-3 uppercase tracking-widest text-left">배송 실적 직접 조회</p>
+        <form action="" method="GET" class="space-y-3">
+            <input type="hidden" name="driver_name" value="{{ driver_name }}">
+            <input type="hidden" name="auth_phone" value="{{ auth_phone }}">
+            <input type="hidden" name="view" value="complete">
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <span class="text-[9px] text-slate-500 ml-1">시작일</span>
+                    <input type="date" name="start_date" value="{{ start_date_str }}" class="w-full bg-slate-900 border border-slate-700 p-3 min-h-[44px] rounded-xl text-white font-bold text-sm outline-none focus:border-green-500">
+                </div>
+                <div>
+                    <span class="text-[9px] text-slate-500 ml-1">종료일</span>
+                    <input type="date" name="end_date" value="{{ end_date_str }}" class="w-full bg-slate-900 border border-slate-700 p-3 min-h-[44px] rounded-xl text-white font-bold text-sm outline-none focus:border-green-500">
+                </div>
             </div>
-            <div>
-                <span class="text-[9px] text-slate-500 ml-1">종료일</span>
-                <input type="date" name="end_date" value="{{ end_date_str }}" class="w-full bg-slate-900 border border-slate-700 p-3 rounded-xl text-white font-bold text-sm outline-none focus:border-green-500">
+            <button type="submit" class="w-full min-h-[48px] bg-green-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl active:scale-95 transition-transform touch-manipulation">실적 조회하기</button>
+        </form>
+        <div class="mt-6 pt-5 border-t border-slate-700/50">
+            <div class="flex justify-between items-end mb-4">
+                <span class="text-slate-400 font-bold text-xs">조회 기간 총 합계</span>
+                <span class="text-2xl font-black text-green-400">{{ tasks|length }}건</span>
             </div>
-        </div>
-        <button type="submit" class="w-full bg-green-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl active:scale-95 transition-transform">실적 조회하기</button>
-    </form>
-
-    <div class="mt-6 pt-5 border-t border-slate-700/50">
-        <div class="flex justify-between items-end mb-4">
-            <span class="text-slate-400 font-bold text-xs">조회 기간 총 합계</span>
-            <span class="text-2xl font-black text-green-400">{{ tasks|length }}건</span>
-        </div>
-        
-        <div class="space-y-2">
-            {% for date, count in sorted_date_summary %}
-            <div class="flex justify-between items-center bg-slate-900/40 p-3 rounded-xl border border-slate-800/50">
-                <span class="text-slate-400 font-bold text-xs">{{ date }}</span>
-                <span class="text-white font-black text-sm">{{ count }}건</span>
+            <div class="space-y-2">
+                {% for date, count in sorted_date_summary %}
+                <div class="flex justify-between items-center bg-slate-900/40 p-3 rounded-xl border border-slate-800/50 min-h-[44px] items-center">
+                    <span class="text-slate-400 font-bold text-xs">{{ date }}</span>
+                    <span class="text-white font-black text-sm">{{ count }}건</span>
+                </div>
+                {% endfor %}
             </div>
-            {% endfor %}
-        </div>
-    </div>
-</div>
-{% endif %}
-        <div class="space-y-2">
-            {% for date, count in sorted_date_summary %}
-            <div class="flex justify-between items-center bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                <span class="text-slate-400 font-bold text-sm">{{ date }}</span>
-                <span class="text-green-400 font-black">{{ count }}건 완료</span>
-            </div>
-            {% endfor %}
         </div>
     </div>
     {% endif %}
@@ -801,7 +745,7 @@ def logi_driver_work():
                 <input type="checkbox" id="driver-check-all" onclick="toggleDriverAll(this)" class="w-7 h-7 rounded-lg border-slate-700 bg-slate-800 accent-green-500 shadow-sm"> 전체선택
             </label>
             {% if view_status == 'assigned' %}
-            <button onclick="bulkPickup()" class="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-black text-sm shadow-xl active:scale-95 transition-transform">일괄 상차 완료</button>
+            <button type="button" onclick="bulkPickup()" class="min-h-[44px] bg-blue-600 text-white px-5 py-2.5 rounded-xl font-black text-sm shadow-xl active:scale-95 transition-transform touch-manipulation">일괄 상차 완료</button>
             {% endif %}
         </div>
         {% endif %}
@@ -839,9 +783,9 @@ def logi_driver_work():
 
                         <div class="mt-5">
                             {% if t.status in ['배정완료', '대기'] %}
-                                <button onclick="secureStatus('{{t.id}}', '픽업')" class="w-full bg-orange-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all">상차 완료</button>
+                                <button type="button" onclick="secureStatus('{{t.id}}', '픽업')" class="w-full min-h-[48px] bg-orange-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all touch-manipulation">상차 완료</button>
                             {% elif t.status == '픽업' %}
-                                <button onclick="openCameraUI('{{t.id}}')" class="w-full bg-green-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all">배송 완료 처리</button>
+                                <button type="button" onclick="openCameraUI('{{t.id}}')" class="w-full min-h-[48px] bg-green-600 text-white py-4 rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all touch-manipulation">배송 완료 처리</button>
                             {% endif %}
                         </div>
                     </div>
@@ -856,14 +800,14 @@ def logi_driver_work():
     </div>
 
     <div class="bottom-ctrl">
-        <div class="bg-slate-800/90 backdrop-blur-xl p-3 rounded-[2rem] border border-slate-700 flex justify-around shadow-2xl">
-            <button onclick="location.reload()" class="flex flex-col items-center gap-1 px-4 py-2">
+        <div class="bg-slate-800/90 backdrop-blur-xl p-3 rounded-[2rem] border border-slate-700 flex justify-around items-center shadow-2xl">
+            <button type="button" onclick="location.reload()" class="min-h-[44px] min-w-[44px] flex flex-col items-center justify-center gap-1 px-4 py-2 touch-manipulation">
                 <i class="fas fa-sync-alt text-slate-400 text-lg"></i>
                 <span class="text-[10px] font-bold text-slate-400">새로고침</span>
             </button>
             <div class="flex gap-2">
-                <button onclick="changeFontSize(2)" class="bg-slate-700 text-white w-12 h-10 rounded-xl font-black">A+</button>
-                <button onclick="changeFontSize(-2)" class="bg-slate-700 text-white w-12 h-10 rounded-xl font-black">A-</button>
+                <button type="button" onclick="changeFontSize(2)" class="min-h-[44px] min-w-[44px] bg-slate-700 text-white rounded-xl font-black touch-manipulation">A+</button>
+                <button type="button" onclick="changeFontSize(-2)" class="min-h-[44px] min-w-[44px] bg-slate-700 text-white rounded-xl font-black touch-manipulation">A-</button>
             </div>
         </div>
     </div>
@@ -875,9 +819,9 @@ def logi_driver_work():
             <canvas id="canvas" class="hidden"></canvas>
         </div>
         <div class="flex gap-4 w-full max-w-md px-2">
-            <button id="capture-btn" type="button" class="flex-1 bg-white text-slate-900 py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform"><i class="fas fa-camera mr-2"></i>사진 촬영</button>
-            <button id="confirm-btn" type="button" class="hidden flex-1 bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform"><i class="fas fa-check-circle mr-2"></i>배송 완료 확정</button>
-            <button id="cancel-camera" type="button" class="w-24 bg-slate-800 text-slate-400 py-6 rounded-2xl font-bold">취소</button>
+            <button id="capture-btn" type="button" class="flex-1 min-h-[52px] bg-white text-slate-900 py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform touch-manipulation"><i class="fas fa-camera mr-2"></i>사진 촬영</button>
+            <button id="confirm-btn" type="button" class="hidden flex-1 min-h-[52px] bg-green-600 text-white py-6 rounded-2xl font-black text-xl shadow-2xl active:scale-95 transition-transform touch-manipulation"><i class="fas fa-check-circle mr-2"></i>배송 완료 확정</button>
+            <button id="cancel-camera" type="button" class="min-w-[80px] min-h-[52px] bg-slate-800 text-slate-400 py-6 rounded-2xl font-bold touch-manipulation">취소</button>
         </div>
     </div>
 
@@ -1166,78 +1110,92 @@ def logi_complete_action(tid):
 def logi_driver_mgmt():
     if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
     drivers = Driver.query.all()
-    # 공통 접속 주소 (토큰 없음)
     work_url = request.host_url.rstrip('/') + "/logi/work"
-    
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    driver_stats = []
+    for d in drivers:
+        assigned = DeliveryTask.query.filter(DeliveryTask.driver_id == d.id, DeliveryTask.status == '배정완료').count()
+        picking = DeliveryTask.query.filter(DeliveryTask.driver_id == d.id, DeliveryTask.status == '픽업').count()
+        complete_today = DeliveryTask.query.filter(DeliveryTask.driver_id == d.id, DeliveryTask.status == '완료', DeliveryTask.completed_at >= today_start).count()
+        driver_stats.append({'driver': d, 'assigned_count': assigned, 'picking_count': picking, 'complete_today': complete_today})
+
     return render_template_string("""
-                                  
-    <script src="https://cdn.tailwindcss.com"></script>
-   <body class="bg-slate-50 p-4 sm:p-10">
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>기사관리 - B.UNCLE Logi</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-50 p-4 sm:p-10 min-h-screen">
     <div class="max-w-md mx-auto">
         <nav class="mb-6 sm:mb-8">
-            <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black text-sm">
+            <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="inline-flex items-center min-h-[44px] text-green-600 font-black text-sm touch-manipulation">
                 <i class="fas fa-arrow-left mr-2"></i>돌아가기
             </a>
         </nav>
 
         <h2 class="font-black mb-6 sm:mb-8 text-xl sm:text-2xl text-slate-800 italic uppercase tracking-tighter">
-            Driver Management
+            기사관리
         </h2>
 
         <form action="{{ url_for('logi.logi_add_driver') }}" method="POST" class="bg-white p-6 sm:p-8 rounded-[2.5rem] shadow-xl border mb-8 space-y-4">
             <input name="name" placeholder="기사님 성함" class="w-full border-none p-4 sm:p-5 rounded-2xl bg-slate-50 font-black text-xs sm:text-sm focus:ring-2 focus:ring-green-500 outline-none" required>
-            <input name="phone" placeholder="전화번호 (인증용)" class="w-full border-none p-4 sm:p-5 rounded-2xl bg-slate-50 font-black text-xs sm:text-sm focus:ring-2 focus:ring-green-500 outline-none" required>
-            <button class="w-full bg-green-600 text-white py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg shadow-lg hover:bg-green-700 transition active:scale-95">
+            <input name="phone" placeholder="전화번호 (인증용)" type="tel" class="w-full border-none p-4 sm:p-5 rounded-2xl bg-slate-50 font-black text-xs sm:text-sm focus:ring-2 focus:ring-green-500 outline-none min-h-[48px]" required>
+            <button type="submit" class="w-full bg-green-600 text-white py-4 sm:py-5 min-h-[48px] rounded-2xl font-black text-base sm:text-lg shadow-lg hover:bg-green-700 transition active:scale-95 touch-manipulation">
                 신규 기사 생성
             </button>
         </form>
 
         <div class="space-y-6">
-            {% for d in drivers %}
-            <div class="driver-card">
-                <div class="bg-white p-5 sm:p-6 rounded-t-[2rem] border border-b-0 flex justify-between items-center shadow-sm border-slate-100">
+            {% for s in driver_stats %}
+            <div class="driver-card bg-white rounded-[2.5rem] shadow-lg border border-slate-100 overflow-hidden mb-4">
+                <div class="p-5 sm:p-6 flex justify-between items-center">
                     <div>
-                        <p class="font-black text-slate-800 text-base sm:text-lg">{{ d.name }}</p>
-                        <p class="text-[10px] sm:text-[11px] text-slate-400 font-bold tracking-widest">{{ d.phone }}</p>
+                        <p class="font-black text-slate-800 text-base sm:text-lg">{{ s.driver.name }}</p>
+                        <p class="text-[10px] sm:text-[11px] text-slate-400 font-bold tracking-widest">{{ s.driver.phone }}</p>
                     </div>
-                    <div class="flex gap-1">
-                        <button onclick="copyUrl()" class="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-xl font-black text-[9px] sm:text-[10px] border border-blue-100 hover:bg-blue-100 transition">주소복사</button>
-                        <button onclick="secureDelete({{d.id}})" class="text-red-200 hover:text-red-500 transition p-2"><i class="fas fa-trash-alt text-sm"></i></button>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="copyUrl('{{ work_url }}')" class="min-h-[44px] flex items-center justify-center bg-blue-50 text-blue-600 px-4 py-2.5 rounded-xl font-black text-[10px] sm:text-xs border border-blue-100 hover:bg-blue-100 transition touch-manipulation">주소복사</button>
+                        <a href="{{ url_for('logi.logi_delete_driver', did=s.driver.id) }}" onclick="return confirm('이 기사님을 삭제할까요?');" class="min-h-[44px] min-w-[44px] flex items-center justify-center text-red-300 hover:text-red-500 transition p-2 touch-manipulation"><i class="fas fa-trash-alt text-sm"></i></a>
                     </div>
                 </div>
 
-                <div class="flex justify-around py-4 sm:py-5 bg-slate-900 text-white rounded-b-[2rem] shadow-lg mb-4">
+                <div class="flex justify-around py-4 sm:py-5 bg-slate-900 text-white">
                     <div class="text-center">
                         <div class="text-[9px] sm:text-[10px] text-slate-500 mb-0.5">배정 중</div>
-                        <div class="text-lg sm:text-xl font-black text-blue-400">{{ assigned_count }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
-                        <div class="text-[10px] sm:text-xs font-bold opacity-70">배정</div>
+                        <div class="text-lg sm:text-xl font-black text-blue-400">{{ s.assigned_count }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
                     </div>
                     <div class="text-center border-x border-slate-800 px-6 sm:px-8">
                         <div class="text-[9px] sm:text-[10px] text-slate-500 mb-0.5">픽업 대기</div>
-                        <div class="text-lg sm:text-xl font-black text-yellow-400">{{ picking_count }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
-                        <div class="text-[10px] sm:text-xs font-bold opacity-70">픽업</div>
+                        <div class="text-lg sm:text-xl font-black text-yellow-400">{{ s.picking_count }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
                     </div>
                     <div class="text-center">
-                        <div class="text-[9px] sm:text-[10px] text-slate-500 mb-0.5">오늘 성공</div>
-                        <div class="text-lg sm:text-xl font-black text-green-400">{{ complete_today }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
-                        <div class="text-[10px] sm:text-xs font-bold opacity-70">완료</div>
+                        <div class="text-[9px] sm:text-[10px] text-slate-500 mb-0.5">오늘 완료</div>
+                        <div class="text-lg sm:text-xl font-black text-green-400">{{ s.complete_today }}<span class="text-[10px] ml-0.5 text-slate-300">건</span></div>
                     </div>
                 </div>
             </div>
             {% endfor %}
         </div>
     </div>
-</body>
-        </div>
-<script>
-        function copyUrl() {
-            const t = document.createElement("input"); document.body.appendChild(t); 
-            t.value = "{{work_url}}"; t.select();
-            document.execCommand("copy"); document.body.removeChild(t); 
-            alert("기사용 접속 주소가 복사되었습니다.\\n기사님은 성함과 전화번호로 로그인하시면 됩니다.");
+    <script>
+        function copyUrl(url) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(function() { alert("기사용 접속 주소가 복사되었습니다."); });
+            } else {
+                var t = document.createElement("input"); document.body.appendChild(t);
+                t.value = url; t.select();
+                document.execCommand("copy"); document.body.removeChild(t);
+                alert("기사용 접속 주소가 복사되었습니다.");
+            }
         }
     </script>
-    """, drivers=drivers, work_url=work_url)
+    </body>
+    </html>
+    """, driver_stats=driver_stats, work_url=work_url)
 
 @logi_bp.route('/driver/add', methods=['POST'])
 def logi_add_driver():

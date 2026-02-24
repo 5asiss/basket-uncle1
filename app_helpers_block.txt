@@ -1,0 +1,408 @@
+﻿def send_message(user_id, title, body, msg_type='custom', related_order_id=None, image_url=None):
+    """?뚯썝?먭쾶 硫붿떆吏 1嫄????(?먮룞 諛쒖넚쨌愿由ъ옄 諛쒖넚 怨듯넻). ?몄떆 ?뚮┝??諛쒖넚 ?쒕룄. image_url ?덉쑝硫?泥⑤?(諛곗넚?꾨즺 ?ъ쭊 ??."""
+    try:
+        m = UserMessage(user_id=user_id, title=title, body=body or '', msg_type=msg_type or 'custom', related_order_id=related_order_id, image_url=image_url)
+        db.session.add(m)
+        db.session.flush()
+        mid = m.id
+        try:
+            send_push_for_user(user_id, title, (body or '')[:200], url='/mypage/messages')
+        except Exception:
+            pass
+        return mid
+    except Exception:
+        return None
+
+
+def send_push_for_user(user_id, title, body, url='/mypage/messages'):
+    """?대떦 ?ъ슜?먯뿉寃??깅줉??紐⑤뱺 援щ룆?쇰줈 Web Push 諛쒖넚. ?ㅽ뙣??援щ룆? ??젣."""
+    vapid_private = os.getenv('VAPID_PRIVATE_KEY')
+    if not vapid_private:
+        return
+    try:
+        from pywebpush import webpush, WebPushException  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return
+    subs = PushSubscription.query.filter_by(user_id=user_id).all()
+    vapid_claims = {"sub": os.getenv("VAPID_SUB_MAILTO", "mailto:admin@basket-uncle.local")}
+    payload = json.dumps({"title": title or "?뚮┝", "body": body or "", "url": url or "/mypage/messages"}, ensure_ascii=False)
+    for sub in subs:
+        try:
+            webpush(
+                subscription_info={"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
+                data=payload,
+                vapid_private_key=vapid_private,
+                vapid_claims=vapid_claims,
+            )
+        except WebPushException as e:
+            if e.response and e.response.status_code in (404, 410):
+                db.session.delete(sub)
+        except Exception:
+            pass
+    # commit? ?몄텧??send_message ???먯꽌 ?섑뻾
+
+
+# ?먮룞 諛쒖넚??湲곕낯 臾멸뎄 (?쒗뵆由??놁쓣 ??
+_DEFAULT_MESSAGES = {
+    'welcome': ('媛?낆쓣 ?섏쁺?⑸땲??, '諛붽뎄?덉궪珥뚯뿉 ?ㅼ떊 寃껋쓣 ?섏쁺?⑸땲?? ?좎꽑???띿궛臾셋룹떇?먯옱瑜?臾??욊퉴吏 諛곗넚???쒕━寃좎뒿?덈떎. 沅곴툑???먯? 1666-8320?쇰줈 ?곕씫 二쇱꽭??'),
+    'order_created': ('二쇰Ц???묒닔?섏뿀?듬땲??, '二쇰Ц踰덊샇 {order_id}濡?寃곗젣媛 ?꾨즺?섏뿀?듬땲?? 諛곗넚 吏꾪뻾 ???뚮젮 ?쒕━寃좎뒿?덈떎. 臾몄쓽: 1666-8320'),
+    'order_cancelled': ('二쇰Ц??痍⑥냼?섏뿀?듬땲??, '二쇰Ц踰덊샇 {order_id}媛 ?꾩븸 痍⑥냼쨌?섎텋 泥섎━?섏뿀?듬땲?? ?섎텋? 移대뱶???뺤콉???곕씪 3~7???뚯슂?????덉뒿?덈떎.'),
+    'part_cancelled': ('?쇰? ?덈ぉ??痍⑥냼?섏뿀?듬땲??, '二쇰Ц踰덊샇 {order_id}?먯꽌 ?대떦 ?덈ぉ??痍⑥냼쨌?섎텋 泥섎━?섏뿀?듬땲?? ?섎텋? 移대뱶???뺤콉???곕씪 3~7???뚯슂?????덉뒿?덈떎.'),
+    'out_of_stock': ('?덉젅濡??명븳 遺遺?痍⑥냼 ?덈궡', '二쇰Ц踰덊샇 {order_id}???쇰? ?곹뭹???덉젅濡?痍⑥냼?섏뿀?듬땲?? ?섎텋? 移대뱶???뺤콉???곕씪 3~7???뚯슂?????덉뒿?덈떎.'),
+    'delivery_requested': ('諛곗넚 以鍮꾧? ?쒖옉?섏뿀?듬땲??, '二쇰Ц踰덊샇 {order_id} ?곹뭹??諛곗넚 以鍮꾧? ?쒖옉?섏뿀?듬땲?? 怨?諛곗넚???쒕━寃좎뒿?덈떎.'),
+    'delivery_in_progress': ('諛곗넚 以묒엯?덈떎', '二쇰Ц踰덊샇 {order_id} ?곹뭹??諛곗넚 以묒엯?덈떎. 怨??꾩갑???덉젙?낅땲??'),
+    'delivery_complete': ('諛곗넚???꾨즺?섏뿀?듬땲??, '二쇰Ц踰덊샇 {order_id} ?곹뭹??諛곗넚 ?꾨즺?섏뿀?듬땲?? ?댁슜??二쇱뀛??媛먯궗?⑸땲??'),
+    'delivery_delayed': ('諛곗넚??吏?곕릺怨??덉뒿?덈떎', '二쇰Ц踰덊샇 {order_id} ?곹뭹??諛곗넚???쇱떆 吏?곕릺怨??덉뒿?덈떎. 鍮좊Ⅸ 諛곗넚???꾪빐 ?몃젰?섍쿋?듬땲?? 臾몄쓽: 1666-8320'),
+}
+
+
+def get_template_content(msg_type, **replace):
+    """msg_type???대떦?섎뒗 ?쒕ぉ/?댁슜 諛섑솚. replace??order_id ??移섑솚??媛??꾨떖 媛??"""
+    t = MessageTemplate.query.filter_by(msg_type=msg_type).first()
+    if t and t.title:
+        title, body = t.title, (t.body or '')
+    else:
+        title, body = _DEFAULT_MESSAGES.get(msg_type, ('?뚮┝', ''))
+    if replace:
+        for k, v in (replace or {}).items():
+            body = body.replace('{' + k + '}', str(v))
+    return title, body
+
+
+def _point_in_polygon(px, py, polygon):
+    """??(px, py)??polygon [[x,y],...] ?덉뿉 ?덈뒗吏 (ray casting)."""
+    if not polygon or len(polygon) < 3:
+        return False
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i][0], polygon[i][1]
+        xj, yj = polygon[j][0], polygon[j][1]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _geocode_address(address_str):
+    """二쇱냼 臾몄옄?댁쓣 (lat, lng)濡?蹂?? ?ㅽ뙣 ??None."""
+    if not address_str or not address_str.strip():
+        return None
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": address_str.strip(), "format": "json", "limit": 1},
+            headers={"User-Agent": "BasketUncle/1.0"},
+            timeout=5,
+        )
+        if r.status_code != 200 or not r.json():
+            return None
+        data = r.json()[0]
+        return (float(data["lat"]), float(data["lon"]))
+    except Exception:
+        return None
+
+
+def _get_quick_region_list(zone):
+    """DeliveryZone.quick_region_names JSON ?뚯떛. 鍮꾩뼱?덇굅???ㅻ쪟 ??鍮?由ъ뒪??"""
+    if not zone or not getattr(zone, 'quick_region_names', None):
+        return []
+    try:
+        names = json.loads(zone.quick_region_names)
+        return [str(n).strip() for n in names if n and str(n).strip()]
+    except Exception:
+        return []
+
+
+def _get_zone():
+    """理쒖떊 諛곗넚援ъ뿭 1嫄?"""
+    return DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
+
+
+def is_address_in_main_polygon(address_str):
+    """二쇱냼媛 ?쇰컲 ?대━怨??덉뿉 ?덉쑝硫?True (諛곗넚媛?μ??? 異붽?猷??놁쓬)."""
+    zone = _get_zone()
+    addr = (address_str or "").strip()
+    if not addr or not zone or not zone.polygon_json:
+        return False
+    try:
+        polygon = json.loads(zone.polygon_json)
+        if not polygon or len(polygon) < 3:
+            return False
+        coords = _geocode_address(addr)
+        return bool(coords and _point_in_polygon(coords[0], coords[1], polygon))
+    except Exception:
+        return False
+
+
+def is_address_in_quick_polygon(address_str):
+    """二쇱냼媛 ???대━怨??덉뿉 ?덉쑝硫?True (異붽?猷??숈쓽 ????諛곗넚)."""
+    zone = _get_zone()
+    addr = (address_str or "").strip()
+    if not addr or not zone or not getattr(zone, 'quick_region_polygon_json', None):
+        return False
+    try:
+        quick_poly = json.loads(zone.quick_region_polygon_json)
+        if not quick_poly or len(quick_poly) < 3:
+            return False
+        coords = _geocode_address(addr)
+        return bool(coords and _point_in_polygon(coords[0], coords[1], quick_poly))
+    except Exception:
+        return False
+
+
+def get_delivery_zone_type(address_str):
+    """二쇱냼 湲곗? 援ъ뿭 援щ텇. 'normal'=?쇰컲?대━怨?諛곗넚媛??, 'quick'=?듯뤃由ш낀留?異붽?猷??숈쓽 ??, 'unavailable'=諛곗넚遺덇?."""
+    addr = (address_str or "").strip()
+    if not addr:
+        return 'unavailable'
+    if is_address_in_main_polygon(addr):
+        return 'normal'
+    if is_address_in_quick_polygon(addr):
+        return 'quick'
+    zone = _get_zone()
+    quick = _get_quick_region_list(zone) if zone else []
+    if quick and any(name in addr for name in quick):
+        return 'normal'
+    return 'unavailable'
+
+
+def get_quick_extra_config():
+    """?듯뤃由ш낀 異붽?猷???? ?덈궡 臾멸뎄. (fee, message)."""
+    zone = _get_zone()
+    fee = 10000
+    msg = "?대떦 二쇱냼??諛곗넚吏??씠 ?꾨떃?덈떎. 諛곗넚猷?異붽? ???듭쑝濡?諛곗넚?⑸땲?? 異붽??섏떆怨?二쇰Ц?섏떆寃좎뒿?덇퉴?"
+    if zone:
+        fee = int(getattr(zone, 'quick_extra_fee', None) or 10000)
+        if getattr(zone, 'quick_extra_message', None):
+            msg = (zone.quick_extra_message or "").strip() or msg
+    return fee, msg
+
+
+def is_address_in_delivery_zone(address_str):
+    """二쇱냼媛 諛곗넚 媛?ν븳吏 (?쇰컲 ?대━怨??먮뒗 ???대━怨??먮뒗 ???대쫫). ?듬쭔 ?덉쑝硫??듬쭔, 洹????꾨? 諛곗넚遺덇?."""
+    zone = _get_zone()
+    addr = (address_str or "").strip()
+    if not addr:
+        return False
+    if is_address_in_main_polygon(addr):
+        return True
+    if is_address_in_quick_polygon(addr):
+        return True
+    quick = _get_quick_region_list(zone) if zone else []
+    if quick:
+        return any(name in addr for name in quick)
+    if zone and zone.polygon_json:
+        try:
+            polygon = json.loads(zone.polygon_json)
+            if polygon and len(polygon) >= 3:
+                coords = _geocode_address(addr)
+                if coords:
+                    return _point_in_polygon(coords[0], coords[1], polygon)
+        except Exception:
+            pass
+    return False
+
+
+def _get_user_total_paid(user_id):
+    """?뚯썝 ?깃툒 ?곗젙???꾩쟻 援щℓ湲덉븸: 諛곗넚?꾨즺???덈ぉ 湲덉븸留??몄젙 (痍⑥냼쨌?섎텋 二쇰Ц ?쒖쇅)."""
+    from sqlalchemy import func
+    total = db.session.query(
+        func.coalesce(func.sum(OrderItem.price * OrderItem.quantity), 0)
+    ).join(Order, OrderItem.order_id == Order.id).filter(
+        Order.user_id == user_id,
+        Order.status.notin_(['痍⑥냼', '?섎텋']),
+        OrderItem.cancelled == False,
+        OrderItem.item_status == '諛곗넚?꾨즺'
+    ).scalar()
+    return int(total) if total is not None else 0
+
+
+def _get_member_grade_config():
+    """?먮룞 ?깃툒 湲곗? 湲덉븸 諛섑솚. (min_grade2, min_grade3, min_grade4, min_grade5) ???⑥쐞."""
+    def get_val(k, default=0):
+        row = MemberGradeConfig.query.filter_by(key=k).first()
+        if not row or not row.value:
+            return default
+        try:
+            return int(row.value)
+        except (ValueError, TypeError):
+            return default
+    return (
+        get_val('min_amount_grade2', 100000),
+        get_val('min_amount_grade3', 500000),
+        get_val('min_amount_grade4', 1000000),
+        get_val('min_amount_grade5', 2000000),
+    )
+
+
+def recompute_member_grade_for_user(user):
+    """援щℓ ?꾩쟻??湲곗??쇰줈 ?깃툒 怨꾩궛. member_grade_overridden ?대㈃ 蹂寃쏀븯吏 ?딆쓬. 諛섑솚: 蹂寃??щ?."""
+    if getattr(user, 'member_grade_overridden', False):
+        return False
+    total = _get_user_total_paid(user.id)
+    min2, min3, min4, min5 = _get_member_grade_config()
+    new_grade = 1
+    if total >= min5:
+        new_grade = 5
+    elif total >= min4:
+        new_grade = 4
+    elif total >= min3:
+        new_grade = 3
+    elif total >= min2:
+        new_grade = 2
+    if user.member_grade != new_grade:
+        user.member_grade = new_grade
+        return True
+    return False
+
+
+def categories_for_member_grade(member_grade):
+    """?대떦 ?깃툒 ?뚯썝?먭쾶 ?몄텧??移댄뀒怨좊━ 荑쇰━. member_grade??1~5, 鍮꾨줈洹몄씤? 1濡?媛꾩＜."""
+    grade = 1 if member_grade is None else max(1, min(5, member_grade))
+    return Category.query.filter(
+        db.or_(Category.min_member_grade.is_(None), Category.min_member_grade <= grade)
+    ).order_by(Category.order.asc(), Category.id.asc())
+
+
+def _get_point_config():
+    """?ъ씤???뺤콉 諛섑솚. accumulation_rate: 1=0.1%, min_order_to_use(??, max_points_per_order(??"""
+    def get_val(k, default=0):
+        row = PointConfig.query.filter_by(key=k).first()
+        if not row or not row.value:
+            return default
+        try:
+            return int(row.value)
+        except (ValueError, TypeError):
+            return default
+    return (
+        get_val('accumulation_rate', 1),   # 1 = 0.1%
+        get_val('min_order_to_use', 30000),
+        get_val('max_points_per_order', 3000),
+    )
+
+
+def apply_order_points(user, order_total, points_used, order_id=None):
+    """寃곗젣 ?꾨즺 ?? ?ъ씤???ъ슜遺꾨쭔 李④컧. ?곷┰? 諛곗넚?꾨즺 ???뺤궛 湲덉븸 湲곗??쇰줈 蹂꾨룄 吏湲?
+    ?ъ씤???ъ슜遺꾩? ?먮ℓ???덈ぉ/?뺤궛?먯꽌 李④컧?섏? ?딄퀬 留덉??낅퉬濡쒕쭔 泥섎━?섎ŉ, MarketingCost??湲곕줉."""
+    user_obj = user if hasattr(user, 'points') else User.query.get(user)
+    if not user_obj:
+        return
+    if points_used > 0:
+        user_obj.points = (user_obj.points or 0) - points_used
+        db.session.add(PointLog(user_id=user_obj.id, amount=-points_used, order_id=order_id, memo='二쇰Ц ?ъ슜'))
+        db.session.add(MarketingCost(order_id=order_id, user_id=user_obj.id, amount=points_used, memo='怨좉컼 ?ъ씤???ъ슜 (留덉??낅퉬)'))
+
+
+def apply_points_on_delivery_complete(order_item):
+    """?덈ぉ??諛곗넚?꾨즺濡?諛붾??? ?대떦 ?덈ぉ???뺤궛踰덊샇(sales_amount) 湲곗??쇰줈 ?ъ씤???곷┰. 1?뚮쭔 吏湲?"""
+    if not order_item or getattr(order_item, 'cancelled', False):
+        return
+    order = Order.query.get(order_item.order_id) if order_item.order_id else None
+    if not order or not order.user_id:
+        return
+    # ?대? ???덈ぉ?????諛곗넚?꾨즺 ?곷┰?????덈뒗吏 ?뺤씤
+    if PointLog.query.filter_by(order_item_id=order_item.id).filter(PointLog.amount > 0).first():
+        return
+    st = Settlement.query.filter_by(order_item_id=order_item.id).first()
+    if not st or not getattr(st, 'sales_amount', 0):
+        return
+    rate, _, _ = _get_point_config()
+    earned = int(st.sales_amount * rate / 1000) if rate else 0
+    if earned <= 0:
+        return
+    u = User.query.get(order.user_id)
+    if not u:
+        return
+    u.points = (getattr(u, 'points', 0) or 0) + earned
+    db.session.add(PointLog(user_id=u.id, amount=earned, order_id=order.id, order_item_id=order_item.id, memo='諛곗넚?꾨즺 ?곷┰'))
+
+
+class Settlement(db.Model):
+    """?뺤궛 ?꾩슜 ?뚯씠釉?(怨좉컼 寃곗젣 ???덈ぉ蹂?怨좎쑀 n?섎쾭 湲곗?)"""
+    __tablename__ = "settlement"
+    id = db.Column(db.Integer, primary_key=True)
+    settlement_no = db.Column(db.String(32), unique=True, nullable=False)  # ?덈ぉ蹂?怨좎쑀 n?섎쾭
+    order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=True)
+    order_item_id = db.Column(db.Integer, nullable=True)  # OrderItem.id
+    sale_dt = db.Column(db.DateTime, nullable=False)  # ?먮ℓ?쇱떆
+    category = db.Column(db.String(50), nullable=False)  # 移댄뀒怨좊━
+    tax_exempt = db.Column(db.Boolean, default=False)  # 硫댁꽭?щ?
+    product_name = db.Column(db.String(200), nullable=False)  # ?덈ぉ
+    sales_amount = db.Column(db.Integer, default=0)  # ?먮ℓ湲덉븸
+    fee = db.Column(db.Integer, default=0)  # ?섏닔猷?    delivery_fee = db.Column(db.Integer, default=0)  # 諛곗넚愿由щ퉬
+    settlement_total = db.Column(db.Integer, default=0)  # ?뺤궛?⑷퀎
+    settlement_status = db.Column(db.String(20), default='?낃툑?湲?)  # ?낃툑?湲? ?낃툑?꾨즺, 痍⑥냼, 蹂대쪟
+    settled_at = db.Column(db.DateTime, nullable=True)  # ?낃툑??    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class Review(db.Model):
+    """?ъ쭊 由щ럭 紐⑤뜽 (?먮ℓ??移댄뀒怨좊━蹂꾨줈 臾띠뿬 ?곹뭹 ?곸꽭?먯꽌 ?대떦 ?먮ℓ???꾧린 ?몄텧)"""
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, unique=True)
+    user_id = db.Column(db.Integer)
+    user_name = db.Column(db.String(50))
+    product_id = db.Column(db.Integer)
+    product_name = db.Column(db.String(100))
+    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)  # ?먮ℓ??移댄뀒怨좊━) id
+    content = db.Column(db.Text)
+    image_url = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+class UserConsent(db.Model):
+    """?댁슜 ?숈쓽 ?댁뿭 紐⑤뜽"""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer)
+    email = db.Column(db.String(120))
+    consent_privacy = db.Column(db.Boolean, default=True)
+    consent_third_party = db.Column(db.Boolean, default=True)
+    consent_purchase_agency = db.Column(db.Boolean, default=True)
+    consent_terms = db.Column(db.Boolean, default=True)
+    consent_marketing = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+@login_manager.user_loader
+def load_user(user_id):
+    if not user_id:
+        return None
+    try:
+        return User.query.get(int(user_id))
+    except (TypeError, ValueError):
+        return None
+
+# --------------------------------------------------------------------------------
+# 3. 怨듯넻 ?좏떥由ы떚 ?⑥닔
+# --------------------------------------------------------------------------------
+
+from PIL import Image, ImageOps
+
+ALLOWED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+def _is_allowed_image_filename(filename):
+    """?낅줈???뚯씪???덉슜 ?대?吏 ?뺤옣?먯씤吏 寃??(蹂댁븞: ?ㅽ뻾 ?뚯씪 ??李⑤떒)"""
+    if not filename:
+        return False
+    ext = os.path.splitext(secure_filename(filename))[1].lower()
+    return ext in ALLOWED_IMAGE_EXTENSIONS
+
+def save_uploaded_file(file):
+    """?몃뱶???ъ쭊 怨듬갚 ?쒓굅(以묒븰 ?щ∼) 諛?WebP 蹂??""
+    if file and file.filename != '' and _is_allowed_image_filename(file.filename):
+        # ?뚯씪紐??ㅼ젙 (.webp濡??듭씪?섏뿬 ?⑸웾 ?덇컧)
+        new_filename = f"uncle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+
+        # 1. ?대?吏 ?닿린
+        img = Image.open(file)
+
+        # 2. ?몃뱶???ъ쭊 ?뚯쟾 諛⑹? (EXIF ?뺣낫 諛뷀깢?쇰줈 諛⑺뼢 諛붾줈?↔린)
+        img = ImageOps.exif_transpose(img)
+
+        # 3. ?뺤궗媛곹삎?쇰줈 以묒븰 ?щ∼ (媛濡쒖꽭濡?800px)
+        # ImageOps.fit? ?대?吏??以묒떖??湲곗??쇰줈 鍮꾩쑉??留욎떠 苑?梨꾩썙 ?먮쫭?덈떎.
+        size = (800, 800)
+        img = ImageOps.fit(img, size, Image.Resampling.LANCZOS)
+
+        # 4. WebP濡????(?⑸웾 理쒖쟻??
+        img.save(save_path, "WEBP", quality=85)
