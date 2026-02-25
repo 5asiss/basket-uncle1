@@ -350,6 +350,14 @@ def _get_zone():
     return DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
 
 
+def _normalize_address_for_zone(address_str):
+    """배송권역 검사용 주소 정규화 (마이페이지·결제 동일 적용). strip + 연속 공백 1칸."""
+    if not address_str:
+        return ""
+    s = (address_str or "").strip()
+    return re.sub(r"\s+", " ", s)
+
+
 def is_address_in_main_polygon(address_str):
     """주소가 기본 권역안에 있으면 True (배송권역 기본 추가요금 없음). 폴리곤 [lat,lng]/[lng,lat] 자동 보정."""
     zone = _get_zone()
@@ -399,19 +407,17 @@ def is_address_in_quick_polygon(address_str):
 
 
 def get_delivery_zone_type(address_str):
-    """주소 기준 권역 판별. 'normal'=기본권역 배송가능, 'quick'=퀵권역만 추가요금 있는 것, 'unavailable'=배송불가. use_quick_region_only 시 기본권역 없음."""
-    zone = _get_zone()
-    addr = (address_str or "").strip()
+    """주소 기준 권역 판별. is_address_in_delivery_zone과 동일한 기준(권역 이름·폴리곤·퀵 이름) 적용 후 normal/quick/unavailable 구분."""
+    addr = _normalize_address_for_zone(address_str)
     if not addr:
         return 'unavailable'
+    # 마이페이지·결제와 동기화: 배송가능 여부는 is_address_in_delivery_zone 단일 기준
+    if not is_address_in_delivery_zone(addr):
+        return 'unavailable'
+    zone = _get_zone()
     use_quick_only = bool(getattr(zone, 'use_quick_region_only', False)) if zone else False
     if use_quick_only:
-        if is_address_in_quick_polygon(addr):
-            return 'quick'
-        quick = _get_quick_region_list(zone)
-        if quick and any(name in addr for name in quick):
-            return 'quick'
-        return 'unavailable'
+        return 'quick'
     if is_address_in_main_polygon(addr):
         return 'normal'
     if is_address_in_quick_polygon(addr):
@@ -419,7 +425,11 @@ def get_delivery_zone_type(address_str):
     quick = _get_quick_region_list(zone) if zone else []
     if quick and any(name in addr for name in quick):
         return 'normal'
-    return 'unavailable'
+    # 권역 이름만 맞는 경우(폴리곤/지오코딩 오차 보정) → 기본권역으로 처리
+    if zone and getattr(zone, 'name', None) and (zone.name or '').strip() and (zone.name or '').strip() in addr:
+        return 'normal'
+    # is_address_in_delivery_zone True인데 위에서 안 걸린 경우(폴리곤 swap 등) → 기본권역
+    return 'normal'
 
 
 def get_quick_extra_config():
@@ -435,9 +445,9 @@ def get_quick_extra_config():
 
 
 def is_address_in_delivery_zone(address_str):
-    """주소가 배송 가능한지 (기본 권역이든 퀵 권역이든 포함). use_quick_region_only 시 퀵권역만 배송가능."""
+    """주소가 배송 가능한지 (기본 권역이든 퀵 권역이든 포함). use_quick_region_only 시 퀵권역만 배송가능. 마이페이지·결제 동일 정규화 적용."""
     zone = _get_zone()
-    addr = (address_str or "").strip()
+    addr = _normalize_address_for_zone(address_str)
     if not addr:
         return False
     use_quick_only = bool(getattr(zone, 'use_quick_region_only', False)) if zone else False
@@ -6887,11 +6897,12 @@ def cart():
 @app.route('/order/confirm')
 @login_required
 def order_confirm():
-    """결제 전 확인. 배송지 확인·결제 전 안내 문구를 모두 보여준 뒤 결제하기로 진행."""
+    """결제 전 확인. 배송지 확인·결제 전 안내 문구를 모두 보여준 뒤 결제하기로 진행. 마이페이지와 동일한 주소 정규화·배송권역 검사 적용."""
     items = Cart.query.filter_by(user_id=current_user.id).all()
     if not items: return redirect('/')
     
-    zone_type = get_delivery_zone_type(current_user.address or "")
+    addr_for_zone = _normalize_address_for_zone(current_user.address or "")
+    zone_type = get_delivery_zone_type(addr_for_zone)
     cat_price_sums = {}
     for i in items: 
         cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
@@ -6908,85 +6919,49 @@ def order_confirm():
     is_quick_zone = (zone_type == 'quick')
     total_with_quick = total + quick_extra_fee if is_quick_zone else total
 
-    # 일반 구역: 주문 확인 페이지 (배송지 확인 + 결제 전 안내 문구 포함)
+    # 일반 구역: 주문 확인 페이지 (간결화)
     if zone_type == 'normal':
         content = f"""
-    <div class="max-w-xl mx-auto py-12 md:py-20 px-4 md:px-6 font-black text-left">
-        <h2 class="text-2xl md:text-3xl font-black mb-10 border-b-4 border-teal-600 pb-4 text-center uppercase italic">
-            주문 확인
-        </h2>
+    <div class="max-w-xl mx-auto py-6 md:py-10 px-4 font-black text-left">
+        <h2 class="text-xl md:text-2xl font-black mb-6 text-center text-teal-600">주문 확인</h2>
         
-        <div class="bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border border-gray-50 space-y-10 text-left">
-            <div class="p-4 rounded-2xl bg-teal-50 border border-teal-100 text-[11px] text-teal-800 font-bold">
-                <p class="font-black">배송지 주소를 확인한 뒤 결제해 주세요.</p>
-            </div>
-            
-            <div class="p-6 md:p-8 bg-gray-50 border border-gray-200 rounded-3xl">
-                <span class="text-teal-600 text-[10px] block uppercase font-black mb-3 tracking-widest">배송지 정보</span>
-                <p class="text-sm text-gray-500 mb-3 font-bold leading-relaxed">주소 수정은 마이페이지에서 가능합니다.</p>
-                <p class="text-lg md:text-xl text-gray-800 font-black leading-snug" id="display-address-text">
-                    { (current_user.address or '정보 없음').replace('<', '&lt;').replace('>', '&gt;') }<br>
-                    { f'<span class="text-teal-600 font-bold">{(getattr(current_user, "address_apt_name", None) or "").replace("<", "&lt;").replace(">", "&gt;")}</span><br>' if getattr(current_user, 'address_apt_name', None) else '' }
-                    <span class="text-gray-500">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
-                </p>
-                <p class="mt-3 text-sm text-teal-700 font-bold"><span class="text-[10px] text-teal-500 uppercase">요청사항</span> { (getattr(current_user, 'request_memo', None) or '').replace('<', '&lt;').replace('>', '&gt;') or '없음' }</p>
-                <a href="/mypage?from=cart" class="inline-flex items-center gap-2 mt-4 px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">
-                    <i class="fas fa-edit"></i> 마이페이지에서 주소 수정
-                </a>
-                <p class="mt-4 font-black text-sm text-teal-600 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송가능</p>
+        <div class="bg-white p-5 md:p-6 rounded-2xl shadow-lg border border-gray-100 space-y-5 text-left">
+            <div class="flex items-start justify-between gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs text-gray-500 font-bold mb-1">배송지</p>
+                    <p class="text-sm text-gray-800 font-black leading-snug" id="display-address-text">
+                        { (current_user.address or '정보 없음').replace('<', '&lt;').replace('>', '&gt;') }<br>
+                        { f'<span class="text-teal-600 font-bold">{(getattr(current_user, "address_apt_name", None) or "").replace("<", "&lt;").replace(">", "&gt;")}</span><br>' if getattr(current_user, 'address_apt_name', None) else '' }
+                        <span class="text-gray-500 text-xs">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
+                    </p>
+                    <p class="text-teal-600 text-xs font-bold mt-1 flex items-center gap-1"><i class="fas fa-check-circle"></i> 배송가능</p>
+                </div>
+                <a href="/mypage?from=cart" class="shrink-0 px-3 py-2 bg-teal-600 text-white rounded-lg text-xs font-black hover:bg-teal-700">주소 수정</a>
             </div>
 
-            <div class="space-y-4 pt-4">
-                <div class="flex justify-between items-end font-black">
-                    <span class="text-gray-400 text-xs uppercase tracking-widest">주문 금액</span>
-                    <span class="text-2xl text-gray-700">{ "{:,}".format(total) }원</span>
-                </div>
-                {f'''<div class="bg-amber-50 p-5 rounded-2xl border border-amber-100 text-[10px] md:text-xs text-amber-800 font-bold">
-                    🎁 보유 포인트: { "{:,}".format(user_points) }원 ({ "{:,}".format(min_order_to_use) }원 이상 구매 시 최대 { "{:,}".format(max_points_per_order) }원까지 사용 가능)
-                    <div class="mt-3 flex items-center gap-2 flex-wrap">
-                        <label class="font-black">사용할 포인트</label>
-                        <input type="number" id="points_used_input" min="0" max="{ max_use }" value="0" step="1" class="w-28 border border-amber-200 rounded-lg px-2 py-1.5 text-sm font-black">
-                        <span>원 (최대 { "{:,}".format(max_use) }원)</span>
-                    </div>
-                </div>''' if can_use_points else f'<div class="bg-gray-50 p-4 rounded-2xl text-[10px] text-gray-500 font-bold">보유 포인트: { "{:,}".format(user_points) }원. { min_order_to_use and total < min_order_to_use and ("{:,}".format(min_order_to_use) + "원 이상 구매 시 사용 가능합니다.") or "사용 가능한 포인트가 없습니다." }</div>'}
-                <div class="flex justify-between items-end font-black border-t border-gray-100 pt-4">
-                    <span class="text-gray-400 text-xs uppercase tracking-widest">최종 결제 금액</span>
-                    <span class="text-4xl md:text-5xl text-teal-600 font-black italic underline underline-offset-8" id="final_amount_display">{ "{:,}".format(total) }원</span>
-                </div>
-                <div class="bg-orange-50 p-5 rounded-2xl border border-orange-100 text-[10px] md:text-xs text-orange-700 font-bold leading-relaxed">
-                    📢 배송비: 카테고리별 1,900원, 카테고리 합계 50,000원 이상이면 1,900원 추가. 현재 배송비: { "{:,}".format(delivery_fee) }원
-                </div>
+            <div class="grid grid-cols-2 gap-3 p-4 bg-gray-50 rounded-xl">
+                <div><span class="text-[10px] text-gray-500 uppercase">주문금액</span><p class="text-lg font-black text-gray-800">{ "{:,}".format(total) }원</p></div>
+                <div class="text-right"><span class="text-[10px] text-gray-500 uppercase">최종 결제</span><p class="text-xl font-black text-teal-600" id="final_amount_display">{ "{:,}".format(total) }원</p></div>
+                {f'''<div class="col-span-2 flex items-center gap-2 flex-wrap text-[10px] text-amber-800 font-bold">
+                    <span>포인트</span>
+                    <input type="number" id="points_used_input" min="0" max="{ max_use }" value="0" step="1" class="w-20 border border-amber-200 rounded-lg px-2 py-1 text-sm font-black">
+                    <span>원 (최대 { "{:,}".format(max_use) }원)</span>
+                </div>''' if can_use_points else f'<p class="col-span-2 text-[10px] text-gray-500">포인트 { "{:,}".format(user_points) }원</p>'}
             </div>
 
-            <div class="p-6 md:p-8 bg-gray-50 rounded-3xl text-[11px] md:text-xs text-gray-500 space-y-6 font-black border border-gray-100">
-                <div class="bg-gray-100 border border-gray-200 rounded-2xl p-4 text-gray-700 text-[10px] md:text-[11px] leading-relaxed">
-                    <span class="font-extrabold text-gray-900">⚠️ 주문 전 필수 확인</span>
-                    <ul class="mt-2 pl-4 space-y-1 list-disc">
-                        <li>장바구니 단계에서는 언제든지 주문 취소가 가능합니다.</li>
-                        <li>공동구매·실시간 수급 특성상 도매처 품절·수급 변동으로 <b>부분 또는 전체 취소</b>가 발생할 수 있습니다.</li>
-                        <li>비정상적·상업적 재판매·시스템 악용 시 <b>관리자 판단에 따라 사전 안내 후 취소</b>될 수 있습니다.</li>
-                        <li>상품 준비가 시작된 이후에는 취소·변경이 제한될 수 있습니다.</li>
-                    </ul>
+            <details class="bg-gray-50 rounded-xl border border-gray-100 text-[10px] text-gray-600">
+                <summary class="p-3 cursor-pointer font-black text-gray-700">결제 전 안내 (필수 확인)</summary>
+                <div class="px-3 pb-3 pt-0 space-y-2">
+                    <p>· 품절/부분취소 가능 · 구매대행 서비스 동의 · 개인정보 제3자 제공 동의</p>
                 </div>
-                <div class="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-amber-800 text-[10px] md:text-[11px] leading-relaxed">
-                    <span class="font-extrabold">⚠️ 주문·결제 전 취소 안내</span><br>
-                    공동구매 방식의 구매 특성상 재고 소진 시 품절 처리될 수 있으며, 관리자 판단에 따라 상업적·비상식적·악의적 이용으로 보이는 경우 해당 품목이 부분 취소될 수 있습니다.
-                </div>
-                <label class="flex items-start gap-4 cursor-pointer group">
-                    <input type="checkbox" id="consent_partial_cancel" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-teal-600 focus:ring-teal-500" required>
-                    <span class="group-hover:text-gray-800 transition leading-relaxed">[필수] 위 취소 안내(품절·부분 취소 가능)를 확인했으며 이에 동의합니다.</span>
-                </label>
-                <label class="flex items-start gap-4 pt-4 border-t border-gray-200 cursor-pointer group">
-                    <input type="checkbox" id="consent_agency" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-teal-600 focus:ring-teal-500" required>
-                    <span class="group-hover:text-gray-800 transition leading-relaxed">[필수] 본인은 바구니삼촌이 상품 판매자가 아니며, 요청에 따라 구매 및 배송을 대행하는 서비스임을 확인하고 이에 동의합니다.</span>
-                </label>
-                <label class="flex items-start gap-4 pt-4 border-t border-gray-200 cursor-pointer group">
-                    <input type="checkbox" id="consent_third_party_order" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-teal-600 focus:ring-teal-500" required>
-                    <span class="group-hover:text-gray-800 transition leading-relaxed">[필수] 개인정보 제3자 제공 동의: 원활한 배송 처리를 위해 판매처 및 배송 담당자에게 정보가 제공됨을 확인했습니다.</span>
-                </label>
+            </details>
+            <div class="space-y-2">
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
-            <form id="payForm" action="/order/payment" method="POST" class="mt-4">
+            <form id="payForm" action="/order/payment" method="POST">
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
                 <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
                 <input type="hidden" name="order_address" id="order_address_hidden" value="{ (current_user.address or '').replace('&', '&amp;').replace('"', '&quot;') }">
@@ -6994,7 +6969,7 @@ def order_confirm():
                 <input type="hidden" name="order_address_detail" id="order_address_detail_hidden" value="{ (current_user.address_detail or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="order_entrance_pw" id="order_entrance_pw_hidden" value="{ (current_user.entrance_pw or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="save_address_to_profile" id="save_address_to_profile_hidden" value="0">
-                <button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 hover:bg-teal-700 transition active:scale-95">배송지 확인 후 결제하기</button>
+                <button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-teal-600 text-white py-4 md:py-5 rounded-xl font-black text-base shadow-lg hover:bg-teal-700 transition">결제하기</button>
             </form>
         </div>
     </div>
@@ -7002,8 +6977,8 @@ def order_confirm():
     var orderTotal = { total };
     var maxUse = { max_use };
     function startPayment() {{
-        if(!document.getElementById('consent_partial_cancel').checked) {{ alert("주문·결제 전 취소 안내에 동의해 주세요."); return; }}
-        if(!document.getElementById('consent_agency').checked) {{ alert("구매 대행 서비스 이용 동의가 필요합니다."); return; }}
+        if(!document.getElementById('consent_partial_cancel').checked) {{ alert("취소 안내에 동의해 주세요."); return; }}
+        if(!document.getElementById('consent_agency').checked) {{ alert("구매대행 서비스 동의가 필요합니다."); return; }}
         if(!document.getElementById('consent_third_party_order').checked) {{ alert("개인정보 제공 동의가 필요합니다."); return; }}
         var ptsInput = document.getElementById('points_used_input');
         var pts = ptsInput ? parseInt(ptsInput.value, 10) || 0 : 0;
@@ -7197,17 +7172,23 @@ def order_payment():
         except ValueError:
             points_used = 0
         quick_agree = request.form.get('quick_agree', '0').strip() in ('1', 'on', 'yes')
-        order_address = request.form.get('order_address', '').strip()
+        order_address = _normalize_address_for_zone(request.form.get('order_address', '') or '')
         order_address_detail = request.form.get('order_address_detail', '').strip()
         order_entrance_pw = request.form.get('order_entrance_pw', '').strip()
         save_address_to_profile = request.form.get('save_address_to_profile', '0').strip() in ('1', 'on', 'yes')
-        effective_address = order_address if order_address else (current_user.address or "")
+        # 마이페이지와 동일: 회원 저장 주소 우선, 결제 시 사용 주소는 동일한 정규화·검사 적용
+        user_addr = _normalize_address_for_zone(current_user.address or "")
+        effective_address = order_address if order_address else user_addr
         items = Cart.query.filter_by(user_id=current_user.id).all()
         if not items:
             return redirect('/order/confirm')
         if not is_address_in_delivery_zone(effective_address):
-            flash("선택한 배송지는 배송 가능 구역이 아닙니다. 주소를 확인해 주세요.")
-            return redirect('/order/confirm')
+            # 폼 주소가 배송불가여도, 회원 주소(마이페이지와 동일)로 재검사해 배송가능이면 진행
+            if user_addr and is_address_in_delivery_zone(user_addr):
+                effective_address = user_addr
+            else:
+                flash("선택한 배송지는 배송 가능 구역이 아닙니다. 주소를 확인해 주세요.")
+                return redirect('/order/confirm')
         zone_type = get_delivery_zone_type(effective_address)
         if zone_type == 'quick' and not quick_agree:
             return redirect('/order/confirm')
@@ -7240,8 +7221,9 @@ def order_payment():
         session['quick_extra_fee'] = quick_extra_fee_val
         return redirect(url_for('order_payment'))
     items = Cart.query.filter_by(user_id=current_user.id).all()
-    effective_addr = session.get('order_address') or current_user.address or ""
-    if not items or not is_address_in_delivery_zone(effective_addr):
+    # 마이페이지와 동일하게: 회원 저장 주소 우선 사용(세션은 이전 결제 시도 값이라 마이페이지 수정 후 불일치 가능)
+    effective_addr = _normalize_address_for_zone(current_user.address or "") or _normalize_address_for_zone(session.get('order_address') or "")
+    if not items or not effective_addr or not is_address_in_delivery_zone(effective_addr):
         return redirect('/order/confirm')
     
     subtotal = sum(i.price * i.quantity for i in items)
