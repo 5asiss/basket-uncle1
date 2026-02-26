@@ -80,8 +80,8 @@ from config import (
     KAKAO_MAP_APP_KEY, KAKAO_REST_API_KEY, MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_USE_TLS, DEFAULT_MAIL_FROM,
     GITHUB_BACKUP_TOKEN, GITHUB_BACKUP_REPO,
 )
-# 로컬 업로드 폴더 (Cloudinary 미사용 시만 활용)
-UPLOAD_FOLDER = os.path.join("static", "uploads")
+# 로컬 업로드 폴더 (Cloudinary 미사용 시만 활용). app.root_path 기준 절대 경로로 저장해 직접 올린 사진이 항상 /static/uploads/ 에서 노출되도록 함
+UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -9482,6 +9482,7 @@ def admin_dashboard():
                 {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
                 <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
+                <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
                 <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
                 {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
@@ -9509,6 +9510,30 @@ def admin_dashboard():
             </div>
         </div>
 
+        {% if tab == 'bulk_register' %}
+            <div class="mb-8 p-6 rounded-[2rem] border-2 border-teal-200 bg-teal-50/80 text-left">
+                <p class="font-black text-teal-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📦</span> 상품 대량등록 (우리상품등록과 동일한 양식)</p>
+                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 항목을 채운 뒤 업로드하면 상품이 일괄 반영됩니다. <b>ZIP 업로드</b> 시 엑셀과 동일 위치에 상품명 폴더를 두고, 폴더 안에 1~10번 이미지를 넣으면 1번=대표이미지, 2~10번=상세이미지로 자동 반영됩니다.</p>
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <a href="/admin/product/bulk_upload_template" class="bg-white text-teal-600 border-2 border-teal-300 px-5 py-3 rounded-xl font-black text-xs shadow-sm hover:bg-teal-50 transition">📥 엑셀 업로드 양식 다운로드</a>
+                </div>
+                <form action="/admin/product/bulk_upload" method="POST" enctype="multipart/form-data" class="flex flex-wrap items-end gap-4 p-5 bg-white rounded-2xl border border-teal-100">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-[10px] font-black text-gray-600 mb-1">엑셀 또는 ZIP 파일 선택</label>
+                        <input type="file" name="excel_file" class="w-full bg-gray-50 p-3 rounded-xl text-xs border border-gray-200" accept=".xlsx,.xls,.zip" required>
+                    </div>
+                    <button type="submit" class="bg-teal-600 text-white px-8 py-3 rounded-xl font-black text-sm hover:bg-teal-700">상품 업로드</button>
+                </form>
+                <div class="mt-5 p-5 bg-white/70 rounded-xl border border-teal-100 text-left text-[11px] text-gray-700 space-y-2">
+                    <p class="font-black text-gray-800 mb-2">📋 ZIP 업로드 구조</p>
+                    <p>· ZIP 안에 <b>엑셀 파일(.xlsx)</b> 하나와, 엑셀과 <b>같은 위치</b>에 <b>상품명과 똑같은 이름의 폴더</b>를 두세요.</p>
+                    <p>· 각 폴더 안에는 <b>1, 2, 3, … 10</b> 번 이미지 파일을 넣습니다 (예: 1.jpg, 2.png). <b>1번=대표이미지</b>, <b>2~10번=상세이미지</b> 순서로 적용됩니다. 빈 란이나 사진이 부족·많아도 오류 없이 처리되며, 입력 안 된 항목은 기본값으로 등록됩니다.</p>
+                    <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼 (우리상품등록 기준)</p>
+                    <p>· <b>필수</b>: 카테고리, 상품명, 가격 · 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
+                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일/+2일/+3일/당일배송), 규격, 공급가, 재고, 마감일시, 재고초기화시각, 초기화수량, 세금(과세/면세). 비어 있으면 기본값 적용.</p>
+                </div>
+            </div>
+        {% endif %}
         {% if tab == 'products' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-amber-200 bg-amber-50/80 text-left">
                 <p class="font-black text-amber-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">👋</span> 처음 사용하시는 관리자용 안내</p>
@@ -12755,6 +12780,7 @@ def admin_dashboard():
                 {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
                 <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
+                <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
                 <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
                 {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
@@ -13164,67 +13190,314 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
     </div>""" 
 
 # --------------------------------------------------------------------------------
-# 7. 엑셀 대량 업로드 (사용자 커스텀 양식 대응)
+# 7. 엑셀 대량 업로드 (우리상품등록과 동일한 양식)
 # --------------------------------------------------------------------------------
 @login_required
 def admin_product_bulk_upload_template():
-    """상품 엑셀 업로드용 양식 파일 다운로드 (필수 컬럼: 카테고리, 상품명, 규격, 가격, 이미지파일명)"""
+    """상품 엑셀 업로드용 양식 다운로드. 우리상품등록(상품 등록) 화면과 동일한 항목."""
     if not current_user.is_admin:
         return redirect('/')
-    df = pd.DataFrame(columns=['카테고리', '상품명', '규격', '가격', '이미지파일명'])
-    df.loc[0] = ['(카테고리명)', '(상품명)', '(예: 1박스)', 0, '(파일명.jpg)']
+    columns = [
+        '카테고리', '상품명', 'Short Intro', '상세문구', '배송', '가격', '규격', '공급가', '재고',
+        '마감일시', '재고초기화시각', '초기화수량', '대표이미지파일명', '상세이미지파일명', '세금'
+    ]
+    df = pd.DataFrame(columns=columns)
+    df.loc[0] = [
+        '(카테고리명)', '(상품명)', '(한줄소개/뱃지)', '(상세 사진 위 문구)', '+1일',
+        0, '(예: 5kg/1박스)', '', 50, '', '09:00', 50, '(파일명.jpg)', '(a.jpg,b.jpg)', '과세'
+    ]
     out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
     out.seek(0)
-    return send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name='상품_엑셀_업로드_양식.xlsx', as_attachment=True)
+    return send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name='상품_대량등록_양식.xlsx', as_attachment=True)
 
 
 @login_required
 def admin_product_bulk_upload():
-    """사용자 엑셀 양식(한글 헤더) 기반 대량 업로드 로직"""
-    if not current_user.is_admin: return redirect('/')
+    """엑셀 또는 ZIP 대량 업로드. ZIP 시 엑셀과 동일 위치에 상품명 폴더, 폴더 안 1~10번 이미지(1=대표, 2~10=상세). 빈란/사진 부족·과다 시 기본값·오류 없이 처리."""
+    if not current_user.is_admin:
+        return redirect('/')
     file = request.files.get('excel_file')
-    if not file: return redirect('/admin')
+    if not file or file.filename == '':
+        return redirect('/admin?tab=bulk_register')
+    import zipfile
+    import tempfile
+    import shutil
+    tmp_dir = None
+    images_root = None
     try:
-        df = pd.read_excel(file)
-        # 사용자 요청 헤더: 카테고리, 상품명, 규격, 가격, 이미지파일명
-        required_cols = ['카테고리', '상품명', '규격', '가격', '이미지파일명']
-        if not all(col in df.columns for col in required_cols): 
-            flash("엑셀 헤더 불일치 (필요: 카테고리, 상품명, 규격, 가격, 이미지파일명)"); return redirect('/admin')
-        
+        fn = (file.filename or '').strip().lower()
+        if fn.endswith('.zip'):
+            tmp_dir = tempfile.mkdtemp(prefix='bulk_')
+            try:
+                try:
+                    with zipfile.ZipFile(file, 'r', metadata_encoding='cp949') as zf:
+                        zf.extractall(tmp_dir)
+                except TypeError:
+                    with zipfile.ZipFile(file, 'r') as zf:
+                        zf.extractall(tmp_dir)
+                except Exception:
+                    with zipfile.ZipFile(file, 'r') as zf:
+                        zf.extractall(tmp_dir)
+            except Exception as e:
+                flash(f"ZIP 해제 실패: {str(e)}")
+                return redirect('/admin?tab=bulk_register')
+            xlsx_path = None
+            for root, dirs, files in os.walk(tmp_dir):
+                for f in files:
+                    if f.lower().endswith('.xlsx') or f.lower().endswith('.xls'):
+                        xlsx_path = os.path.join(root, f)
+                        break
+                if xlsx_path:
+                    break
+            if not xlsx_path or not os.path.isfile(xlsx_path):
+                flash("ZIP 안에 엑셀 파일(.xlsx 또는 .xls)이 없습니다.")
+                return redirect('/admin?tab=bulk_register')
+            df = pd.read_excel(xlsx_path)
+            images_root = os.path.dirname(xlsx_path)
+        else:
+            df = pd.read_excel(file)
+        df.columns = df.columns.astype(str).str.strip()
+        required = ['카테고리', '상품명', '가격']
+        if not all(c in df.columns for c in required):
+            flash("엑셀 헤더에 필수 컬럼이 없습니다. 필수: 카테고리, 상품명, 가격")
+            return redirect('/admin?tab=bulk_register')
+        upload_dir = os.path.join(app.root_path, 'static', 'uploads')
+        os.makedirs(upload_dir, exist_ok=True)
         count = 0
-        for _, row in df.iterrows():
-            cat_name = str(row['카테고리']).strip()
-            cat_exists = Category.query.filter_by(name=cat_name).first()
-            if not cat_exists: continue
-            
-            # 이미지 경로 매핑 및 상세사진 자동 설정
-            raw_img_name = str(row['이미지파일명']).strip()
-            if raw_img_name in ('', 'nan', 'None') or not raw_img_name:
-                raw_img_name = ''
-            img_url = f"/static/uploads/{raw_img_name}" if raw_img_name else ""
-            
+        for idx, row in df.iterrows():
+            cat_name = _cell_str(row.get('카테고리', ''))
+            if not cat_name or cat_name.startswith('('):
+                continue
+            cat = Category.query.filter_by(name=cat_name).first()
+            if not cat:
+                continue
+            name_val = _cell_str(row.get('상품명', ''))
+            if not name_val or name_val.startswith('('):
+                continue
+            try:
+                price_val = int(float(row.get('가격', 0)))
+            except (ValueError, TypeError):
+                price_val = 0
+            if price_val < 0:
+                continue
+            badge = _cell_str(row.get('Short Intro', ''))
+            origin = _cell_str(row.get('상세문구', ''))
+            description = _cell_str(row.get('배송', '')) or '+1일'
+            spec = _cell_str(row.get('규격', ''))
+            supply_price = _cell_int(row.get('공급가'))
+            stock = _cell_int(row.get('재고'))
+            if stock is None or stock < 0:
+                stock = 50
+            deadline_val = _cell_str(row.get('마감일시', ''))
+            deadline = None
+            if deadline_val:
+                for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                    try:
+                        deadline = datetime.strptime(deadline_val.strip()[:19], fmt)
+                        break
+                    except ValueError:
+                        continue
+            reset_time = _cell_str(row.get('재고초기화시각', ''))[:5] or None
+            reset_to_q = _cell_int(row.get('초기화수량'))
+            tax_type = _cell_str(row.get('세금', '')) or (cat.tax_type or '과세')
+            if tax_type not in ('과세', '면세'):
+                tax_type = '과세'
+            image_url = ""
+            detail_image_url = ""
+            if images_root:
+                main_url, detail_urls = _bulk_collect_images_from_folder(images_root, name_val, upload_dir)
+                image_url = main_url or ""
+                detail_image_url = ",".join(detail_urls) if detail_urls else (main_url or "")
+            else:
+                main_img = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
+                main_img = _bulk_image_filename_only(main_img)
+                detail_imgs = _cell_str(row.get('상세이미지파일명', ''))
+                if main_img and not _bulk_is_placeholder_image(main_img):
+                    image_url = f"/static/uploads/{main_img.lstrip('/')}"
+                if detail_imgs and not _bulk_is_placeholder_image(detail_imgs):
+                    parts = [p.strip().lstrip('/') for p in detail_imgs.split(',') if p.strip() and not _bulk_is_placeholder_image(p.strip())]
+                    parts = [_bulk_image_filename_only(p) for p in parts if _bulk_image_filename_only(p)]
+                    if parts:
+                        detail_image_url = ",".join("/static/uploads/" + p for p in parts)
+                if not detail_image_url:
+                    detail_image_url = image_url
             new_p = Product(
-                category=cat_name, 
-                name=str(row['상품명']), 
-                price=int(row['가격']), 
-                spec=str(row['규격']), 
-                origin="국산", 
-                farmer="바구니삼촌", 
-                stock=50, # 기본 재고 50개 설정
-                image_url=img_url, 
-                detail_image_url=img_url, # 메인과 상세 동일하게 복사
-                is_active=True, 
-                tax_type=cat_exists.tax_type
+                category=cat_name,
+                name=name_val,
+                description=description,
+                price=price_val,
+                supply_price=supply_price,
+                spec=spec or "",
+                origin=origin or "",
+                farmer="바구니삼촌",
+                image_url=image_url,
+                detail_image_url=detail_image_url,
+                stock=stock,
+                deadline=deadline,
+                reset_time=reset_time,
+                reset_to_quantity=reset_to_q,
+                badge=badge or "",
+                tax_type=tax_type,
+                is_active=True,
             )
-            db.session.add(new_p); count += 1
-            
+            db.session.add(new_p)
+            count += 1
         db.session.commit()
-        flash(f"{count}개의 상품이 성공적으로 등록되었습니다."); return redirect('/admin')
-    except Exception as e: 
+        flash(f"{count}개 상품이 등록되었습니다.")
+        return redirect('/admin?tab=bulk_register')
+    except Exception as e:
         db.session.rollback()
-        flash(f"업로드 실패: {str(e)}"); return redirect('/admin')
+        flash(f"업로드 실패: {str(e)}")
+        return redirect('/admin?tab=bulk_register')
+    finally:
+        if tmp_dir and os.path.isdir(tmp_dir):
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+
+def _bulk_is_placeholder_image(s):
+    """엑셀 양식 placeholder(파일명.jpg 등)이면 True. 실제 파일명만 URL에 쓰기 위해."""
+    if not s or not isinstance(s, str):
+        return True
+    t = s.strip().lower()
+    if not t:
+        return True
+    if t.startswith('(') and ')' in t:
+        return True
+    if '파일명' in t or 'file' in t and 'example' in t:
+        return True
+    if t in ('(파일명.jpg)', '(파일명)', '파일명.jpg', '파일명', '(a.jpg,b.jpg)', '(예: apple.jpg)'):
+        return True
+    return False
+
+
+def _bulk_image_filename_only(s):
+    """엑셀에 전체 경로나 따옴표가 들어와도 URL에는 파일명만 사용. 예: \"C:/Users/.../1.jpg\" -> 1.jpg"""
+    if not s or not isinstance(s, str):
+        return ""
+    t = s.strip().strip('"').strip("'").strip()
+    if not t:
+        return ""
+    if '/' in t or '\\' in t:
+        return os.path.basename(t)
+    return t
+
+
+def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
+    """images_root(및 하위)에서 상품명과 동일한 폴더를 찾아 1~10번 이미지 수집. 1=대표, 2~10=상세. 복사 후 URL 반환."""
+    import shutil
+    import unicodedata
+    import re
+    IMAGE_EXT = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+    main_url = ""
+    detail_urls = []
+
+    def norm(s):
+        return unicodedata.normalize('NFC', (s or '').strip())
+
+    def norm_for_match(s):
+        """비교용: NFC 정규화 후 연속 공백(전각 포함)을 하나의 공백으로."""
+        t = unicodedata.normalize('NFC', (s or '').strip())
+        t = re.sub(r'[\s\u3000]+', ' ', t)  # 공백·전각공백 등 연속을 하나로
+        return t.strip()
+
+    product_name_norm = norm(product_name)
+    product_name_match = norm_for_match(product_name)
+    if not product_name_norm:
+        return main_url, detail_urls
+
+    product_folder = None
+    candidate = os.path.join(images_root, product_name.strip())
+    if os.path.isdir(candidate):
+        product_folder = candidate
+    if not product_folder:
+        try:
+            for d in os.listdir(images_root):
+                if not os.path.isdir(os.path.join(images_root, d)):
+                    continue
+                dn = norm(d)
+                dm = norm_for_match(d)
+                if dn == product_name_norm or dm == product_name_match or d.strip() == product_name.strip():
+                    product_folder = os.path.join(images_root, d)
+                    break
+        except Exception:
+            pass
+    if not product_folder:
+        try:
+            for root, dirs, _ in os.walk(images_root):
+                for d in dirs:
+                    dn = norm(d)
+                    dm = norm_for_match(d)
+                    if dn == product_name_norm or dm == product_name_match or d.strip() == product_name.strip():
+                        product_folder = os.path.join(root, d)
+                        break
+                if product_folder:
+                    break
+        except Exception:
+            pass
+
+    if not product_folder or not os.path.isdir(product_folder):
+        return main_url, detail_urls
+
+    by_num = {}
+    try:
+        for f in os.listdir(product_folder):
+            base, ext = os.path.splitext(f)
+            if ext.lower() not in IMAGE_EXT:
+                continue
+            try:
+                n = int(base.strip())
+                if 1 <= n <= 10:
+                    by_num[n] = os.path.join(product_folder, f)
+            except ValueError:
+                continue
+    except Exception:
+        return main_url, detail_urls
+
+    upload_dir_abs = os.path.abspath(upload_dir)
+    os.makedirs(upload_dir_abs, exist_ok=True)
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    for num in range(1, 11):
+        src = by_num.get(num)
+        if not src or not os.path.isfile(src):
+            continue
+        ext = os.path.splitext(src)[1].lower()
+        new_name = f"bulk_{num}_{ts}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = os.path.join(upload_dir_abs, new_name)
+        try:
+            shutil.copy2(src, dest)
+            if not os.path.isfile(dest):
+                continue
+            url = f"/static/uploads/{new_name}"
+            if num == 1:
+                main_url = url
+            else:
+                detail_urls.append(url)
+        except Exception:
+            continue
+    if not detail_urls and main_url:
+        detail_urls = [main_url]
+    return main_url, detail_urls
+
+
+def _cell_str(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    s = str(v).strip()
+    return s if s and s.lower() not in ('nan', 'none') else ""
+
+
+def _cell_int(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return None
 
 @login_required
 def admin_restaurant_request_comment(rid):

@@ -145,23 +145,16 @@ def register_admin_routes(app):
     # 수익통계 리포트 다운로드 (catch-all 전에 등록)
     admin_bp.add_url_rule('/admin/revenue_report/download', view_func=login_required(admin_revenue_report_download))
 
-    # 대시보드: /admin, /admin/, /admin/<path> (나머지는 위의 구체 라우트가 처리)
-    def _admin_dashboard_with_path(path=''):
-        return admin_dashboard()
-    admin_bp.add_url_rule('/admin', view_func=login_required(admin_dashboard), endpoint='admin_dashboard')
-    admin_bp.add_url_rule('/admin/', view_func=login_required(admin_dashboard), endpoint='admin_dashboard_slash')
-    admin_bp.add_url_rule('/admin/<path:path>', view_func=login_required(_admin_dashboard_with_path), endpoint='admin_dashboard_path')
-
-    # product bulk
+    # product bulk (catch-all 전에 등록해야 404 방지)
     admin_bp.add_url_rule('/admin/product/bulk_upload_template', view_func=login_required(admin_product_bulk_upload_template))
     admin_bp.add_url_rule('/admin/product/bulk_upload', view_func=login_required(admin_product_bulk_upload), methods=['POST'])
 
+    # 아래 모든 구체 라우트를 catch-all 전에 등록 (순서 중요)
     # board
     admin_bp.add_url_rule('/admin/board/restaurant-request/<int:rid>/comment', view_func=login_required(admin_restaurant_request_comment), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/restaurant-request/<int:rid>/hide', view_func=login_required(admin_restaurant_request_hide), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/restaurant-request/<int:rid>/notice', view_func=login_required(admin_restaurant_request_notice_toggle), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/restaurant-request/notice/write', view_func=login_required(admin_restaurant_request_notice_write), methods=['GET', 'POST'])
-    # app.py에 @app.route 없이 정의된 배송요청 뷰 (폼에서 /admin/board/delivery-request/... 호출)
     admin_bp.add_url_rule('/admin/board/delivery-request/<int:did>/comment', view_func=login_required(admin_delivery_request_comment), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/delivery-request/<int:did>/hide', view_func=login_required(admin_delivery_request_hide), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/delivery-request/<int:did>/notice', view_func=login_required(admin_delivery_request_notice_toggle), methods=['POST'])
@@ -170,7 +163,6 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/board/partnership/<int:pid>/hide', view_func=login_required(admin_partnership_hide), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/partnership/<int:pid>/notice', view_func=login_required(admin_partnership_notice_toggle), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/partnership/notice/write', view_func=login_required(admin_partnership_notice_write), methods=['GET', 'POST'])
-
     # email / seller
     admin_bp.add_url_rule('/admin/email_setup', view_func=login_required(admin_email_setup))
     admin_bp.add_url_rule('/admin/seller/order_preview', view_func=login_required(admin_seller_order_preview))
@@ -178,16 +170,12 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/seller/send_order_email', view_func=login_required(admin_seller_send_order_email), methods=['POST'])
     admin_bp.add_url_rule('/admin/email_order/line_status', view_func=login_required(admin_email_order_line_status_update), methods=['POST'])
     admin_bp.add_url_rule('/admin/email_order/create_view_link', view_func=login_required(admin_email_order_create_view_link), methods=['POST'])
-
     # backup
     admin_bp.add_url_rule('/admin/backup/run', view_func=login_required(admin_backup_run), methods=['POST'])
     admin_bp.add_url_rule('/admin/backup/cron', view_func=admin_backup_cron)
-
-    # review
+    # review / board comment
     admin_bp.add_url_rule('/admin/review/delete/<int:rid>', view_func=login_required(admin_review_delete))
-    # board comment
     admin_bp.add_url_rule('/admin/board/comment/delete/<int:cid>', view_func=login_required(admin_board_comment_delete), methods=['POST'])
-
     # seed / test
     admin_bp.add_url_rule('/admin/seed_test_data', view_func=login_required(admin_seed_test_data))
     admin_bp.add_url_rule('/admin/delete_test_data', view_func=login_required(admin_delete_test_data))
@@ -195,7 +183,6 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/seed_virtual_orders', view_func=login_required(admin_seed_virtual_orders))
     admin_bp.add_url_rule('/admin/seed_virtual_payment_orders', view_func=login_required(admin_seed_virtual_payment_orders))
     admin_bp.add_url_rule('/admin/seed_virtual_board_data', view_func=login_required(admin_seed_virtual_board_data))
-
     # product crud
     admin_bp.add_url_rule('/admin/add', view_func=login_required(admin_product_add), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/edit/<int:pid>', view_func=login_required(admin_product_edit), methods=['GET', 'POST'])
@@ -203,14 +190,12 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/product/<int:pid>/end_sale', view_func=login_required(admin_product_end_sale), methods=['POST'])
     admin_bp.add_url_rule('/admin/product/<int:pid>/reactivate', view_func=login_required(admin_product_reactivate), methods=['POST'])
     admin_bp.add_url_rule('/admin/product/bulk_sale_action', view_func=login_required(admin_product_bulk_sale_action), methods=['POST'])
-
     # category
     admin_bp.add_url_rule('/admin/category/add', view_func=login_required(admin_category_add), methods=['POST'])
     admin_bp.add_url_rule('/admin/category/edit/<int:cid>', view_func=login_required(admin_category_edit), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/category/move/<int:cid>/<string:direction>', view_func=login_required(admin_category_move))
     admin_bp.add_url_rule('/admin/category/delete/<int:cid>', view_func=login_required(admin_category_delete))
     admin_bp.add_url_rule('/admin/category/delete_products', view_func=login_required(admin_delete_products_by_category))
-
     # excel
     admin_bp.add_url_rule('/admin/sellers/excel', view_func=login_required(admin_sellers_excel))
     admin_bp.add_url_rule('/admin/orders/sales_excel', view_func=login_required(admin_orders_sales_excel))
@@ -222,5 +207,12 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/orders/settlement_detail_excel', view_func=login_required(admin_orders_settlement_detail_excel))
     admin_bp.add_url_rule('/admin/settlement/category_excel', view_func=login_required(admin_settlement_category_excel))
     admin_bp.add_url_rule('/admin/orders/excel', view_func=login_required(admin_orders_excel))
+
+    # 대시보드: /admin, /admin/, /admin/<path> (맨 마지막에 등록해 나머지 경로만 처리)
+    def _admin_dashboard_with_path(path=''):
+        return admin_dashboard()
+    admin_bp.add_url_rule('/admin', view_func=login_required(admin_dashboard), endpoint='admin_dashboard')
+    admin_bp.add_url_rule('/admin/', view_func=login_required(admin_dashboard), endpoint='admin_dashboard_slash')
+    admin_bp.add_url_rule('/admin/<path:path>', view_func=login_required(_admin_dashboard_with_path), endpoint='admin_dashboard_path')
 
     app.register_blueprint(admin_bp)
