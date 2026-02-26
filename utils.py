@@ -28,10 +28,12 @@ db = db_delivery
 
 
 def _get_main_db_path():
-    """메인 DB(주문 등) SQLite 파일 경로. Flask 컨텍스트 또는 delivery_system 경로 사용."""
+    """메인 DB(주문 등) SQLite 파일 경로. PostgreSQL 사용 시 None."""
     try:
         from flask import current_app
         uri = (current_app.config.get("SQLALCHEMY_DATABASE_URI") or "").strip()
+        if uri and ("postgresql" in uri.lower() or uri.lower().startswith("postgres://")):
+            return None
         if uri and "sqlite" in uri.lower():
             parsed = urlparse(uri)
             path = (parsed.path or "").lstrip("/")
@@ -60,6 +62,55 @@ def get_inactive_songdo_customers(weeks=2, limit=500):
     반환: [ {"customer_phone": "...", "customer_name": "...", "last_order_at": "..."}, ... ]
     """
     path = _get_main_db_path()
+    # PostgreSQL 사용 시 ORM으로 동일 로직 수행
+    if path is None:
+        try:
+            from flask import current_app
+            from models import Order
+            from sqlalchemy import text, func
+            uri = (current_app.config.get("SQLALCHEMY_DATABASE_URI") or "").strip()
+            if not uri or ("postgresql" not in uri.lower() and not uri.lower().startswith("postgres://")):
+                return []
+            days = max(1, int(weeks) * 7)
+            cutoff = datetime.now() - timedelta(days=days)
+            # 서브쿼리: 송도 고객별 마지막 주문일
+            subq = (
+                Order.query.filter(
+                    Order.delivery_address.isnot(None),
+                    Order.delivery_address.contains("송도"),
+                    ~Order.status.in_(["결제취소"]),
+                    Order.customer_phone.isnot(None),
+                )
+                .with_entities(
+                    Order.customer_phone,
+                    Order.customer_name,
+                    func.max(Order.created_at).label("last_order_at"),
+                )
+                .group_by(Order.customer_phone, Order.customer_name)
+                .subquery()
+            )
+            from sqlalchemy import select
+            stmt = (
+                select(subq.c.customer_phone, subq.c.customer_name, subq.c.last_order_at)
+                .where(subq.c.last_order_at < cutoff)
+                .order_by(subq.c.last_order_at.desc())
+                .limit(limit)
+            )
+            session = current_app.extensions.get("sqlalchemy")
+            if not session:
+                return []
+            rows = session.session.execute(stmt).fetchall()
+            return [
+                {
+                    "customer_phone": re.sub(r"\D", "", (r[0] or "")),
+                    "customer_name": (r[1] or "").strip() or "고객",
+                    "last_order_at": r[2].strftime("%Y-%m-%d %H:%M:%S") if getattr(r[2], "strftime", None) else str(r[2]),
+                }
+                for r in rows
+            ]
+        except Exception:
+            return []
+
     if not os.path.isfile(path):
         return []
     days = max(1, int(weeks) * 7)
@@ -537,8 +588,10 @@ def _generate_report_backup_files(tmp_dir):
         from flask import current_app
         from models import Order, Settlement
         from sqlalchemy import func
-        # app에서 사용하는 db (db_delivery = Flask-SQLAlchemy 인스턴스)
-        db_session = current_app.extensions["sqlalchemy"].session
+        db_session = current_app.extensions.get("sqlalchemy")
+        if not db_session or not hasattr(db_session, "session"):
+            return out
+        db_session = db_session.session
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(days=30)
         orders_in_range = Order.query.filter(

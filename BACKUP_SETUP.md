@@ -177,6 +177,8 @@ Render의 Cron Job 서비스를 쓰는 방법입니다. **Cron 1개당 월 최�
   - **401**: `key`와 `BACKUP_CRON_SECRET` 불일치 → 값 다시 확인.
   - **500 / 타임아웃**: 앱 로그 확인 (pg_dump 없음, DB 연결 오류 등).
 
+**사이트 이상 시 GitHub 백업으로 복구**하는 방법은 → **[RECOVERY.md](RECOVERY.md)** 참고.
+
 ---
 
 ## 요약 체크리스트

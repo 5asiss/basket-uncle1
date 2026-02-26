@@ -1414,7 +1414,7 @@ FOOTER_HTML = """
             typeBadge.className = 'text-[10px] px-2 py-1 rounded font-black ' + (data.popup_type === 'event' ? 'bg-amber-100 text-amber-800' : (data.popup_type === 'alert' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'));
             titleEl.textContent = data.title || '';
             if (data.display_date) { dateEl.textContent = data.display_date; dateEl.classList.remove('hidden'); } else { dateEl.classList.add('hidden'); }
-            if (data.image_url) { imgEl.src = data.image_url.indexOf('/') === 0 ? data.image_url : '/' + data.image_url; imgWrap.classList.remove('hidden'); } else { imgWrap.classList.add('hidden'); }
+            if (data.image_url) { imgEl.src = (data.image_url.indexOf('http') === 0 ? data.image_url : (data.image_url.indexOf('/') === 0 ? data.image_url : '/' + data.image_url)); imgWrap.classList.remove('hidden'); } else { imgWrap.classList.add('hidden'); }
             bodyEl.textContent = data.body || '';
             function closeModal() { modal.classList.add('hidden'); modal.classList.remove('flex'); modal.style.display = 'none'; document.body.style.overflow = ''; }
             if (todayHide.checked) sessionStorage.setItem(todayKey(data.id), '1');
@@ -7595,7 +7595,7 @@ def _save_delivery_proof_base64(data_url_or_base64):
     try:
         if cloudinary_url:
             upload_res = cloudinary.uploader.upload(
-                raw,
+                BytesIO(raw),
                 folder="basket-uncle/delivery_proof"
             )
             return upload_res.get("secure_url") or upload_res.get("url")
@@ -7636,12 +7636,15 @@ def api_logi_delivery_complete():
             apply_points_on_delivery_complete(oi)
         db.session.add(OrderItemLog(order_id=order.id, order_item_id=oi.id, log_type='item_status', old_value=old_status, new_value='배송완료', created_at=datetime.now()))
     db.session.commit()
+    # 고객 메시지/알림톡에 넣을 사진 URL: 이미 절대 URL(Cloudinary 등)이면 그대로, 상대 경로면 도메인 붙임
+    message_image_url = (proof_url if (proof_url and proof_url.startswith("http")) else (request.url_root.rstrip("/") + proof_url) if proof_url else None)
     title, body = get_template_content('delivery_complete', order_id=order.order_id)
-    send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=proof_url)
+    if order.user_id:
+        send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=message_image_url)
     try:
         extra_vars = {}
         if proof_url:
-            full_url = request.url_root.rstrip('/') + proof_url
+            full_url = proof_url if proof_url.startswith("http") else request.url_root.rstrip("/") + proof_url
             extra_vars["#{사진링크}"] = full_url
         send_alimtalk_order_event('delivery_complete', order.customer_phone, order.customer_name, order.order_id, **extra_vars)
     except Exception:

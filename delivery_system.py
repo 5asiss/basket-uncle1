@@ -111,8 +111,18 @@ def logi_get_item_summary(tasks):
     return summary
 
 def logi_get_main_db_path():
-    # app.py와 같은 레벨의 instance 폴더 내 DB 경로를 정확히 반환
+    # app.py와 같은 레벨의 instance 폴더 내 DB 경로를 정확히 반환 (SQLite 전용)
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'direct_trade_mall.db')
+
+
+def _logi_using_postgres():
+    """단일 DB 사용 시 PostgreSQL이면 True. request 컨텍스트 필요."""
+    try:
+        from flask import current_app
+        uri = (current_app.config.get("SQLALCHEMY_DATABASE_URI") or "").strip().lower()
+        return bool(uri and ("postgresql" in uri or uri.startswith("postgres://")))
+    except Exception:
+        return False
 
 # --------------------------------------------------------------------------------
 # 5. 관리자 보안 라우트 (로그인/로그아웃)
@@ -176,12 +186,17 @@ def logi_admin_dashboard():
     # 현황판 수치 계산
     pending_sync_count = 0
     try:
-        conn = sqlite3.connect(logi_get_main_db_path())
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM \"order\" WHERE status = '배송요청'")
-        pending_sync_count = cursor.fetchone()[0]
-        conn.close()
-    except: pass
+        if _logi_using_postgres():
+            r = db_delivery.session.execute(text("SELECT COUNT(*) FROM \"order\" WHERE status = '배송요청'")).scalar()
+            pending_sync_count = int(r) if r is not None else 0
+        else:
+            conn = sqlite3.connect(logi_get_main_db_path())
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM \"order\" WHERE status = '배송요청'")
+            pending_sync_count = cursor.fetchone()[0]
+            conn.close()
+    except Exception:
+        pass
 
     unassigned_count = DeliveryTask.query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None).count()
     assigned_count = DeliveryTask.query.filter_by(status='배정완료').count()
@@ -1009,8 +1024,32 @@ def logi_get_task_logs(tid):
 
 @logi_bp.route('/sync')
 def logi_sync():
-    path = logi_get_main_db_path()
     try:
+        if _logi_using_postgres():
+            rows = db_delivery.session.execute(text(
+                "SELECT order_id, customer_name, customer_phone, delivery_address, request_memo, product_details FROM \"order\" WHERE status = '배송요청'"
+            )).fetchall()
+            count = 0
+            canceled = db_delivery.session.execute(text("SELECT order_id FROM \"order\" WHERE status = '결제취소'")).fetchall()
+            canceled_ids = [r[0] for r in canceled]
+            if canceled_ids:
+                DeliveryTask.query.filter(DeliveryTask.order_id.in_(canceled_ids)).update({DeliveryTask.status: "결제취소"}, synchronize_session=False)
+            for row in rows:
+                order_id, customer_name, customer_phone, delivery_address, request_memo, product_details_val = row[0], row[1], row[2], row[3], row[4], row[5]
+                for block in (product_details_val or "").split(" | "):
+                    match = re.search(r"\[(.*?)\]", block)
+                    if match:
+                        cat = match.group(1).strip()
+                        exists = DeliveryTask.query.filter_by(order_id=order_id, category=cat).first()
+                        if not exists:
+                            nt = DeliveryTask(order_id=order_id, customer_name=customer_name or "", phone=customer_phone or "", address=delivery_address or "", memo=request_memo or "", category=cat, product_details=block.strip(), status="대기")
+                            db_delivery.session.add(nt)
+                            db_delivery.session.commit()
+                            logi_add_log(nt.id, nt.order_id, "입고", "배송시스템에 신규 주문 입고됨")
+                            count += 1
+            db_delivery.session.commit()
+            return jsonify({"success": True, "synced_count": count})
+        path = logi_get_main_db_path()
         conn = sqlite3.connect(path); conn.row_factory = sqlite3.Row; cursor = conn.cursor()
         # [복구] 결제취소 상태 동기화
         cursor.execute("SELECT order_id FROM \"order\" WHERE status = '결제취소'")
@@ -1100,13 +1139,16 @@ def logi_complete_action(tid):
         logi_add_log(t.id, t.order_id, '완료', '기사 배송 완료 및 안내 전송')
         db_delivery.session.commit()
         # 메인 앱에 배송완료 반영 및 고객 메시지(사진 포함) 발송
+        customer_notify_ok = True
         try:
             url = (request.host_url or request.url_root or '').rstrip('/') + '/api/logi/delivery-complete'
             if url.startswith('http'):
-                r = requests.post(url, json={'order_id': t.order_id, 'category': t.category or '', 'photo': t.photo_data}, timeout=10)
+                r = requests.post(url, json={'order_id': t.order_id, 'category': t.category or '', 'photo': t.photo_data}, timeout=15)
+                if r.status_code not in (200, 201):
+                    customer_notify_ok = False
         except Exception:
-            pass
-        return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone})
+            customer_notify_ok = False
+        return jsonify({"success": True, "customer": t.customer_name, "phone": t.phone, "customer_notify_ok": customer_notify_ok})
     return jsonify({"success": False})
 
 # --------------------------------------------------------------------------------
