@@ -1,0 +1,16 @@
+# Render 등에서 PostgreSQL 백업(pg_dump)을 쓰려면 이 Dockerfile 사용.
+# Dashboard에서 "Docker" 런타임으로 전환 후 이 파일로 빌드하면 pg_dump 사용 가능.
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+
+ENV PORT=10000
+EXPOSE $PORT
+CMD gunicorn --bind 0.0.0.0:$PORT app:app

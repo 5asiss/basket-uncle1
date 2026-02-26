@@ -24,7 +24,18 @@
 | `SITE_URL` | 선택 | 판매자 확인 링크에 사용 (예: `https://your-app.onrender.com`). 없으면 요청 URL 기준으로 생성 |
 | `GITHUB_BACKUP_TOKEN` | 선택 | GitHub Personal Access Token (repo 권한). 설정 시 백업 zip을 해당 저장소 Release로 업로드 |
 | `GITHUB_BACKUP_REPO` | 선택 | 백업 대상 저장소 (형식: owner/repo). 예: myid/basket-uncle |
-| `BACKUP_CRON_SECRET` | 선택 | 매일 새벽 4시(KST) 외부 cron이 호출할 때 사용. GET /admin/backup/cron?key=비밀값 |
+| `BACKUP_CRON_SECRET` | 선택 | 매일 새벽 4시(KST) Cron이 `/admin/backup/cron` 호출 시 쿼리 key 값. Web·Cron 서비스 둘 다 동일 값 설정 |
+| `BACKUP_APP_URL` | 선택 | **Cron 서비스 전용.** 백업 호출 대상 URL (예: `https://basket-uncle.onrender.com`) |
+
+## 2-1. 백업 전략 (인프라·외부·법적)
+
+| 구분 | 설명 |
+|------|------|
+| **Render 자동 백업 (인프라 레벨)** | `render.yaml`의 Cron 서비스가 매일 **04:00 KST**에 Web 서비스의 `GET /admin/backup/cron?key=BACKUP_CRON_SECRET` 호출. Cron 서비스에 `BACKUP_APP_URL`, `BACKUP_CRON_SECRET` 환경변수 설정 필요. |
+| **pg_dump + 외부 저장소** | `DATABASE_URL`이 PostgreSQL이면 `pg_dump`로 전체 덤프 후 zip에 포함. `GITHUB_BACKUP_TOKEN`·`GITHUB_BACKUP_REPO` 설정 시 동일 zip을 GitHub Release로 업로드 → **Render 계정/DB가 날아가도 복구 가능.** (Web 서버에 `postgresql-client`가 없으면 pg_dump 실패. 이 경우 프로젝트 루트의 `Dockerfile.backup` 참고해 Docker 빌드로 전환하거나, 수동 백업 시 로컬에서 pg_dump 실행 후 업로드.) |
+| **엑셀/리포트 (법적·실무용)** | 매 백업 시 최근 30일 **수익 리포트 CSV**가 zip 내 `reports/revenue_report_30d.csv`로 포함. 관리자 화면에서 기간별 수익통계·주문 엑셀 다운로드로 별도 기록용 백업 가능. |
+
+**배포 환경에서 매일 새벽 4시 자동 백업 설정**은 → **[BACKUP_SETUP.md](BACKUP_SETUP.md)** 참고 (cron-job.org / GitHub Actions / Render Cron 단계별 안내).
 
 ## 3. GitHub 1차 업로드
 

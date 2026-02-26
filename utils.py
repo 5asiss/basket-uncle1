@@ -7,6 +7,7 @@ import zipfile
 import tempfile
 import shutil
 import sqlite3
+import subprocess
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import requests
@@ -478,28 +479,152 @@ def _sqlite_path_from_uri(uri, app_root):
     return os.path.abspath(path) if os.path.isfile(path) else None
 
 
+def _is_postgres_uri(uri):
+    """PostgreSQL 연결 문자열 여부."""
+    if not uri or not isinstance(uri, str):
+        return False
+    u = (uri or "").strip().lower()
+    return u.startswith("postgresql://") or u.startswith("postgres://")
+
+
+def _run_pg_dump(database_url, out_path, timeout_sec=300):
+    """
+    pg_dump로 PostgreSQL 전체 덤프 (plain SQL).
+    서버에 postgresql-client(pg_dump)가 설치되어 있어야 함.
+    반환: (성공 여부, 에러 메시지 또는 None)
+    """
+    database_url = (database_url or "").strip()
+    if not database_url:
+        return False, "DATABASE_URL이 비어 있습니다."
+    # Render 등에서는 postgres:// 인데 pg_dump는 둘 다 허용. sslmode 필요 시 쿼리 추가
+    if database_url.startswith("postgres://") and "sslmode" not in database_url:
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+        if "?" in database_url:
+            database_url += "&sslmode=require"
+        else:
+            database_url += "?sslmode=require"
+    try:
+        env = os.environ.copy()
+        # 비밀번호에 특수문자가 있으면 URI에 이미 인코딩되어 있으므로 그대로 사용
+        proc = subprocess.run(
+            ["pg_dump", database_url, "-F", "p", "-f", out_path, "--no-owner", "--no-acl"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "")[:500]
+            return False, f"pg_dump 실패 (code={proc.returncode}): {err}"
+        if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
+            return False, "pg_dump 출력 파일이 비어 있거나 없습니다."
+        return True, None
+    except FileNotFoundError:
+        return False, "pg_dump를 찾을 수 없습니다. 서버에 postgresql-client 설치가 필요합니다 (예: Dockerfile에서 apt-get install -y postgresql-client)."
+    except subprocess.TimeoutExpired:
+        return False, "pg_dump 시간 초과 ({}초).".format(timeout_sec)
+    except Exception as e:
+        return False, str(e) or "pg_dump 실행 중 오류"
+
+
+def _generate_report_backup_files(tmp_dir):
+    """
+    법적/실무용 엑셀·리포트 백업 파일 생성 (최근 30일).
+    반환: [(절대경로, zip 내 arcname), ...]. 실패 시 빈 리스트 또는 부분 리스트.
+    """
+    out = []
+    try:
+        from flask import current_app
+        from models import Order, Settlement
+        from sqlalchemy import func
+        # app에서 사용하는 db (db_delivery = Flask-SQLAlchemy 인스턴스)
+        db_session = current_app.extensions["sqlalchemy"].session
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=30)
+        orders_in_range = Order.query.filter(
+            Order.created_at >= start_dt, Order.created_at <= end_dt
+        ).order_by(Order.created_at.desc()).all()
+        order_ids = [o.id for o in orders_in_range]
+        settlement_by_order = {}
+        if order_ids:
+            sett_rows = db_session.query(Settlement.order_id, func.sum(Settlement.settlement_total).label("s")).filter(
+                Settlement.order_id.in_(order_ids), Settlement.settlement_status == "입금완료"
+            ).group_by(Settlement.order_id).all()
+            for sid, s in sett_rows:
+                settlement_by_order[sid] = int(s or 0)
+        import csv
+        from io import StringIO
+        buf = StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["결제넘버", "주문일시", "상태", "주문원금", "포인트사용", "실제수입", "정산지급"])
+        for o in orders_in_range:
+            pay_rec = (o.total_price or 0) - (o.points_used or 0) if getattr(o, "status", None) != "결제취소" else 0
+            writer.writerow([
+                getattr(o, "order_id", None) or "-",
+                (o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "-"),
+                getattr(o, "status", None) or "-",
+                o.total_price or 0,
+                getattr(o, "points_used", None) or 0,
+                pay_rec,
+                settlement_by_order.get(o.id, 0),
+            ])
+        csv_path = os.path.join(tmp_dir, "revenue_report_30d.csv")
+        with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
+            f.write(buf.getvalue())
+        out.append((csv_path, "reports/revenue_report_30d.csv"))
+    except Exception:
+        pass
+    return out
+
+
 def run_backup():
-    """SQLite DB 파일을 zip으로 묶어 로컬 저장. GITHUB_BACKUP_* 설정 시 GitHub Release로 업로드. 반환: (성공 여부, 메시지)"""
+    """DB 백업: SQLite는 파일 zip, PostgreSQL은 pg_dump 후 zip. GITHUB_BACKUP_* 설정 시 GitHub Release로 업로드. 엑셀/리포트(법적·실무용) 포함. 반환: (성공 여부, 메시지)"""
     from flask import current_app
     app = current_app._get_current_object() if hasattr(current_app, "_get_current_object") else current_app
     app_root = app.root_path
-    main_uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+    main_uri = (app.config.get("SQLALCHEMY_DATABASE_URI") or "").strip()
     binds = app.config.get("SQLALCHEMY_BINDS") or {}
     files_to_backup = []
-    if main_uri and "sqlite" in main_uri.lower():
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    tmp_dir = tempfile.mkdtemp(prefix="basket_backup_")
+
+    # 1) 메인 DB: SQLite 파일 또는 PostgreSQL pg_dump
+    if main_uri and _is_postgres_uri(main_uri):
+        dump_path = os.path.join(tmp_dir, "main_dump.sql")
+        ok, err = _run_pg_dump(main_uri, dump_path)
+        if not ok:
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+            return False, f"PostgreSQL 백업 실패: {err}"
+        files_to_backup.append((dump_path, "main_dump.sql"))
+    elif main_uri and "sqlite" in main_uri.lower():
         p = _sqlite_path_from_uri(main_uri, app_root)
         if p:
             files_to_backup.append((p, "main.db"))
+
+    # 바인드된 SQLite DB (배송 등)
     for name, uri in binds.items():
         if uri and "sqlite" in uri.lower():
             p = _sqlite_path_from_uri(uri, app_root)
             if p:
                 files_to_backup.append((p, f"{name}.db"))
+
     if not files_to_backup:
-        return False, "백업할 SQLite DB 파일이 없습니다 (PostgreSQL 사용 시 백업은 별도 설정 필요)."
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return False, "백업할 DB가 없습니다. (SQLite: 파일 경로 확인, PostgreSQL: pg_dump 설치 및 DATABASE_URL 확인)"
+
+    # 2) 법적/실무용 엑셀·리포트 백업 (최근 30일) 추가
+    report_files = _generate_report_backup_files(tmp_dir)
+    for path, arcname in report_files:
+        if os.path.isfile(path):
+            files_to_backup.append((path, arcname))
+
     zip_name = f"backup_{ts}.zip"
-    tmp_dir = tempfile.mkdtemp(prefix="basket_backup_")
     try:
         zip_path = os.path.join(tmp_dir, zip_name)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -521,7 +646,7 @@ def run_backup():
         r = requests.post(create_url, headers=headers, json={
             "tag_name": tag_name,
             "name": f"Backup {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            "body": "자동 백업 (바구니삼촌)",
+            "body": "자동 백업 (바구니삼촌) — pg_dump/DB + 엑셀·리포트",
         }, timeout=30)
         if r.status_code not in (200, 201):
             return False, f"GitHub Release 생성 실패: {r.status_code} {r.text[:200]}"

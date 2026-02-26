@@ -6,6 +6,9 @@
 # - Start Command: gunicorn --bind 0.0.0.0:$PORT app:app
 # - Environment: FLASK_SECRET_KEY, TOSS_CLIENT_KEY, TOSS_SECRET_KEY 등 .env.example 참고
 
+# 백업 Cron: 매일 04:00 KST = 19:00 UTC. Web Service URL과 BACKUP_CRON_SECRET을 Cron 서비스 환경변수에 설정.
+# 인프라 레벨 안전망: Render 계정/DB가 날아가도 GitHub 등 외부 저장소에 pg_dump+리포트가 남음.
+
 services:
   - type: web
     name: basket-uncle
@@ -17,3 +20,15 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: "3.12.0"
+
+  - type: cron
+    name: basket-uncle-backup
+    runtime: python
+    schedule: "0 19 * * *"
+    buildCommand: pip install -r requirements.txt
+    command: python -c "import os, requests; url=os.environ.get('BACKUP_APP_URL','').rstrip('/'); key=os.environ.get('BACKUP_CRON_SECRET',''); r=requests.get(url+'/admin/backup/cron', params={'key': key}, timeout=300); print('Backup cron:', r.status_code)"
+    envVars:
+      - key: BACKUP_APP_URL
+        sync: false
+      - key: BACKUP_CRON_SECRET
+        sync: false

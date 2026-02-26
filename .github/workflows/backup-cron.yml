@@ -1,0 +1,32 @@
+# 매일 한국시간 새벽 4시에 배포된 앱의 백업 API 호출
+# 사용 전: 저장소 Settings → Secrets and variables → Actions 에서
+#   BACKUP_CRON_SECRET, BACKUP_APP_URL 시크릿 추가 필요 (BACKUP_SETUP.md 참고)
+
+name: Backup cron (daily 4am KST)
+
+on:
+  schedule:
+    # 19:00 UTC = 04:00 KST (한국 다음날 새벽 4시)
+    - cron: '0 19 * * *'
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  call-backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call backup endpoint
+        run: |
+          URL="${{ secrets.BACKUP_APP_URL }}"
+          KEY="${{ secrets.BACKUP_CRON_SECRET }}"
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "Missing BACKUP_APP_URL or BACKUP_CRON_SECRET secret."
+            exit 1
+          fi
+          URL="${URL%/}"
+          echo "Calling ${URL}/admin/backup/cron ..."
+          HTTP=$(curl -s -o /tmp/out.txt -w "%{http_code}" --max-time 300 "${URL}/admin/backup/cron?key=${KEY}")
+          echo "HTTP $HTTP"
+          cat /tmp/out.txt
+          if [ "$HTTP" != "200" ]; then
+            exit 1
+          fi

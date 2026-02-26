@@ -9920,7 +9920,7 @@ def admin_dashboard():
         {% elif tab == 'backup' %}
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">백업 · 복원</h3>
-                <p class="text-[11px] text-gray-500 font-bold mb-6">SQLite DB를 zip으로 백업합니다. GITHUB_BACKUP_TOKEN·GITHUB_BACKUP_REPO 설정 시 GitHub Release로 업로드되며, 미설정 시 instance/backups 에 저장됩니다.</p>
+                <p class="text-[11px] text-gray-500 font-bold mb-6">SQLite는 DB 파일을 zip으로, PostgreSQL은 pg_dump 후 zip으로 백업합니다. GITHUB_BACKUP_TOKEN·GITHUB_BACKUP_REPO 설정 시 GitHub Release로 업로드되며, 매 백업 시 최근 30일 수익 리포트(reports/revenue_report_30d.csv)가 zip에 포함됩니다. 미설정 시 instance/backups 에 저장됩니다.</p>
                 <div class="flex flex-wrap items-center gap-4 mb-6">
                     <button type="button" id="backup-run-btn" class="px-6 py-3 bg-teal-600 text-white rounded-xl font-black text-sm hover:bg-teal-700 transition">수동 백업 실행</button>
                     <span id="backup-result" class="text-sm font-bold"></span>
@@ -9934,7 +9934,7 @@ def admin_dashboard():
                         <li>배포 환경(Render 등)에서는 서버 디스크가 휘발성일 수 있으므로, 복원이 필요할 때 GitHub Release에서 zip을 받아 로컬에서 DB를 교체한 뒤 재배포하거나, 인스턴스 디스크에 DB를 복사한 뒤 재시작하는 방식으로 적용하세요.</li>
                     </ol>
                 </div>
-                <p class="mt-4 text-[10px] text-gray-500">매일 한국시간 새벽 4시 자동 백업: <code class="bg-gray-100 px-1 rounded">python app.py</code> 로 실행 시 스케줄이 동작합니다. gunicorn 배포 시에는 Cron 서비스에서 <code class="bg-gray-100 px-1 rounded">GET /admin/backup/cron?key=BACKUP_CRON_SECRET</code> 을 새벽 4시(KST)에 호출하도록 설정하면 됩니다.</p>
+                <p class="mt-4 text-[10px] text-gray-500">매일 한국시간 새벽 4시 자동 백업: <code class="bg-gray-100 px-1 rounded">python app.py</code> 로 실행 시 스케줄이 동작합니다. gunicorn 배포 시에는 Render Cron 서비스에서 <code class="bg-gray-100 px-1 rounded">GET /admin/backup/cron?key=BACKUP_CRON_SECRET</code> 을 새벽 4시(KST)에 호출하도록 설정하면 됩니다 (render.yaml 참고).</p>
             </div>
             <script>
             (function(){
