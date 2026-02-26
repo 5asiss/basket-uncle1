@@ -69,6 +69,12 @@ class Category(db.Model):
     account_holder = db.Column(db.String(100), nullable=True)
     settlement_account = db.Column(db.String(50), nullable=True)
     min_member_grade = db.Column(db.Integer, nullable=True)
+    # 카테고리별 배송료 관리 (금액/건별)
+    delivery_base_fee = db.Column(db.Integer, default=1900)
+    delivery_free_over = db.Column(db.Integer, nullable=True)
+    delivery_extra_threshold = db.Column(db.Integer, nullable=True)
+    delivery_extra_fee = db.Column(db.Integer, default=1900)
+    delivery_fee_per_item = db.Column(db.Integer, default=0)
 
 
 class Product(db.Model):
@@ -322,6 +328,19 @@ class EmailOrderLineStatus(db.Model):
     order_item_id = db.Column(db.Integer, db.ForeignKey('order_item.id'), unique=True, nullable=False)
     status = db.Column(db.String(20), default='대기')
     confirmation_id = db.Column(db.Integer, db.ForeignKey('seller_order_confirmation.id'), nullable=True)
+
+
+class OrderViewLink(db.Model):
+    """외부 업체용 발주서 공유 링크. 비밀번호(9988) 입력 후 조회·이메일 발송."""
+    __tablename__ = "order_view_link"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    order_date = db.Column(db.Date, nullable=True)
+    status_filter = db.Column(db.String(20), default='대기')
+    category_filter = db.Column(db.String(50), default='전체')
+    product_q = db.Column(db.String(200), nullable=True)
+    selected_items = db.Column(db.Text, nullable=True)  # JSON: [{product_name, total_quantity, supply_price, tax_type, line_amount}]
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
 
 class SitePopup(db.Model):

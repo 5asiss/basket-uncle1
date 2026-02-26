@@ -59,6 +59,8 @@ def register_admin_routes(app):
         admin_seller_order_preview,
         admin_seller_send_manual_email,
         admin_seller_send_order_email,
+        admin_email_order_line_status_update,
+        admin_email_order_create_view_link,
         admin_backup_run,
         admin_backup_cron,
         admin_review_delete,
@@ -72,6 +74,9 @@ def register_admin_routes(app):
         admin_product_add,
         admin_product_edit,
         admin_delete,
+        admin_product_end_sale,
+        admin_product_reactivate,
+        admin_product_bulk_sale_action,
         admin_category_add,
         admin_category_edit,
         admin_category_move,
@@ -81,6 +86,7 @@ def register_admin_routes(app):
         admin_orders_sales_excel,
         admin_orders_sales_detail_image,
         admin_orders_delivery_summary_image,
+        admin_orders_delivery_summary_excel,
         admin_orders_sales_summary_excel,
         admin_orders_sales_summary_image,
         admin_orders_settlement_detail_excel,
@@ -170,6 +176,8 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/seller/order_preview', view_func=login_required(admin_seller_order_preview))
     admin_bp.add_url_rule('/admin/seller/send_manual_email', view_func=login_required(admin_seller_send_manual_email), methods=['POST'])
     admin_bp.add_url_rule('/admin/seller/send_order_email', view_func=login_required(admin_seller_send_order_email), methods=['POST'])
+    admin_bp.add_url_rule('/admin/email_order/line_status', view_func=login_required(admin_email_order_line_status_update), methods=['POST'])
+    admin_bp.add_url_rule('/admin/email_order/create_view_link', view_func=login_required(admin_email_order_create_view_link), methods=['POST'])
 
     # backup
     admin_bp.add_url_rule('/admin/backup/run', view_func=login_required(admin_backup_run), methods=['POST'])
@@ -192,6 +200,9 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/add', view_func=login_required(admin_product_add), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/edit/<int:pid>', view_func=login_required(admin_product_edit), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/delete/<int:pid>', view_func=login_required(admin_delete))
+    admin_bp.add_url_rule('/admin/product/<int:pid>/end_sale', view_func=login_required(admin_product_end_sale), methods=['POST'])
+    admin_bp.add_url_rule('/admin/product/<int:pid>/reactivate', view_func=login_required(admin_product_reactivate), methods=['POST'])
+    admin_bp.add_url_rule('/admin/product/bulk_sale_action', view_func=login_required(admin_product_bulk_sale_action), methods=['POST'])
 
     # category
     admin_bp.add_url_rule('/admin/category/add', view_func=login_required(admin_category_add), methods=['POST'])
@@ -205,6 +216,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/orders/sales_excel', view_func=login_required(admin_orders_sales_excel))
     admin_bp.add_url_rule('/admin/orders/sales_detail_image', view_func=login_required(admin_orders_sales_detail_image))
     admin_bp.add_url_rule('/admin/orders/delivery_summary_image', view_func=login_required(admin_orders_delivery_summary_image))
+    admin_bp.add_url_rule('/admin/orders/delivery_summary_excel', view_func=login_required(admin_orders_delivery_summary_excel))
     admin_bp.add_url_rule('/admin/orders/sales_summary_excel', view_func=login_required(admin_orders_sales_summary_excel))
     admin_bp.add_url_rule('/admin/orders/sales_summary_image', view_func=login_required(admin_orders_sales_summary_image))
     admin_bp.add_url_rule('/admin/orders/settlement_detail_excel', view_func=login_required(admin_orders_settlement_detail_excel))
