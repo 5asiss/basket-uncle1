@@ -264,10 +264,24 @@ def _polygon_point_as_xy(polygon, point_lat, point_lng):
 
 
 def _geocode_address(address_str):
-    """주소 문자열을 (lat, lng)로 변환. Nominatim 시도 후 실패 시 Photon(무료) 폴백."""
+    """주소 문자열을 (lat, lng)로 변환. Nominatim 시도 후 실패 시 Photon(무료) 폴백. 결과는 주소별 캐시."""
     if not address_str or not address_str.strip():
         return None
     addr = address_str.strip()
+    # 간단 인메모리 캐시 (최대 500개, 동일 주소 재요청 시 즉시 반환)
+    if not hasattr(_geocode_address, '_cache'):
+        _geocode_address._cache = {}
+        _geocode_address._cache_keys = []
+    _cache, _keys = _geocode_address._cache, _geocode_address._cache_keys
+    if addr in _cache:
+        return _cache[addr]
+    _max = 500
+    if len(_keys) >= _max:
+        for k in _keys[:_max // 4]:
+            _cache.pop(k, None)
+        _geocode_address._cache_keys = _keys[_max // 4:]
+        _keys = _geocode_address._cache_keys
+
     # 한국 주소는 국가명 포함 시 성공률 상승
     q_nominatim = addr if ("대한민국" in addr or "한국" in addr or "South Korea" in addr) else (addr + " 대한민국")
 
@@ -282,7 +296,10 @@ def _geocode_address(address_str):
         if r.status_code == 200:
             data = r.json()
             if data and len(data) > 0 and data[0].get("lat") and data[0].get("lon"):
-                return (float(data[0]["lat"]), float(data[0]["lon"]))
+                result = (float(data[0]["lat"]), float(data[0]["lon"]))
+                _cache[addr] = result
+                _geocode_address._cache_keys.append(addr)
+                return result
     except Exception:
         pass
 
@@ -300,9 +317,14 @@ def _geocode_address(address_str):
             if features:
                 coords = features[0].get("geometry", {}).get("coordinates")
                 if coords and len(coords) >= 2:
-                    return (float(coords[1]), float(coords[0]))
+                    result = (float(coords[1]), float(coords[0]))
+                    _cache[addr] = result
+                    _geocode_address._cache_keys.append(addr)
+                    return result
     except Exception:
         pass
+    _cache[addr] = None
+    _geocode_address._cache_keys.append(addr)
     return None
 
 
@@ -932,7 +954,6 @@ HEADER_HTML = """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <script src="https://js.tosspayments.com/v1/payment"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -4864,6 +4885,13 @@ def product_detail(pid):
     )
     category_delivery_desc = get_category_delivery_description(p.category) if p.category else "배송료 문의"
 
+    # 동일 카테고리 상품 (현재 상품 제외, 판매중·재고 있음 우선, 최대 8개)
+    same_category_products = Product.query.filter(
+        Product.category == p.category,
+        Product.id != pid,
+        Product.is_active == True,
+    ).order_by(Product.stock.desc(), Product.id.desc()).limit(8).all()
+
     content = """
     <div class="max-w-5xl mx-auto px-0 md:px-6 pb-16 font-black text-left">
         
@@ -4940,6 +4968,29 @@ def product_detail(pid):
                 </button>
                 {% else %}
                 <button class="w-full bg-gray-200 text-gray-400 py-5 md:py-7 rounded-[2rem] font-black text-xl md:text-2xl cursor-not-allowed italic" disabled>판매가 마감되었습니다</button>
+                {% endif %}
+
+                {% if same_category_products %}
+                <div class="mt-12 pt-10 border-t border-gray-100">
+                    <h3 class="text-base md:text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
+                        <span class="w-1.5 h-6 bg-teal-500 rounded-full"></span> 같은 카테고리 상품
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                        {% for cp in same_category_products[:4] %}
+                        <a href="/product/{{ cp.id }}" class="group block bg-white rounded-2xl border border-gray-100 p-3 shadow-sm hover:shadow-lg hover:border-teal-200 transition-all text-left">
+                            <div class="aspect-square rounded-xl overflow-hidden bg-gray-50 mb-2">
+                                <img src="{{ cp.image_url or 'https://placehold.co/400x400/f1f5f9/94a3b8?text=상품' }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" onerror="this.src='https://placehold.co/400x400/f1f5f9/94a3b8?text=상품'">
+                            </div>
+                            <p class="text-[11px] font-black text-gray-800 truncate leading-tight">{{ cp.name }}</p>
+                            <p class="text-[10px] font-bold text-teal-600 mt-0.5">{{ "{:,}".format(cp.price) }}원</p>
+                        </a>
+                        {% endfor %}
+                    </div>
+                    <a href="/category/{{ p.category }}" class="inline-flex items-center gap-2 text-teal-600 font-black text-sm hover:text-teal-700 transition">
+                        <span>{{ p.category }} 전체 보기</span>
+                        <i class="fas fa-chevron-right text-[10px]"></i>
+                    </a>
+                </div>
                 {% endif %}
             </div>
         </div>
@@ -5193,6 +5244,7 @@ def product_detail(pid):
                                   p=p, is_expired=is_expired, detail_images=detail_images, 
                                   cat_info=cat_info, latest_all=latest_all, 
                                   keyword_recommends=keyword_recommends, 
+                                  same_category_products=same_category_products,
                                   product_reviews=product_reviews,
                                   reviews_total_count=reviews_total_count,
                                   reviews_has_more=reviews_has_more,
@@ -7506,9 +7558,9 @@ def order_payment():
         session['order_address_detail'] = order_address_detail if order_address else (current_user.address_detail or "")
         session['order_entrance_pw'] = order_entrance_pw if order_address else (current_user.entrance_pw or "")
         session['save_address_to_profile'] = save_address_to_profile
-        coords = _geocode_address(effective_address)
-        session['delivery_lat'] = float(coords[0]) if coords else None
-        session['delivery_lng'] = float(coords[1]) if coords else None
+        # 지오코딩은 결제 완료 시(payment_success)에 수행. 여기서 호출 시 외부 API 대기로 결제 페이지 진입이 느려짐.
+        session['delivery_lat'] = None
+        session['delivery_lng'] = None
         subtotal = sum(i.price * i.quantity for i in items)
         cat_price_sums = {}
         for i in items:
@@ -7588,6 +7640,7 @@ def order_payment():
         </p>
     </div>
 
+    <script src="https://js.tosspayments.com/v1/payment"></script>
     <script>
     // 1. 토스페이먼츠 초기화
     var tossPayments = TossPayments("{TOSS_CLIENT_KEY}");
@@ -10519,6 +10572,49 @@ def admin_dashboard():
                     </div>
                 </div>
                 {% endif %}
+                {% if email_order_date and seller_request_categories %}
+                <div class="mb-8">
+                    <h4 class="text-sm font-black text-gray-800 mb-3">카테고리별 발주 상세 <span class="text-[10px] font-normal text-gray-500">(판매일자: {{ email_order_date.strftime('%Y-%m-%d') }})</span></h4>
+                    <p class="text-[10px] text-gray-500 mb-4">카테고리별로 선택 · 판매일자 · 품명 · 수량 · 공급가 · 면세/과세 · 합계액을 확인할 수 있습니다.</p>
+                    {% for c in seller_request_categories %}
+                    {% if email_order_lines_by_category[c.id] %}
+                    <div class="mb-6">
+                        <h5 class="text-xs font-black text-teal-800 mb-2">{{ c.name }}</h5>
+                        <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
+                            <table class="w-full text-left min-w-[520px] text-[11px] font-bold border-collapse">
+                                <thead class="bg-teal-700 text-white">
+                                    <tr>
+                                        <th class="p-2 border border-teal-600 w-10 text-center">선택</th>
+                                        <th class="p-2 border border-teal-600 w-24 text-center">판매일자</th>
+                                        <th class="p-2 border border-teal-600">품명</th>
+                                        <th class="p-2 border border-teal-600 w-16 text-center">수량</th>
+                                        <th class="p-2 border border-teal-600 w-24 text-right">공급가</th>
+                                        <th class="p-2 border border-teal-600 w-20 text-center">면세/과세</th>
+                                        <th class="p-2 border border-teal-600 w-28 text-right">합계액</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in email_order_lines_by_category[c.id] %}
+                                    <tr class="border-b border-gray-100">
+                                        <td class="p-2 text-center">
+                                            <input type="checkbox" class="email-order-cat-row rounded" data-name="{{ row.product_name|e }}" data-qty="{{ row.quantity }}" data-supply="{{ row.supply_price }}" data-tax="{{ row.tax_type }}" data-amount="{{ row.line_amount }}">
+                                        </td>
+                                        <td class="p-2 text-center">{{ row.sale_dt.strftime('%Y-%m-%d') if row.sale_dt else '-' }}</td>
+                                        <td class="p-2">{{ row.product_name }}</td>
+                                        <td class="p-2 text-center">{{ row.quantity }}</td>
+                                        <td class="p-2 text-right">{{ "{:,}".format(row.supply_price) }}원</td>
+                                        <td class="p-2 text-center">{{ '면세' if row.tax_type == '면세' else '과세' }}</td>
+                                        <td class="p-2 text-right font-black">{{ "{:,}".format(row.line_amount) }}원</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                {% endif %}
                 <div class="mb-8">
                     <h4 class="text-sm font-black text-gray-800 mb-3">조회결과 상세 <span class="text-[10px] font-normal text-gray-500">(총 {{ email_order_filtered_lines|length }}건)</span></h4>
                     <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
@@ -13293,6 +13389,7 @@ def admin_product_bulk_upload():
             deadline_val = _cell_str(row.get('마감일시', ''))
             deadline = None
             if deadline_val:
+                deadline_val = deadline_val.strip().replace(',', ' ')[:19]  # 엑셀 "2026-02-28,23:59" 형태 지원
                 for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
                     try:
                         deadline = datetime.strptime(deadline_val.strip()[:19], fmt)
@@ -13311,18 +13408,37 @@ def admin_product_bulk_upload():
                 image_url = main_url or ""
                 detail_image_url = ",".join(detail_urls) if detail_urls else (main_url or "")
             else:
-                main_img = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
-                main_img = _bulk_image_filename_only(main_img)
-                detail_imgs = _cell_str(row.get('상세이미지파일명', ''))
-                if main_img and not _bulk_is_placeholder_image(main_img):
-                    image_url = f"/static/uploads/{main_img.lstrip('/')}"
-                if detail_imgs and not _bulk_is_placeholder_image(detail_imgs):
-                    parts = [p.strip().lstrip('/') for p in detail_imgs.split(',') if p.strip() and not _bulk_is_placeholder_image(p.strip())]
-                    parts = [_bulk_image_filename_only(p) for p in parts if _bulk_image_filename_only(p)]
-                    if parts:
-                        detail_image_url = ",".join("/static/uploads/" + p for p in parts)
+                main_img_raw = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
+                # 엑셀에 전체 경로가 있으면(예: "C:\...\1.jpg") 해당 파일을 복사해 사용
+                image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
+                if not image_url:
+                    main_img = _bulk_image_filename_only(main_img_raw)
+                    if main_img and not _bulk_is_placeholder_image(main_img):
+                        image_url = f"/static/uploads/{main_img.lstrip('/')}"
+                # 대표가 전체 경로면 같은 폴더의 2.jpg~10.jpg를 상세이미지로 자동 수집
+                path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
+                is_abs = path_for_same_folder and ((len(path_for_same_folder) >= 2 and path_for_same_folder[1] == ':') or path_for_same_folder.startswith('/') or '\\' in path_for_same_folder)
+                if is_abs and os.path.isfile(path_for_same_folder):
+                    detail_from_folder = _bulk_copy_detail_2_to_10_from_same_folder(path_for_same_folder, upload_dir)
+                    if detail_from_folder:
+                        detail_image_url = ",".join(detail_from_folder)
                 if not detail_image_url:
-                    detail_image_url = image_url
+                    detail_imgs_raw = _cell_str(row.get('상세이미지파일명', ''))
+                    if detail_imgs_raw and not _bulk_is_placeholder_image(detail_imgs_raw):
+                        parts = [p.strip().lstrip('/').strip('"').strip("'") for p in detail_imgs_raw.split(',') if p.strip() and not _bulk_is_placeholder_image(p.strip())]
+                        detail_parts = []
+                        for p in parts:
+                            u = _bulk_try_copy_from_absolute_path(p, upload_dir)
+                            if u:
+                                detail_parts.append(u)
+                            else:
+                                fn = _bulk_image_filename_only(p)
+                                if fn:
+                                    detail_parts.append(f"/static/uploads/{fn}")
+                        if detail_parts:
+                            detail_image_url = ",".join(detail_parts)
+                if not detail_image_url:
+                    detail_image_url = image_url or ""
             new_p = Product(
                 category=cat_name,
                 name=name_val,
@@ -13385,6 +13501,66 @@ def _bulk_image_filename_only(s):
     if '/' in t or '\\' in t:
         return os.path.basename(t)
     return t
+
+
+def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
+    """엑셀 셀에 로컬 전체 경로가 있으면 해당 파일을 upload_dir에 복사하고 URL 반환. 없거나 실패 시 None."""
+    if not raw_value or not isinstance(raw_value, str):
+        return None
+    import shutil
+    path = raw_value.strip().strip('"').strip("'").strip()
+    if not path:
+        return None
+    # 절대 경로로 보이는 경우만 시도 (Windows C:\ 또는 \, Unix /)
+    is_absolute = (len(path) >= 2 and path[1] == ':') or path.startswith('/') or path.startswith('\\') or ('\\' in path and path[0].isalpha())
+    if not is_absolute or not os.path.isfile(path):
+        return None
+    ext = (os.path.splitext(path)[1] or '.jpg').lower()
+    if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
+        ext = '.jpg'
+    new_name = f"bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+    dest = os.path.join(os.path.abspath(upload_dir), new_name)
+    try:
+        shutil.copy2(path, dest)
+        if os.path.isfile(dest):
+            return f"/static/uploads/{new_name}"
+    except Exception:
+        pass
+    return None
+
+
+def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
+    """대표이미지 전체 경로(예: C:\\...\\1.jpg) 기준으로 같은 폴더의 2.jpg~10.jpg를 복사해 상세이미지 URL 목록 반환."""
+    if not main_absolute_path or not isinstance(main_absolute_path, str):
+        return []
+    import shutil
+    path = main_absolute_path.strip().strip('"').strip("'").strip()
+    if not path or not os.path.isfile(path):
+        return []
+    dir_path = os.path.dirname(path)
+    upload_abs = os.path.abspath(upload_dir)
+    os.makedirs(upload_abs, exist_ok=True)
+    exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+    urls = []
+    for num in range(2, 11):
+        candidate = None
+        for e in exts:
+            p = os.path.join(dir_path, str(num) + e)
+            if os.path.isfile(p):
+                candidate = p
+                break
+        if not candidate:
+            continue
+        ext = os.path.splitext(candidate)[1].lower()
+        new_name = f"bulk_{num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = os.path.join(upload_abs, new_name)
+        try:
+            shutil.copy2(candidate, dest)
+            if os.path.isfile(dest):
+                urls.append(f"/static/uploads/{new_name}")
+        except Exception:
+            pass
+    return urls
 
 
 def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
@@ -13751,7 +13927,7 @@ def admin_email_setup():
 
 
 def _get_email_order_lines(category_name, order_date):
-    """해당 카테고리·일자의 발주 품목 목록 (결제 품목넘버별 1건). 판매시각, 품명, 수량, 금액합계, VAT, 발주상태."""
+    """해당 카테고리·일자의 발주 품목 목록 (결제 품목넘버별 1건). 판매시각, 품명, 수량, 금액합계, VAT, 발주상태, 공급가, 합계액."""
     start_dt = datetime.combine(order_date, datetime.min.time())
     end_dt = datetime.combine(order_date, datetime.max.time().replace(microsecond=0))
     items = db.session.query(OrderItem, Order, Settlement).join(
@@ -13774,6 +13950,10 @@ def _get_email_order_lines(category_name, order_date):
         settlement_no = (st.settlement_no if st else None) or ("N" + str(oi.id).zfill(10))
         total = oi.price * oi.quantity
         vat_label = (getattr(oi, 'tax_type', None) or '과세') == '면세' and '면세' or '과세'
+        p = Product.query.get(oi.product_id) if oi.product_id else None
+        supply_price = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else 0
+        tax_type = (getattr(p, 'tax_type', None) or '과세').strip() if p else (getattr(oi, 'tax_type', None) or '과세')
+        line_amount = (supply_price * oi.quantity) if tax_type == '면세' else int(round(supply_price * 1.1 * oi.quantity))
         result.append({
             'order_item_id': oi.id,
             'sale_dt': sale_dt,
@@ -13783,6 +13963,9 @@ def _get_email_order_lines(category_name, order_date):
             'amount_total': total,
             'vat_label': vat_label,
             'status': status_map.get(oi.id, '대기'),
+            'supply_price': supply_price,
+            'tax_type': tax_type,
+            'line_amount': line_amount,
         })
     return result
 
