@@ -90,7 +90,7 @@ cloudinary_url = os.getenv("CLOUDINARY_URL", "").strip()
 if cloudinary_url:
     cloudinary.config(cloudinary_url=cloudinary_url)
 
-from utils import send_mail, run_backup, run_product_stock_reset, send_alimtalk_order_event, send_alimtalk_welcome
+from utils import send_mail, send_mail_with_attachment, run_backup, run_product_stock_reset, send_alimtalk_order_event, send_alimtalk_welcome
 
 # PWA: manifest (역할별 이름: 소비자=바구니삼촌, 관리자=바삼관리자, 기사=바삼배송관리)
 @app.route('/manifest.json')
@@ -9421,6 +9421,42 @@ def admin_dashboard():
                     r['category_name'] = c.name
                     email_order_detail_lines.append(r)
 
+    # 발주관리 탭: 품목 수량별 도매업체 발주 정보 (이미지 생성·이메일 발송)
+    purchase_order_start = None
+    purchase_order_end = None
+    purchase_order_category = '전체'
+    purchase_order_rows = []
+    purchase_order_categories = []
+    if tab == 'purchase_order' and is_master:
+        purchase_order_categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
+        po_start_str = request.args.get('po_start', '').strip() or (now.strftime('%Y-%m-%d') + ' 00:00')
+        po_end_str = request.args.get('po_end', '').strip() or (now.strftime('%Y-%m-%d') + ' 23:59')
+        purchase_order_category = request.args.get('po_category', '전체').strip() or '전체'
+        try:
+            purchase_order_start = datetime.strptime(po_start_str.replace('T', ' '), '%Y-%m-%d %H:%M')
+        except Exception:
+            purchase_order_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        try:
+            purchase_order_end = datetime.strptime(po_end_str.replace('T', ' '), '%Y-%m-%d %H:%M')
+        except Exception:
+            purchase_order_end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        from collections import defaultdict
+        q_oi = db.session.query(OrderItem.product_category, OrderItem.product_name, OrderItem.quantity).join(
+            Order, OrderItem.order_id == Order.id
+        ).filter(
+            Order.status != '결제취소',
+            OrderItem.cancelled == False,
+            Order.created_at >= purchase_order_start,
+            Order.created_at <= purchase_order_end
+        )
+        if purchase_order_category and purchase_order_category != '전체':
+            q_oi = q_oi.filter(OrderItem.product_category == purchase_order_category)
+        rows_oi = q_oi.all()
+        agg_po = defaultdict(int)
+        for cat, pname, qty in rows_oi:
+            agg_po[(cat or '', pname or '')] += int(qty or 0)
+        purchase_order_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v} for k, v in sorted(agg_po.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))]
+
     # 통계(페이지뷰) 탭: 조회수·주문·상품·회원 등
     stats_page_views_today = stats_page_views_week = stats_page_views_total = {'main': 0, 'category': 0, 'product': 0, 'cart': 0}
     stats_orders_today = stats_orders_week = stats_orders_total = 0
@@ -9534,6 +9570,7 @@ def admin_dashboard():
                 <span class="text-[10px] text-amber-600 font-black uppercase w-28 shrink-0">1. 물류·정산</span>
                 {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
                 <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
                 <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
@@ -9585,6 +9622,56 @@ def admin_dashboard():
                     <p>· <b>필수</b>: 카테고리, 상품명, 가격 · 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
                     <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일/+2일/+3일/당일배송), 규격, 공급가, 재고, 마감일시, 재고초기화시각, 초기화수량, 세금(과세/면세). 비어 있으면 기본값 적용.</p>
                 </div>
+            </div>
+        {% endif %}
+        {% if tab == 'purchase_order' %}
+            <div class="mb-8 p-6 rounded-[2rem] border-2 border-indigo-200 bg-indigo-50/80 text-left">
+                <p class="font-black text-indigo-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📋</span> 발주관리 — 품목 수량별 도매업체 발주 정보 (이미지로 전송)</p>
+                <p class="text-[11px] text-gray-700 mb-4">시간대를 지정한 뒤 품목·수량 집계를 이미지로 만들고, 수신 이메일만 입력하면 바로 발송할 수 있습니다.</p>
+                <form action="/admin?tab=purchase_order" method="GET" class="flex flex-wrap items-end gap-4 p-5 bg-white rounded-2xl border border-indigo-100 mb-6">
+                    <input type="hidden" name="tab" value="purchase_order">
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-600 mb-1">시작 일시</label>
+                        <input type="datetime-local" name="po_start" value="{{ (purchase_order_start.strftime('%Y-%m-%dT%H:%M') if purchase_order_start else '') }}" class="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-600 mb-1">종료 일시</label>
+                        <input type="datetime-local" name="po_end" value="{{ (purchase_order_end.strftime('%Y-%m-%dT%H:%M') if purchase_order_end else '') }}" class="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-600 mb-1">카테고리</label>
+                        <select name="po_category" class="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                            <option value="전체" {% if purchase_order_category == '전체' %}selected{% endif %}>전체</option>
+                            {% for c in purchase_order_categories %}<option value="{{ c.name }}" {% if purchase_order_category == c.name %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-black text-xs hover:bg-indigo-700">조회</button>
+                </form>
+                {% if purchase_order_rows %}
+                <div class="bg-white rounded-2xl border border-indigo-100 overflow-hidden mb-6">
+                    <h4 class="text-sm font-black text-gray-800 p-4 border-b border-gray-100">품목 수량별 집계 ({{ purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else '' }} ~ {{ purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else '' }})</h4>
+                    <table class="w-full text-left text-[11px]">
+                        <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-3">카테고리</th><th class="p-3">상품명</th><th class="p-3 text-right">수량</th></tr></thead>
+                        <tbody>
+                            {% for row in purchase_order_rows %}
+                            <tr class="border-b border-gray-50"><td class="p-3">{{ row.category }}</td><td class="p-3 font-bold">{{ row.product_name }}</td><td class="p-3 text-right font-black">{{ row.total_quantity }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <form id="po-send-form" action="/admin/purchase_order/send_image" method="POST" class="flex flex-wrap items-end gap-4 p-5 bg-white rounded-2xl border border-indigo-100">
+                    <input type="hidden" name="po_start" value="{{ purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else '' }}">
+                    <input type="hidden" name="po_end" value="{{ purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else '' }}">
+                    <input type="hidden" name="po_category" value="{{ purchase_order_category }}">
+                    <div class="flex-1 min-w-[240px]">
+                        <label class="block text-[10px] font-black text-gray-600 mb-1">수신 이메일</label>
+                        <input type="email" name="to_email" required placeholder="도매업체 이메일 주소" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                    </div>
+                    <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-teal-700">이미지 생성 후 이메일 발송</button>
+                </form>
+                {% else %}
+                <p class="text-gray-500 text-sm font-bold py-4">위에서 시작·종료 일시와 카테고리를 선택한 뒤 [조회]를 누르면 해당 구간의 품목 수량 집계가 표시됩니다. 이메일을 입력하고 [이미지 생성 후 이메일 발송]으로 도매업체에 바로 보낼 수 있습니다.</p>
+                {% endif %}
             </div>
         {% endif %}
         {% if tab == 'products' %}
@@ -12875,6 +12962,7 @@ def admin_dashboard():
                 <span class="text-[10px] text-amber-600 font-black uppercase w-28 shrink-0">1. 물류·정산</span>
                 {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
                 <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
                 <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
@@ -14201,6 +14289,94 @@ def admin_seller_send_manual_email():
     except Exception as e:
         return jsonify({"success": False, "message": str(e) or "이메일 발송 실패."}), 500
     return jsonify({"success": True, "message": "이메일을 발송했습니다."})
+
+
+@login_required
+def admin_purchase_order_send_image():
+    """발주관리: 품목 수량별 집계를 이미지로 만들어 지정 이메일로 발송."""
+    if not current_user.is_admin:
+        flash("권한이 없습니다.")
+        return redirect('/admin')
+    to_email = (request.form.get('to_email') or '').strip()
+    if not to_email or '@' not in to_email:
+        flash("수신 이메일 주소를 입력해 주세요.")
+        return redirect('/admin?tab=purchase_order')
+    po_start_str = (request.form.get('po_start') or '').strip()
+    po_end_str = (request.form.get('po_end') or '').strip()
+    po_category = (request.form.get('po_category') or '전체').strip() or '전체'
+    now = datetime.now()
+    try:
+        start_dt = datetime.strptime(po_start_str.replace('T', ' '), '%Y-%m-%d %H:%M') if po_start_str else now.replace(hour=0, minute=0, second=0, microsecond=0)
+    except Exception:
+        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        end_dt = datetime.strptime(po_end_str.replace('T', ' '), '%Y-%m-%d %H:%M') if po_end_str else now.replace(hour=23, minute=59, second=59, microsecond=0)
+    except Exception:
+        end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    from collections import defaultdict
+    q_oi = db.session.query(OrderItem.product_category, OrderItem.product_name, OrderItem.quantity).join(
+        Order, OrderItem.order_id == Order.id
+    ).filter(
+        Order.status != '결제취소',
+        OrderItem.cancelled == False,
+        Order.created_at >= start_dt,
+        Order.created_at <= end_dt
+    )
+    if po_category and po_category != '전체':
+        q_oi = q_oi.filter(OrderItem.product_category == po_category)
+    rows_oi = q_oi.all()
+    agg_po = defaultdict(int)
+    for cat, pname, qty in rows_oi:
+        agg_po[(cat or '', pname or '')] += int(qty or 0)
+    purchase_order_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v} for k, v in sorted(agg_po.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))]
+    if not purchase_order_rows:
+        flash("해당 구간에 품목이 없어 이미지를 만들 수 없습니다.")
+        return redirect('/admin?tab=purchase_order')
+    from PIL import ImageDraw
+    font, font_header = _pil_font_for_table(14)
+    headers = ['카테고리', '상품명', '수량']
+    row_cells_list = [[str(r.get('category', '')), str(r.get('product_name', '')), str(r.get('total_quantity', ''))] for r in purchase_order_rows]
+    col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font)
+    cell_h = 38
+    img_w = sum(col_w)
+    img_h = cell_h * (1 + len(purchase_order_rows))
+    img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    y = 0
+    for i, h in enumerate(headers):
+        x = sum(col_w[:i])
+        draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(0, 0, 0), fill=(55, 65, 81))
+        draw.text((x + 8, y + 10), h, fill=(255, 255, 255), font=font_header)
+    y += cell_h
+    for cells in row_cells_list:
+        for i, cell in enumerate(cells):
+            x = sum(col_w[:i])
+            draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(200, 200, 200))
+            draw.text((x + 8, y + 10), cell, fill=(0, 0, 0), font=font)
+        y += cell_h
+    out = BytesIO()
+    img.save(out, format='PNG')
+    png_bytes = out.getvalue()
+    filename = f"발주_품목수량_{start_dt.strftime('%Y%m%d_%H%M')}_{end_dt.strftime('%H%M')}.png"
+    subject = f"[바구니삼촌] 발주 품목 수량 ({start_dt.strftime('%Y-%m-%d %H:%M')} ~ {end_dt.strftime('%Y-%m-%d %H:%M')})"
+    body = f"""안녕하세요, 바구니삼촌입니다.
+
+아래 기간의 품목·수량 집계를 이미지로 첨부하여 보내드립니다.
+
+기간: {start_dt.strftime('%Y-%m-%d %H:%M')} ~ {end_dt.strftime('%Y-%m-%d %H:%M')}
+카테고리: {po_category}
+
+첨부 이미지를 확인해 주시기 바랍니다.
+"""
+    try:
+        send_mail_with_attachment(to_email, subject, body, filename, png_bytes, "image/png")
+    except Exception as e:
+        flash("이메일 발송 실패: " + (str(e) or "이메일 설정을 확인해 주세요."))
+        return redirect('/admin?tab=purchase_order')
+    flash(f"발주 이미지를 {to_email} 로 발송했습니다.")
+    from urllib.parse import urlencode
+    qs = urlencode({'tab': 'purchase_order', 'po_start': po_start_str or start_dt.strftime('%Y-%m-%d %H:%M'), 'po_end': po_end_str or end_dt.strftime('%Y-%m-%d %H:%M'), 'po_category': po_category})
+    return redirect('/admin?' + qs)
 
 
 @login_required

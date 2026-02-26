@@ -514,6 +514,33 @@ def send_mail(to_email, subject, body_plain):
         smtp.sendmail(DEFAULT_MAIL_FROM, [to_email], msg.as_string())
 
 
+def send_mail_with_attachment(to_email, subject, body_plain, attachment_filename, attachment_bytes, attachment_mimetype="image/png"):
+    """SMTP로 이메일 발송 (첨부파일 1개). attachment_bytes: 바이트. 실패 시 예외."""
+    if not to_email or not (MAIL_SERVER and MAIL_USERNAME and MAIL_PASSWORD):
+        raise ValueError("이메일 설정이 되어 있지 않습니다.")
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.base import MIMEBase
+    from email import encoders
+    from email.utils import formataddr
+    msg = MIMEMultipart()
+    msg["Subject"] = subject
+    msg["From"] = formataddr(("바구니삼촌", DEFAULT_MAIL_FROM))
+    msg["To"] = to_email
+    msg.attach(MIMEText(body_plain, "plain", "utf-8"))
+    part = MIMEBase("application", "octet-stream")
+    part.set_payload(attachment_bytes)
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", "attachment", filename=("utf-8", "", attachment_filename))
+    msg.attach(part)
+    with smtplib.SMTP(MAIL_SERVER, MAIL_PORT) as smtp:
+        if MAIL_USE_TLS:
+            smtp.starttls()
+        smtp.login(MAIL_USERNAME, MAIL_PASSWORD)
+        smtp.sendmail(DEFAULT_MAIL_FROM, [to_email], msg.as_string())
+
+
 def _sqlite_path_from_uri(uri, app_root):
     """SQLite URI에서 실제 파일 경로 반환. 없으면 None."""
     if not uri or "sqlite" not in uri.lower():
