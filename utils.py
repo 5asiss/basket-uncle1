@@ -270,8 +270,38 @@ def run_reengagement_alimtalk(weeks=2, dry_run=True, limit=100, coupon_code="WEL
 def send_alimtalk_welcome(phone, customer_name, coupon_code="WELCOME2WEEKS"):
     """
     신규 회원 환영 알림톡 발송용 헬퍼.
-    내부적으로 기존 쿠폰 알림톡 함수(send_kakao_alimtalk)를 재사용한다.
+    1순위: 솔라피 WELCOME 템플릿(SOLAPI_KAKAO_TEMPLATE_ID_WELCOME) 사용.
+    2순위: 기존 재방문 쿠폰 템플릿(send_kakao_alimtalk) 재사용.
     """
+    phone_clean = re.sub(r"\D", "", str(phone).strip())
+    if len(phone_clean) < 10:
+        return False, "전화번호 형식이 올바르지 않습니다."
+    # 1) 솔라피 WELCOME 템플릿이 설정된 경우 우선 사용
+    if SOLAPI_API_KEY and SOLAPI_API_SECRET and SOLAPI_KAKAO_PF_ID and SOLAPI_KAKAO_TEMPLATE_ID_WELCOME:
+        variables = {"#{고객명}": (customer_name or "고객")[:20], "#{쿠폰}": (coupon_code or "WELCOME2WEEKS")[:20]}
+        ok, err = send_solapi_kakao_alimtalk(
+            phone_clean,
+            SOLAPI_KAKAO_TEMPLATE_ID_WELCOME,
+            variables=variables,
+        )
+        try:
+            from flask import current_app
+            with current_app.app_context():
+                from models import MarketingAlimtalkLog
+                log = MarketingAlimtalkLog(
+                    phone=phone_clean,
+                    customer_name=customer_name,
+                    template_code=SOLAPI_KAKAO_TEMPLATE_ID_WELCOME,
+                    coupon_code=(coupon_code or "WELCOME2WEEKS"),
+                    success=ok,
+                    memo=err,
+                )
+                db.session.add(log)
+                db.session.commit()
+        except Exception:
+            pass
+        return ok, err
+    # 2) 솔라피 WELCOME 미설정 시, 기존 쿠폰 알림톡 로직 사용
     return send_kakao_alimtalk(phone, customer_name, coupon_code=coupon_code)
 
 

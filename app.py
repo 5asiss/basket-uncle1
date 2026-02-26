@@ -3,6 +3,7 @@ import requests
 from dotenv import load_dotenv
 import base64
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from io import BytesIO
 import re
 import json
@@ -19,18 +20,19 @@ from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import text, or_, func
 from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint 가져오기
+import cloudinary
+import cloudinary.uploader
 load_dotenv()
+
+# 한국 시간(KST) 기준 현재 시각 (홈/템플릿 표시 및 마감 비교용)
+KST = ZoneInfo("Asia/Seoul")
+def now_kst():
+    """DB와 비교 가능한 naive datetime (한국 시간 기준)."""
+    return datetime.now(KST).replace(tzinfo=None)
 
 # --------------------------------------------------------------------------------
 # 1. 초기 설정 및 Flask 인스턴스 생성
 # --------------------------------------------------------------------------------
-# --- 수정 전 기존 코드 ---
-# app = Flask(__name__)
-# app.register_blueprint(logi_bp) 
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///direct_trade_mall.db'
-# db = SQLAlchemy(app)
-
-# --- 수정 후 (이 부분으로 교체하세요) ---
 from delivery_system import logi_bp, db_delivery
 
 app = Flask(__name__)
@@ -39,11 +41,8 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_fallback_key")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 
-# 1. 모든 DB 경로 설정
+# 1. 모든 DB 경로 설정 (단일 DB 사용)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///direct_trade_mall.db")
-app.config['SQLALCHEMY_BINDS'] = {
-    'delivery': os.getenv("DELIVERY_DATABASE_URL", "sqlite:///delivery.db")
-}
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # 2. DB 연결 (공백 제거 버전)
@@ -81,9 +80,15 @@ from config import (
     KAKAO_MAP_APP_KEY, KAKAO_REST_API_KEY, MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_USE_TLS, DEFAULT_MAIL_FROM,
     GITHUB_BACKUP_TOKEN, GITHUB_BACKUP_REPO,
 )
+# 로컬 업로드 폴더 (Cloudinary 미사용 시만 활용)
 UPLOAD_FOLDER = os.path.join("static", "uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Cloudinary 설정 (CLOUDINARY_URL 환경변수 기반)
+cloudinary_url = os.getenv("CLOUDINARY_URL", "").strip()
+if cloudinary_url:
+    cloudinary.config(cloudinary_url=cloudinary_url)
 
 from utils import send_mail, run_backup, run_product_stock_reset, send_alimtalk_order_event, send_alimtalk_welcome
 
@@ -101,10 +106,10 @@ def pwa_manifest():
     else:
         name, short_name = '바구니삼촌', '바구니삼촌'
         start_url = base + '/'
-    # PWA 로고: static/logo/icon-192.png, icon-512.png 있으면 사용, 없으면 side1.jpg
+    # PWA 로고: static/logo/icon-192.png, icon-512.png 있으면 사용, 없으면 sede1roding.png
     logo_dir = os.path.join(app.root_path, app.static_folder or 'static', 'logo')
-    icon_192 = base + '/static/logo/icon-192.png' if os.path.isfile(os.path.join(logo_dir, 'icon-192.png')) else base + '/static/logo/side1.jpg'
-    icon_512 = base + '/static/logo/icon-512.png' if os.path.isfile(os.path.join(logo_dir, 'icon-512.png')) else base + '/static/logo/side1.jpg'
+    icon_192 = base + '/static/logo/icon-192.png' if os.path.isfile(os.path.join(logo_dir, 'icon-192.png')) else base + '/static/logo/sede1roding.png'
+    icon_512 = base + '/static/logo/icon-512.png' if os.path.isfile(os.path.join(logo_dir, 'icon-512.png')) else base + '/static/logo/sede1roding.png'
     icon_type_192 = 'image/png' if icon_192.endswith('.png') else 'image/jpeg'
     icon_type_512 = 'image/png' if icon_512.endswith('.png') else 'image/jpeg'
     icons = [
@@ -736,13 +741,22 @@ def _is_allowed_image_filename(filename):
     return ext in ALLOWED_IMAGE_EXTENSIONS
 
 def save_uploaded_file(file):
-    """핸드폰 사진 비율 정리(중앙 크롭)·압축(WebP). 모바일 촬영 사진도 동일하게 처리."""
+    """핸드폰 사진 비율 정리(중앙 크롭)·압축(WebP). Cloudinary가 설정되어 있으면 Cloudinary로 업로드."""
     if not file or not getattr(file, 'filename', None) or (file.filename or '').strip() == '':
         return None
     fn = (file.filename or '').strip()
     if not fn or not _is_allowed_image_filename(fn):
         return None
     try:
+        # Cloudinary 우선 사용
+        if cloudinary_url:
+            upload_res = cloudinary.uploader.upload(
+                file,
+                folder="basket-uncle/main",
+                transformation={"width": 800, "height": 800, "crop": "fill"}
+            )
+            return upload_res.get("secure_url") or upload_res.get("url")
+        # Fallback: 로컬 저장
         new_filename = f"uncle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
         img = Image.open(file)
@@ -756,14 +770,21 @@ def save_uploaded_file(file):
 
 
 def save_review_image(file):
-    """리뷰용 이미지 최적화 후 저장 (최대 640px, WebP, uploads/reviews/)"""
+    """리뷰용 이미지 최적화 후 저장 (최대 640px). Cloudinary 설정 시 Cloudinary 사용."""
     if not file or file.filename == '' or not _is_allowed_image_filename(file.filename):
         return None
-    review_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'reviews')
-    os.makedirs(review_folder, exist_ok=True)
-    new_filename = f"review_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
-    save_path = os.path.join(review_folder, new_filename)
     try:
+        if cloudinary_url:
+            upload_res = cloudinary.uploader.upload(
+                file,
+                folder="basket-uncle/reviews",
+                transformation={"width": 640, "height": 640, "crop": "fill"}
+            )
+            return upload_res.get("secure_url") or upload_res.get("url")
+        review_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'reviews')
+        os.makedirs(review_folder, exist_ok=True)
+        new_filename = f"review_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        save_path = os.path.join(review_folder, new_filename)
         img = Image.open(file)
         img = ImageOps.exif_transpose(img)
         size = (640, 640)
@@ -774,14 +795,21 @@ def save_review_image(file):
         return None
 
 def save_board_image(file):
-    """게시판(전국맛집요청 등) 이미지 최적화 저장"""
+    """게시판(전국맛집요청 등) 이미지 최적화 저장. Cloudinary 설정 시 Cloudinary 사용."""
     if not file or file.filename == '' or not _is_allowed_image_filename(file.filename):
         return None
-    board_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'board')
-    os.makedirs(board_folder, exist_ok=True)
-    new_filename = f"board_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
-    save_path = os.path.join(board_folder, new_filename)
     try:
+        if cloudinary_url:
+            upload_res = cloudinary.uploader.upload(
+                file,
+                folder="basket-uncle/board",
+                transformation={"width": 800, "height": 800, "crop": "fill"}
+            )
+            return upload_res.get("secure_url") or upload_res.get("url")
+        board_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'board')
+        os.makedirs(board_folder, exist_ok=True)
+        new_filename = f"board_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        save_path = os.path.join(board_folder, new_filename)
         img = Image.open(file)
         img = ImageOps.exif_transpose(img)
         size = (800, 800)
@@ -818,10 +846,10 @@ HEADER_HTML = """
     <meta name="theme-color" content="#0d9488">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <link rel="apple-touch-icon" href="/static/logo/side1.jpg">
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/logo/side1.jpg">
-    <link rel="apple-touch-icon" sizes="152x152" href="/static/logo/side1.jpg">
-    <link rel="apple-touch-icon" sizes="120x120" href="/static/logo/side1.jpg">
+    <link rel="apple-touch-icon" href="/static/logo/sede1roding.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/logo/sede1roding.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/static/logo/sede1roding.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="/static/logo/sede1roding.png">
 <title>바구니 삼촌 |  basam</title>
 
     <title>바구니삼촌 - 농산물·식자재 배송 신개념 6PL 생활서비스 basam </title>
@@ -841,6 +869,18 @@ HEADER_HTML = """
         }
       };
     </script>
+    {% set _flashes = get_flashed_messages() %}
+    {% if _flashes %}
+    <script>
+      window.addEventListener('load', function() {
+        {% for _m in _flashes %}
+        {% if '로그인되었습니다' in _m or '가입을 환영합니다' in _m %}
+        showToast("{{ _m|replace('\\n', ' ')|replace('\"','\\\"') }}");
+        {% endif %}
+        {% endfor %}
+      });
+    </script>
+    {% endif %}
     <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 <style>
@@ -1927,6 +1967,32 @@ def admin_messages_template():
     return jsonify({"success": True, "message": "템플릿이 저장되었습니다."})
 
 
+@app.route('/admin/solapi/test_send', methods=['POST'])
+@login_required
+def admin_solapi_test_send():
+    """관리자: 솔라피 카카오 알림톡 테스트 1건 발송. JSON: phone, test_type(order_created|delivery_complete|recovery)."""
+    if not getattr(current_user, 'is_admin', False):
+        return jsonify({"success": False, "message": "권한이 없습니다."}), 403
+    data = request.get_json() or {}
+    phone = (data.get('phone') or '').strip().replace('-', '').replace(' ', '')
+    phone = re.sub(r'\D', '', phone)
+    test_type = (data.get('test_type') or 'order_created').strip()
+    if len(phone) < 10:
+        return jsonify({"success": False, "message": "휴대폰 번호를 입력해 주세요."})
+    from utils import send_solapi_kakao_alimtalk, send_alimtalk_order_event, send_kakao_alimtalk
+    if test_type == 'order_created':
+        ok, err = send_alimtalk_order_event('order_created', phone, '테스트고객', 'TEST_ORDER_001')
+    elif test_type == 'delivery_complete':
+        ok, err = send_alimtalk_order_event('delivery_complete', phone, '테스트고객', 'TEST_ORDER_001')
+    elif test_type == 'recovery':
+        ok, err = send_kakao_alimtalk(phone, '테스트고객', coupon_code='TEST_COUPON')
+    else:
+        return jsonify({"success": False, "message": "지원하지 않는 발송 타입입니다."})
+    if ok:
+        return jsonify({"success": True, "message": "발송 요청이 완료되었습니다."})
+    return jsonify({"success": False, "message": err or "발송 실패"})
+
+
 @app.route('/api/messages/unread_count')
 @login_required
 def api_messages_unread_count():
@@ -1938,7 +2004,7 @@ def api_messages_unread_count():
 @app.route('/api/popup/current')
 def api_popup_current():
     """현재 노출할 알림 팝업 1건. 노출 기간 내·활성만. 없으면 null."""
-    now = datetime.now()
+    now = now_kst()
     q = SitePopup.query.filter(
         SitePopup.is_active == True,
         db.or_(SitePopup.start_at.is_(None), SitePopup.start_at <= now),
@@ -2344,9 +2410,9 @@ def inject_globals():
             unread_message_count = UserMessage.query.filter_by(user_id=current_user.id, read_at=None).count()
         categories = categories_for_member_grade(grade).all()
         managers = [c.manager_email for c in categories if c.manager_email]
-        return dict(cart_count=cart_count, unread_message_count=unread_message_count, now=datetime.now(), managers=managers, nav_categories=categories)
+        return dict(cart_count=cart_count, unread_message_count=unread_message_count, now=now_kst(), managers=managers, nav_categories=categories)
     except Exception:
-        return dict(cart_count=0, unread_message_count=0, now=datetime.now(), managers=[], nav_categories=[])
+        return dict(cart_count=0, unread_message_count=0, now=now_kst(), managers=[], nav_categories=[])
 
 @app.route('/api/search')
 def api_search():
@@ -2361,7 +2427,7 @@ def api_search():
     return jsonify([{
         "id": p.id, "name": p.name, "price": p.price, "image_url": p.image_url,
         "description": p.description or "", "stock": p.stock,
-        "is_sold_out": (p.deadline and p.deadline < datetime.now()) or p.stock <= 0,
+        "is_sold_out": (p.deadline and p.deadline < now_kst()) or p.stock <= 0,
     } for p in products])
 
 
@@ -2494,13 +2560,13 @@ def index():
     all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
     main_categories = all_categories[:8]  # 메인에는 8개만
     grouped_products = {}
-    order_logic = (Product.stock <= 0) | (Product.deadline < datetime.now())
+    order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     
     latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(30).all()
     random_latest = random.sample(latest_all, min(len(latest_all), 30)) if latest_all else []
     
-    today_end = datetime.now().replace(hour=23, minute=59, second=59)
-    closing_today = Product.query.filter(Product.is_active == True, Product.deadline > datetime.now(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(50).all()
+    today_end = now_kst().replace(hour=23, minute=59, second=59)
+    closing_today = Product.query.filter(Product.is_active == True, Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(50).all()
     latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
 
     for cat in main_categories:
@@ -2515,7 +2581,7 @@ def index():
     review_counts = {}
     if all_pids:
         review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
-    now = datetime.now()
+    now = now_kst()
 
     # 게시판별 추천 많은 순 상위 4개 (메인 하단 노출)
     def _top_restaurant_ids(limit=4):
@@ -2691,7 +2757,7 @@ def index():
     <div class="hero-inner">
         <span class="hero-label">Direct Delivery & Agency Service</span>
         <h1 class="hero-title">
-            판매가 아닌, <span class="accent">배송 서비스</span> 입니다.<br>
+            판매가 아닌 <span class="accent">배송 서비스</span> 입니다.<br>
             <span class="accent">Premium 6PL Service</span>
         </h1>
         <div class="hero-divider"></div>
@@ -2753,7 +2819,7 @@ def index():
                     <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                     <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}</h3>
                     <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.description or '' }}</p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
@@ -2788,7 +2854,7 @@ def index():
                     <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                     <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
                     <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}</p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
@@ -2823,7 +2889,7 @@ def index():
                     <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                     <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
                     <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}</p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
@@ -2946,7 +3012,7 @@ def index():
         </span>
 
         <h1 class="hero-title text-3xl md:text-7xl font-black mb-8 leading-tight tracking-tighter">
-            판매가 아닌, <span class="text-teal-500 uppercase">배송 서비스</span> 입니다.<br>
+            판매가 아닌 <span class="text-teal-500 uppercase">배송 서비스</span> 입니다.<br>
             <span class="text-teal-500 uppercase text-2xl md:text-4xl mt-4 inline-block">Premium Service</span>
         </h1>
 
@@ -3050,7 +3116,7 @@ def index():
                         <div class="absolute bottom-2 left-2 md:bottom-5 md:left-5"><span class="bg-red-600 text-white text-[7px] md:text-[10px] px-1.5 py-0.5 md:px-3 md:py-1 rounded md:rounded-lg font-black animate-pulse uppercase">CLOSING</span></div>
                     </a>
                     <div class="p-3 md:p-7 flex flex-col flex-1 text-left">
-                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                         <h3 class="font-black text-gray-800 text-[11px] md:text-base truncate mb-0.5">{{ p.name }}</h3>
                         <p class="text-[9px] md:text-[11px] text-teal-600 mb-2 font-medium truncate">{{ p.description or '' }}</p>
                         <div class="mt-auto flex justify-between items-end">
@@ -3089,7 +3155,7 @@ def index():
                         </div>
                     </a>
                     <div class="p-3 md:p-8 flex flex-col flex-1 text-left">
-                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5 text-left" data-deadline="{{ p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else '' }}"></p>
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5 text-left" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                         <h3 class="font-black text-gray-800 text-[11px] md:text-base truncate mb-0.5 text-left">{{ p.name }}</h3>
                         <p class="text-[9px] md:text-[11px] text-teal-600 mb-2 font-medium truncate text-left">{{ p.description or '' }}</p>
                         <div class="mt-auto flex justify-between items-end text-left">
@@ -5201,6 +5267,8 @@ def auth_naver_callback():
     login_user(user)
     if user.email and user.email.endswith('@social.local'):
         flash("네이버로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+    else:
+        flash("로그인되었습니다.")
     resp = redirect(next_url)
     resp.set_cookie('last_login_method', 'naver', max_age=365*24*3600, samesite='Lax')
     return resp
@@ -5280,6 +5348,8 @@ def auth_google_callback():
     login_user(user)
     if user.email and user.email.endswith('@social.local'):
         flash("구글로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+    else:
+        flash("로그인되었습니다.")
     resp = redirect(next_url)
     resp.set_cookie('last_login_method', 'google', max_age=365*24*3600, samesite='Lax')
     return resp
@@ -5362,6 +5432,8 @@ def auth_kakao_callback():
     login_user(user)
     if user.email and user.email.endswith('@social.local'):
         flash("카카오로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+    else:
+        flash("로그인되었습니다.")
     resp = redirect(next_url)
     resp.set_cookie('last_login_method', 'kakao', max_age=365*24*3600, samesite='Lax')
     return resp
@@ -5416,6 +5488,7 @@ def login():
         if user and user.password and check_password_hash(user.password, request.form.get('password')):
             session.permanent = True
             login_user(user)
+            flash("로그인되었습니다.")
             resp = redirect(request.args.get('next') or '/')
             resp.set_cookie('last_login_method', 'email', max_age=365*24*3600, samesite='Lax')
             return resp
@@ -5465,7 +5538,6 @@ def login():
             </form>
             </div>
         </div>
-        <p class="mt-4 p-3 rounded-xl bg-gray-50 border border-gray-100 text-[10px] text-gray-500 font-bold text-center">배송 불가 지역도 회원가입 가능합니다. 로그인 후 마이페이지에서 배송지를 수정할 수 있습니다.</p>
         <div class="text-center mt-6"><a href="/register" class="text-gray-400 text-[11px] font-bold hover:text-teal-600 transition">아직 회원이 아니신가요? 회원가입</a></div>
     </div>""" + FOOTER_HTML, next_q=next_q, recent_login=recent_login)
 
@@ -5502,7 +5574,6 @@ def register():
     return render_template_string(HEADER_HTML + """
     <div class="max-w-md mx-auto mt-12 mb-24 p-10 md:p-16 bg-white rounded-[3rem] md:rounded-[4rem] shadow-2xl border text-left">
         <h2 class="text-2xl md:text-3xl font-black mb-12 tracking-tighter uppercase text-teal-600 text-left">Join Us</h2>
-        <p class="mb-6 p-4 rounded-2xl bg-teal-50 border border-teal-200 text-teal-800 text-[11px] font-bold">배송 불가 지역도 회원가입 가능합니다. 해당 주소로는 배송이 되지 않을 수 있으며, 배송 가능 지역으로 변경 시 주문이 가능합니다.</p>
         {% for message in get_flashed_messages() %}
         <div class="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-sm font-bold">{{ message }}</div>
         {% endfor %}
@@ -7001,109 +7072,56 @@ def order_confirm():
     """
         return render_template_string(HEADER_HTML + content + FOOTER_HTML, total=total, delivery_fee=delivery_fee, is_songdo=True, zone_type='normal', quick_extra_fee=0, quick_extra_message='', total_with_quick=total, is_quick_zone=False, user_points=user_points, max_use=max_use, min_order_to_use=min_order_to_use)
 
-    # 퀵 구역 또는 배송 불가: 2차 확인 페이지
+    # 퀵 구역 또는 배송 불가: 2차 확인 페이지 (간결화)
     content = f"""
-    <div class="max-w-xl mx-auto py-12 md:py-20 px-4 md:px-6 font-black text-left">
-        <h2 class="text-2xl md:text-3xl font-black mb-10 border-b-4 border-teal-600 pb-4 text-center uppercase italic">
-            주문 확인 (2차: 퀵 구역 확인)
-        </h2>
+    <div class="max-w-xl mx-auto py-6 md:py-10 px-4 font-black text-left">
+        <h2 class="text-xl md:text-2xl font-black mb-6 text-center text-teal-600">주문 확인</h2>
         
-        <div class="bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl border border-gray-50 space-y-10 text-left">
-            <div class="p-4 rounded-2xl bg-gray-100 border border-gray-200 text-[11px] text-gray-600 font-bold">
-                <p class="mb-1">1차: 일반 배송 구역이 아닙니다.</p>
-                <p class="text-amber-700 font-black">2차: 퀵 지정 구역 적용 여부를 확인해 주세요.</p>
-            </div>
-            
-            <div class="p-6 md:p-8 {'bg-amber-50 border-amber-200' if zone_type == 'quick' else 'bg-red-50 border-red-100'} rounded-3xl border relative overflow-hidden">
-                <span class="{'text-amber-700' if zone_type == 'quick' else 'text-red-600'} text-[10px] block uppercase font-black mb-3 tracking-widest">
-                    배송지 정보
-                </span>
-                <p class="text-sm text-gray-500 mb-3 font-bold leading-relaxed">주소 수정은 마이페이지에서만 가능합니다. 수정 후 장바구니에서 다시 주문하기를 눌러 주세요.</p>
-                <div id="address-display-block">
-                    <p class="text-lg md:text-xl text-gray-800 font-black leading-snug" id="display-address-text">
+        <div class="bg-white p-5 md:p-6 rounded-2xl shadow-lg border border-gray-100 space-y-5 text-left">
+            <div class="flex items-start justify-between gap-3 p-4 {'bg-amber-50 border-amber-200' if zone_type == 'quick' else 'bg-red-50 border-red-100'} rounded-xl border">
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs text-gray-600 font-bold mb-1">배송지</p>
+                    <p class="text-sm text-gray-800 font-black leading-snug" id="display-address-text">
                         { (current_user.address or '정보 없음').replace('<', '&lt;').replace('>', '&gt;') }<br>
                         { f'<span class="text-teal-600 font-bold">{(getattr(current_user, "address_apt_name", None) or "").replace("<", "&lt;").replace(">", "&gt;")}</span><br>' if getattr(current_user, 'address_apt_name', None) else '' }
-                        <span class="text-gray-500">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
+                        <span class="text-gray-500 text-xs">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
                     </p>
-                    <p class="mt-3 text-sm text-teal-700 font-bold"><span class="text-[10px] text-teal-500 uppercase">요청사항</span> { (getattr(current_user, 'request_memo', None) or '').replace('<', '&lt;').replace('>', '&gt;') or '없음' }</p>
-                    <a href="/mypage?from=cart" class="inline-flex items-center gap-2 mt-4 px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">
-                        <i class="fas fa-edit"></i> 마이페이지에서 주소 수정
-                    </a>
+                    <p class="mt-1 text-xs font-black" id="zone-status-msg">
+                        {'<span class="text-amber-700"><i class="fas fa-check-circle mr-1"></i> 퀵 구역 (추가료 동의 시 주문 가능)</span>' if zone_type == 'quick' else '<span class="text-red-600"><i class="fas fa-exclamation-triangle mr-1"></i> 배송 불가</span>'}
+                    </p>
                 </div>
-                <p class="mt-4 font-black text-sm" id="zone-status-msg">
-                    {'<span class="text-amber-700 flex items-center gap-2"><i class="fas fa-check-circle"></i> 배송가능 (퀵 추가료 동의 시 주문 가능)</span>' if zone_type == 'quick' else '<span class="text-red-600 flex items-center gap-2"><i class="fas fa-exclamation-triangle"></i> 배송 불가</span>'}
-                </p>
+                <a href="/mypage?from=cart" class="shrink-0 px-3 py-2 bg-teal-600 text-white rounded-lg text-xs font-black hover:bg-teal-700">주소 수정</a>
             </div>
 
-            {f'<div class="p-6 bg-red-100 rounded-2xl text-red-700 text-xs md:text-sm font-bold leading-relaxed">⚠️ 1차·2차 모두 해당 구역이 없습니다. 배송 가능 주소로 수정해 주세요.</div>' if zone_type == 'unavailable' else ''}
-            {f'''<div class="p-6 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs md:text-sm font-bold leading-relaxed">
-                <p class="mb-2 font-black">배송가능 (퀵 구역 — 추가 배송료 적용)</p>
-                <p class="mb-3">{ quick_extra_message }</p>
-                <p class="mb-3">퀵 추가 배송료: <strong>{ "{:,}".format(quick_extra_fee) }원</strong></p>
-                <label class="flex items-start gap-3 cursor-pointer mt-4">
-                    <input type="checkbox" id="quick_agree" class="mt-1 w-4 h-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500">
-                    <span>위 추가 배송료에 동의하고 퀵으로 주문합니다.</span>
-                </label>
+            {f'<div class="p-3 bg-red-100 rounded-xl text-red-700 text-xs font-bold">해당 구역 배송 불가. 배송 가능 주소로 수정해 주세요.</div>' if zone_type == 'unavailable' else ''}
+            {f'''<div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-bold">
+                <p class="font-black mb-1">퀵 추가 배송료 { "{:,}".format(quick_extra_fee) }원</p>
+                <p class="text-[10px] text-amber-700 mb-2">{ quick_extra_message }</p>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="quick_agree" class="rounded border-amber-400 text-amber-600"> 위 추가료에 동의하고 퀵 주문합니다.</label>
             </div>''' if is_quick_zone else ''}
 
-            <div class="space-y-4 pt-4">
-                <div class="flex justify-between items-end font-black">
-                    <span class="text-gray-400 text-xs uppercase tracking-widest">주문 금액</span>
-                    <span class="text-2xl text-gray-700">{ "{:,}".format(total) }원</span>
-                </div>
-                {f'''<div class="bg-amber-50 p-5 rounded-2xl border border-amber-100 text-[10px] md:text-xs text-amber-800 font-bold">
-                    🎁 보유 포인트: { "{:,}".format(user_points) }원 ({ "{:,}".format(min_order_to_use) }원 이상 구매 시 최대 { "{:,}".format(max_points_per_order) }원까지 사용 가능)
-                    <div class="mt-3 flex items-center gap-2 flex-wrap">
-                        <label class="font-black">사용할 포인트</label>
-                        <input type="number" id="points_used_input" min="0" max="{ max_use }" value="0" step="1" class="w-28 border border-amber-200 rounded-lg px-2 py-1.5 text-sm font-black">
-                        <span>원 (최대 { "{:,}".format(max_use) }원)</span>
-                    </div>
-                </div>''' if can_use_points else f'<div class="bg-gray-50 p-4 rounded-2xl text-[10px] text-gray-500 font-bold">보유 포인트: { "{:,}".format(user_points) }원. { min_order_to_use and total < min_order_to_use and ("{:,}".format(min_order_to_use) + "원 이상 구매 시 사용 가능합니다.") or "사용 가능한 포인트가 없습니다." }</div>'}
-                <div class="flex justify-between items-end font-black border-t border-gray-100 pt-4">
-                    <span class="text-gray-400 text-xs uppercase tracking-widest">최종 결제 금액</span>
-                    <span class="text-4xl md:text-5xl text-teal-600 font-black italic underline underline-offset-8" id="final_amount_display">{ "{:,}".format(total if not is_quick_zone else total) }원</span>
-                </div>
-                {f'<p class="text-[10px] text-amber-700 font-bold">퀵 동의 시 결제 금액: <span id="final_with_quick_display">{ "{:,}".format(total_with_quick) }원</span></p>' if is_quick_zone else ''}
-                <div class="bg-orange-50 p-5 rounded-2xl border border-orange-100 text-[10px] md:text-xs text-orange-700 font-bold leading-relaxed">
-                    📢 배송비: 카테고리별 1,900원, 카테고리 합계 50,000원 이상이면 1,900원 추가. 현재 배송비: { "{:,}".format(delivery_fee) }원
-                </div>
+            <div class="grid grid-cols-2 gap-3 p-4 bg-gray-50 rounded-xl">
+                <div><span class="text-[10px] text-gray-500 uppercase">주문금액</span><p class="text-lg font-black text-gray-800">{ "{:,}".format(total) }원</p></div>
+                <div class="text-right"><span class="text-[10px] text-gray-500 uppercase">최종 결제</span><p class="text-xl font-black text-teal-600" id="final_amount_display">{ "{:,}".format(total if not is_quick_zone else total) }원</p></div>
+                {f'''<div class="col-span-2 flex items-center gap-2 flex-wrap text-[10px] text-amber-800 font-bold">
+                    <span>포인트</span>
+                    <input type="number" id="points_used_input" min="0" max="{ max_use }" value="0" step="1" class="w-20 border border-amber-200 rounded-lg px-2 py-1 text-sm font-black">
+                    <span>원 (최대 { "{:,}".format(max_use) }원)</span>
+                </div>''' if can_use_points else f'<p class="col-span-2 text-[10px] text-gray-500">포인트 { "{:,}".format(user_points) }원</p>'}
+                {f'<p class="col-span-2 text-[10px] text-amber-700 font-bold">퀵 동의 시: <span id="final_with_quick_display">{ "{:,}".format(total_with_quick) }원</span></p>' if is_quick_zone else ''}
             </div>
 
-            <div class="p-6 md:p-8 bg-gray-50 rounded-3xl text-[11px] md:text-xs text-gray-500 space-y-6 font-black border border-gray-100">
-                <div class="bg-gray-100 border border-gray-200 rounded-2xl p-4 text-gray-700 text-[10px] md:text-[11px] leading-relaxed">
-                    <span class="font-extrabold text-gray-900">⚠️ 주문 전 필수 확인</span>
-                    <ul class="mt-2 pl-4 space-y-1 list-disc">
-                        <li>장바구니 단계에서는 언제든지 주문 취소가 가능합니다.</li>
-                        <li>공동구매·실시간 수급 특성상 도매처 품절·수급 변동으로 <b>부분 또는 전체 취소</b>가 발생할 수 있습니다.</li>
-                        <li>비정상적·상업적 재판매·시스템 악용 시 <b>관리자 판단에 따라 사전 안내 후 취소</b>될 수 있습니다.</li>
-                        <li>상품 준비가 시작된 이후에는 취소·변경이 제한될 수 있습니다.</li>
-                    </ul>
-                </div>
-                <div class="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-amber-800 text-[10px] md:text-[11px] leading-relaxed">
-                    <span class="font-extrabold">⚠️ 주문·결제 전 취소 안내</span><br>
-                    공동구매 방식의 구매 특성상 재고 소진 시 품절 처리될 수 있으며, 관리자 판단에 따라 상업적·비상식적·악의적 이용으로 보이는 경우 해당 품목이 부분 취소될 수 있습니다.
-                </div>
-                <label class="flex items-start gap-4 cursor-pointer group">
-                    <input type="checkbox" id="consent_partial_cancel" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-teal-600 focus:ring-teal-500" required>
-                    <span class="group-hover:text-gray-800 transition leading-relaxed">
-                        [필수] 위 취소 안내(품절·부분 취소 가능)를 확인했으며 이에 동의합니다.
-                    </span>
-                </label>
-                <label class="flex items-start gap-4 pt-4 border-t border-gray-200 cursor-pointer group">
-                    <input type="checkbox" id="consent_agency" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-teal-600 focus:ring-teal-500" required>
-                    <span class="group-hover:text-gray-800 transition leading-relaxed">
-                        [필수] 본인은 바구니삼촌이 상품 판매자가 아니며, 요청에 따라 구매 및 배송을 대행하는 서비스임을 확인하고 이에 동의합니다.
-                    </span>
-                </label>
-                <label class="flex items-start gap-4 pt-4 border-t border-gray-200 cursor-pointer group">
-                    <input type="checkbox" id="consent_third_party_order" class="mt-1 w-4 h-4 rounded-full border-gray-300 text-teal-600 focus:ring-teal-500" required>
-                    <span class="group-hover:text-gray-800 transition leading-relaxed">
-                        [필수] 개인정보 제3자 제공 동의: 원활한 배송 처리를 위해 판매처 및 배송 담당자에게 정보가 제공됨을 확인했습니다.
-                    </span>
-                </label>
+            <details class="bg-gray-50 rounded-xl border border-gray-100 text-[10px] text-gray-600">
+                <summary class="p-3 cursor-pointer font-black text-gray-700">결제 전 안내 (필수 확인)</summary>
+                <div class="px-3 pb-3 pt-0 space-y-2"><p>· 품절/부분취소 가능 · 구매대행 서비스 동의 · 개인정보 제3자 제공 동의</p></div>
+            </details>
+            <div class="space-y-2">
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
-            <form id="payForm" action="/order/payment" method="POST" class="mt-4">
+            <form id="payForm" action="/order/payment" method="POST">
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
                 <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
                 <input type="hidden" name="order_address" id="order_address_hidden" value="{ (current_user.address or '').replace('&', '&amp;').replace('"', '&quot;') }">
@@ -7111,7 +7129,7 @@ def order_confirm():
                 <input type="hidden" name="order_address_detail" id="order_address_detail_hidden" value="{ (current_user.address_detail or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="order_entrance_pw" id="order_entrance_pw_hidden" value="{ (current_user.entrance_pw or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="save_address_to_profile" id="save_address_to_profile_hidden" value="0">
-                {f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 hover:bg-teal-700 transition active:scale-95">안전 결제하기</button>' if zone_type == 'normal' else f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-amber-500 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl hover:bg-amber-600 transition active:scale-95">퀵 추가료 동의 후 결제하기</button>' if zone_type == 'quick' else '<button type="button" class="w-full bg-gray-300 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl cursor-not-allowed" disabled>배송지를 확인해 주세요</button>'}
+                {f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-teal-600 text-white py-4 md:py-5 rounded-xl font-black text-base shadow-lg hover:bg-teal-700 transition">결제하기</button>' if zone_type == 'normal' else f'<button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-amber-500 text-white py-4 md:py-5 rounded-xl font-black text-base shadow-lg hover:bg-amber-600 transition">퀵 동의 후 결제하기</button>' if zone_type == 'quick' else '<button type="button" class="w-full bg-gray-300 text-white py-4 rounded-xl font-black cursor-not-allowed" disabled>배송지 수정 후 주문하세요</button>'}
             </form>
         </div>
     </div>
@@ -7122,14 +7140,10 @@ def order_confirm():
     var isQuickZone = { 'true' if is_quick_zone else 'false' };
     var totalWithQuick = { total_with_quick };
     function startPayment() {{
-        if(!document.getElementById('consent_partial_cancel').checked) {{ alert("주문·결제 전 취소 안내(품절·부분 취소 가능)에 동의해 주세요."); return; }}
-        if(!document.getElementById('consent_agency').checked) {{ alert("구매 대행 서비스 이용 동의가 필요합니다."); return; }}
+        if(!document.getElementById('consent_partial_cancel').checked) {{ alert("취소 안내에 동의해 주세요."); return; }}
+        if(!document.getElementById('consent_agency').checked) {{ alert("구매대행 서비스 동의가 필요합니다."); return; }}
         if(!document.getElementById('consent_third_party_order').checked) {{ alert("개인정보 제공 동의가 필요합니다."); return; }}
-        if (isQuickZone) {{
-            var q = document.getElementById('quick_agree');
-            if (!q || !q.checked) {{ alert("퀵 추가 배송료에 동의해 주세요."); return; }}
-            document.getElementById('quick_agree_hidden').value = '1';
-        }}
+        if (isQuickZone) {{ var q = document.getElementById('quick_agree'); if (!q || !q.checked) {{ alert("퀵 추가료에 동의해 주세요."); return; }} document.getElementById('quick_agree_hidden').value = '1'; }}
         var ptsInput = document.getElementById('points_used_input');
         var pts = ptsInput ? parseInt(ptsInput.value, 10) || 0 : 0;
         var maxUse = { max_use };
@@ -7140,23 +7154,11 @@ def order_confirm():
     }}
     var ptsIn = document.getElementById('points_used_input');
     if (ptsIn) {{
-        ptsIn.addEventListener('input', function() {{
-            var v = parseInt(this.value, 10) || 0;
-            var m = { max_use };
-            if (v > m) this.value = m;
-            var base = orderTotal;
-            if (isQuickZone) base = totalWithQuick;
-            var final = base - (parseInt(this.value, 10) || 0);
-            var el = document.getElementById('final_amount_display');
-            if (el) el.textContent = final.toLocaleString() + '원';
-        }});
+        ptsIn.addEventListener('input', function() {{ var v = parseInt(this.value, 10) || 0; var m = { max_use }; if (v > m) this.value = m; var base = isQuickZone ? totalWithQuick : orderTotal; var final = base - (parseInt(this.value, 10) || 0); var el = document.getElementById('final_amount_display'); if (el) el.textContent = final.toLocaleString() + '원'; }});
     }}
     if (isQuickZone) {{
         var qAgree = document.getElementById('quick_agree');
-        if (qAgree) qAgree.addEventListener('change', function() {{
-            var el = document.getElementById('final_amount_display');
-            if (el) el.textContent = (this.checked ? totalWithQuick : orderTotal).toLocaleString() + '원';
-        }});
+        if (qAgree) qAgree.addEventListener('change', function() {{ var el = document.getElementById('final_amount_display'); if (el) el.textContent = (this.checked ? totalWithQuick : orderTotal).toLocaleString() + '원'; }});
     }}
     </script>
     """
@@ -7550,17 +7552,23 @@ def admin_bulk_request_delivery():
 
 
 def _save_delivery_proof_image(file):
-    """배송완료 증빙 사진 저장. 반환: URL 또는 None. 허용 확장자만 저장."""
+    """배송완료 증빙 사진 저장. 반환: URL 또는 None. Cloudinary 설정 시 Cloudinary 사용."""
     if not file or not getattr(file, 'filename', None) or file.filename == '' or not _is_allowed_image_filename(file.filename):
         return None
-    folder = os.path.join(app.config['UPLOAD_FOLDER'], 'delivery_proof')
-    os.makedirs(folder, exist_ok=True)
-    ext = os.path.splitext(secure_filename(file.filename))[1].lower() or '.jpg'
-    if ext not in ALLOWED_IMAGE_EXTENSIONS:
-        ext = '.jpg'
-    new_name = f"proof_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
-    path = os.path.join(folder, new_name)
     try:
+        if cloudinary_url:
+            upload_res = cloudinary.uploader.upload(
+                file,
+                folder="basket-uncle/delivery_proof"
+            )
+            return upload_res.get("secure_url") or upload_res.get("url")
+        folder = os.path.join(app.config['UPLOAD_FOLDER'], 'delivery_proof')
+        os.makedirs(folder, exist_ok=True)
+        ext = os.path.splitext(secure_filename(file.filename))[1].lower() or '.jpg'
+        if ext not in ALLOWED_IMAGE_EXTENSIONS:
+            ext = '.jpg'
+        new_name = f"proof_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        path = os.path.join(folder, new_name)
         file.save(path)
         return f"/static/uploads/delivery_proof/{new_name}"
     except Exception:
@@ -7568,7 +7576,7 @@ def _save_delivery_proof_image(file):
 
 
 def _save_delivery_proof_base64(data_url_or_base64):
-    """기사 앱에서 보낸 base64 또는 data URL을 파일로 저장. 반환: URL 또는 None."""
+    """기사 앱에서 보낸 base64 또는 data URL을 파일로 저장. 반환: URL 또는 None. Cloudinary 설정 시 Cloudinary 사용."""
     if not data_url_or_base64 or not isinstance(data_url_or_base64, str):
         return None
     s = data_url_or_base64.strip()
@@ -7584,11 +7592,17 @@ def _save_delivery_proof_base64(data_url_or_base64):
         return None
     if len(raw) > 10 * 1024 * 1024:
         return None
-    folder = os.path.join(app.config['UPLOAD_FOLDER'], 'delivery_proof')
-    os.makedirs(folder, exist_ok=True)
-    new_name = f"logi_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-    path = os.path.join(folder, new_name)
     try:
+        if cloudinary_url:
+            upload_res = cloudinary.uploader.upload(
+                raw,
+                folder="basket-uncle/delivery_proof"
+            )
+            return upload_res.get("secure_url") or upload_res.get("url")
+        folder = os.path.join(app.config['UPLOAD_FOLDER'], 'delivery_proof')
+        os.makedirs(folder, exist_ok=True)
+        new_name = f"logi_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+        path = os.path.join(folder, new_name)
         with open(path, 'wb') as f:
             f.write(raw)
         return f"/static/uploads/delivery_proof/{new_name}"
@@ -7625,7 +7639,11 @@ def api_logi_delivery_complete():
     title, body = get_template_content('delivery_complete', order_id=order.order_id)
     send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=proof_url)
     try:
-        send_alimtalk_order_event('delivery_complete', order.customer_phone, order.customer_name, order.order_id)
+        extra_vars = {}
+        if proof_url:
+            full_url = request.url_root.rstrip('/') + proof_url
+            extra_vars["#{사진링크}"] = full_url
+        send_alimtalk_order_event('delivery_complete', order.customer_phone, order.customer_name, order.order_id, **extra_vars)
     except Exception:
         pass
     return jsonify({"success": True, "message": "배송완료 처리 및 고객 알림 발송 완료."})
@@ -7715,7 +7733,11 @@ def admin_order_item_status():
             proof_url = getattr(oi, 'delivery_proof_image_url', None) or None
             send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=proof_url)
             try:
-                send_alimtalk_order_event('delivery_complete', order.customer_phone, order.customer_name, order.order_id)
+                extra_vars = {}
+                if proof_url:
+                    full_url = request.url_root.rstrip('/') + proof_url
+                    extra_vars["#{사진링크}"] = full_url
+                send_alimtalk_order_event('delivery_complete', order.customer_phone, order.customer_name, order.order_id, **extra_vars)
             except Exception:
                 pass
         elif item_status == '배송지연':
@@ -8315,11 +8337,13 @@ def admin_dashboard():
     if tab == 'sellers' and seller_tax in ('과세', '면세'):
         sellers_categories = [c for c in categories if (getattr(c, 'tax_type', None) or '과세') == seller_tax]
     
-    # 카테고리 탭: 주문완료 현황 리스트, 게시판 현황
+    # 통계 탭: 주문완료 현황 리스트
     order_completion_list = []
     board_stats = []
-    if tab == 'categories':
+    if tab == 'stats':
         order_completion_list = Order.query.filter(Order.status != '결제취소').order_by(Order.created_at.desc()).limit(50).all()
+    # 마케팅·회원 탭(회원관리): 게시판 현황
+    if tab == 'members':
         board_stats = [
             {'name': '전국맛집요청', 'count': RestaurantRequest.query.count(), 'link': '/board/restaurant-request'},
             {'name': '배송요청', 'count': DeliveryRequest.query.count(), 'link': '/board/delivery-request'},
@@ -8901,6 +8925,39 @@ def admin_dashboard():
                 utm_aggregates.append({'source': usrc, 'order_count': 0, 'revenue': 0, 'buyer_count': 0, 'signup_count': cnt})
         utm_aggregates.sort(key=lambda x: (-x['revenue'], -x['order_count']))
 
+    solapi_status = {}
+    if tab == 'solapi_check' and is_master:
+        from config import (
+            SOLAPI_API_KEY, SOLAPI_API_SECRET, SOLAPI_KAKAO_PF_ID,
+            SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY, SOLAPI_KAKAO_TEMPLATE_ID_WELCOME,
+            SOLAPI_KAKAO_TEMPLATE_ID_ORDER_CREATED, SOLAPI_KAKAO_TEMPLATE_ID_DELIVERY_COMPLETE,
+            SOLAPI_SENDER_PHONE,
+        )
+        def _mask(s, show=4):
+            if not s: return ''
+            s = str(s).strip()
+            if len(s) <= show: return '*' * len(s)
+            return s[:show] + '*' * (len(s) - show)
+        solapi_status = {
+            'api_key': _mask(SOLAPI_API_KEY, 4),
+            'api_secret': _mask(SOLAPI_API_SECRET, 4),
+            'pf_id': _mask(SOLAPI_KAKAO_PF_ID, 6),
+            'sender_phone': SOLAPI_SENDER_PHONE or '(미설정)',
+            'templates': {
+                'recovery': SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY or '(미설정)',
+                'welcome': SOLAPI_KAKAO_TEMPLATE_ID_WELCOME or '(미설정)',
+                'order_created': SOLAPI_KAKAO_TEMPLATE_ID_ORDER_CREATED or '(미설정)',
+                'delivery_complete': SOLAPI_KAKAO_TEMPLATE_ID_DELIVERY_COMPLETE or '(미설정)',
+            },
+            'ready': bool(SOLAPI_API_KEY and SOLAPI_API_SECRET and SOLAPI_KAKAO_PF_ID),
+            'message_types': [
+                {'name': '재방문 쿠폰', 'key': 'recovery', 'when': '휴면 고객 일괄 발송(스크립트)', 'template_var': 'SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY', 'vars': '#{고객명}, #{쿠폰}'},
+                {'name': '회원가입 환영', 'key': 'welcome', 'when': '회원가입 완료 시', 'template_var': 'SOLAPI_KAKAO_TEMPLATE_ID_RECOVERY (동일)', 'vars': '#{고객명}, #{쿠폰}'},
+                {'name': '주문 완료 알림', 'key': 'order_created', 'when': '결제 완료 직후', 'template_var': 'SOLAPI_KAKAO_TEMPLATE_ID_ORDER_CREATED', 'vars': '#{고객명}, #{주문번호}'},
+                {'name': '배송 완료 알림', 'key': 'delivery_complete', 'when': '배송 완료 처리 시', 'template_var': 'SOLAPI_KAKAO_TEMPLATE_ID_DELIVERY_COMPLETE', 'vars': '#{고객명}, #{주문번호}'},
+            ],
+        }
+
     seller_request_categories = []
     seller_confirmations_recent = []
     email_order_date = None
@@ -9038,6 +9095,7 @@ def admin_dashboard():
             <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
                 <span class="text-[10px] text-teal-600 font-black uppercase w-28 shrink-0">2. 마케팅·회원</span>
                 {% if is_master %}<a href="/admin?tab=messages" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'messages' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메시지 발송</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=solapi_check" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'solapi_check' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">솔라피 확인</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=popup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">알림팝업</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=utm" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'utm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">유입/광고</a>{% endif %}
                 <a href="/admin?tab=reviews" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'reviews' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">리뷰 관리</a>
@@ -9280,6 +9338,30 @@ def admin_dashboard():
                       <p class="font-black text-gray-700 mb-1">통계 안내</p>
                       <p>조회수는 메인·카테고리·상품상세·장바구니 페이지 방문 시 일별로 집계됩니다. 주문·매출은 결제취소를 제외한 건수와 결제금액 합계입니다. 장바구니 담긴 수: {{ stats_cart_items_total }}개(현재 담긴 수량 합계).</p>
                   </div>
+
+                  <div class="mb-8 p-6 md:p-8 rounded-[2.5rem] border border-gray-50 shadow-sm bg-white">
+                      <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-4 font-black">주문완료 현황 (최근 50건)</h3>
+                      <div class="overflow-x-auto -mx-2 md:mx-0">
+                          <table class="w-full text-left min-w-[400px] text-[10px] md:text-xs">
+                              <thead class="bg-gray-50 border-b border-gray-100 font-bold">
+                                  <tr><th class="p-3">주문번호</th><th class="p-3">일시</th><th class="p-3 text-right">금액</th><th class="p-3 text-center">상태</th></tr>
+                              </thead>
+                              <tbody>
+                                  {% for o in order_completion_list %}
+                                  <tr class="border-b border-gray-50 hover:bg-gray-50/50">
+                                      <td class="p-3 font-mono text-gray-800">{{ (o.order_id or '-')[-12:] }}</td>
+                                      <td class="p-3 text-gray-600">{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '-' }}</td>
+                                      <td class="p-3 text-right font-black text-teal-600">{{ "{:,}".format(o.total_price or 0) }}원</td>
+                                      <td class="p-3 text-center"><span class="{% if o.status == '결제취소' %}text-red-500{% else %}text-teal-600{% endif %} font-bold">{{ o.status or '-' }}</span></td>
+                                  </tr>
+                                  {% else %}
+                                  <tr><td colspan="4" class="p-6 text-center text-gray-400">주문 내역이 없습니다.</td></tr>
+                                  {% endfor %}
+                              </tbody>
+                          </table>
+                      </div>
+                      <p class="mt-4 text-[10px] text-gray-400 font-bold">결제취소 제외 최근 50건입니다.</p>
+                  </div>
               </div>
 
           {% elif tab == 'categories' %}
@@ -9350,43 +9432,6 @@ def admin_dashboard():
                               {% endfor %}
                         </tbody>
                     </table>
-                </div>
-            </div>
-
-            <div class="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-10 text-left">
-                <div class="bg-white p-6 md:p-8 rounded-[2.5rem] border border-gray-50 shadow-sm">
-                    <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-4 font-black">주문완료 현황 (최근 50건)</h3>
-                    <div class="overflow-x-auto -mx-2 md:mx-0">
-                        <table class="w-full text-left min-w-[400px] text-[10px] md:text-xs">
-                            <thead class="bg-gray-50 border-b border-gray-100 font-bold">
-                                <tr><th class="p-3">주문번호</th><th class="p-3">일시</th><th class="p-3 text-right">금액</th><th class="p-3 text-center">상태</th></tr>
-                            </thead>
-                            <tbody>
-                                {% for o in order_completion_list %}
-                                <tr class="border-b border-gray-50 hover:bg-gray-50/50">
-                                    <td class="p-3 font-mono text-gray-800">{{ (o.order_id or '-')[-12:] }}</td>
-                                    <td class="p-3 text-gray-600">{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '-' }}</td>
-                                    <td class="p-3 text-right font-black text-teal-600">{{ "{:,}".format(o.total_price or 0) }}원</td>
-                                    <td class="p-3 text-center"><span class="{% if o.status == '결제취소' %}text-red-500{% else %}text-teal-600{% endif %} font-bold">{{ o.status or '-' }}</span></td>
-                                </tr>
-                                {% else %}
-                                <tr><td colspan="4" class="p-6 text-center text-gray-400">주문 내역이 없습니다.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="bg-white p-6 md:p-8 rounded-[2.5rem] border border-gray-50 shadow-sm">
-                    <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-4 font-black">게시판 현황</h3>
-                    <ul class="space-y-3">
-                        {% for b in board_stats %}
-                        <li class="flex items-center justify-between py-2 border-b border-gray-100">
-                            <a href="{{ b.link }}" class="font-black text-gray-800 hover:text-teal-600 transition">{{ b.name }}</a>
-                            <span class="text-teal-600 font-black">{{ b.count }}건</span>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    <p class="mt-4 text-[10px] text-gray-400 font-bold">게시판별 글 수를 확인하고 링크로 이동할 수 있습니다.</p>
                 </div>
             </div>
 
@@ -10556,6 +10601,95 @@ def admin_dashboard():
                 <p class="text-[10px] text-gray-500 mt-2">최근 500건만 표시됩니다. 전체 합계는 상단 금액을 참고하세요.</p>
             </div>
 
+        {% elif tab == 'solapi_check' %}
+            <div class="mb-12">
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">솔라피(Solapi) 작동 확인 · 메시지 전송 타입 및 설정</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-6">카카오 알림톡 발송 설정 상태와 메시지 타입별 사용 템플릿을 확인하고, 테스트 발송으로 동작을 검증할 수 있습니다.</p>
+                {% if solapi_status and solapi_status.ready %}
+                <div class="bg-teal-50 border border-teal-200 rounded-2xl p-4 mb-6">
+                    <p class="text-teal-800 font-black text-sm">연동 상태: <span class="text-teal-600">설정됨 (API 키 · PF ID 있음)</span></p>
+                </div>
+                {% else %}
+                <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6">
+                    <p class="text-amber-800 font-black text-sm">연동 상태: <span class="text-amber-600">미설정 또는 불완전</span> — SOLAPI_API_KEY, SOLAPI_API_SECRET, SOLAPI_KAKAO_PF_ID 를 .env에 설정하세요.</p>
+                </div>
+                {% endif %}
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                        <h4 class="p-4 border-b border-gray-100 text-sm font-black text-gray-800">설정 값 (마스킹)</h4>
+                        <table class="w-full text-[11px]">
+                            <tbody>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500 w-36">API Key</td><td class="p-3 font-mono">{{ solapi_status.get('api_key', '') or '-' }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500">API Secret</td><td class="p-3 font-mono">{{ solapi_status.get('api_secret', '') or '-' }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500">PF ID (채널)</td><td class="p-3 font-mono">{{ solapi_status.get('pf_id', '') or '-' }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500">발신번호(대체발송)</td><td class="p-3">{{ solapi_status.get('sender_phone', '') or '-' }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500">재방문 쿠폰 템플릿</td><td class="p-3 font-mono text-[10px]">{{ (solapi_status.get('templates') or {}).get('recovery', '') or '-' }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500">회원가입 환영</td><td class="p-3 font-mono text-[10px]">{{ (solapi_status.get('templates') or {}).get('welcome', '') or '-' }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500">주문 완료 템플릿</td><td class="p-3 font-mono text-[10px]">{{ (solapi_status.get('templates') or {}).get('order_created', '') or '-' }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3 text-gray-500">배송 완료 템플릿</td><td class="p-3 font-mono text-[10px]">{{ (solapi_status.get('templates') or {}).get('delivery_complete', '') or '-' }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                        <h4 class="p-4 border-b border-gray-100 text-sm font-black text-gray-800">메시지 전송 타입 및 발송 시점</h4>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-[11px]">
+                                <thead class="bg-gray-50"><tr><th class="p-3 text-left">용도</th><th class="p-3 text-left">발송 시점</th><th class="p-3 text-left">템플릿 변수</th></tr></thead>
+                                <tbody>
+                                    {% for mt in (solapi_status.get('message_types') or []) %}
+                                    <tr class="border-b border-gray-50"><td class="p-3 font-bold">{{ mt.name }}</td><td class="p-3 text-gray-600">{{ mt.when }}</td><td class="p-3 text-gray-500">{{ mt.vars }}</td></tr>
+                                    {% else %}
+                                    <tr><td colspan="3" class="p-4 text-center text-gray-400">데이터 없음</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-2xl border border-gray-200 p-6">
+                    <h4 class="text-sm font-black text-gray-800 mb-4">테스트 발송</h4>
+                    <p class="text-[11px] text-gray-500 mb-4">아래 번호로 선택한 타입의 알림톡 1건을 발송합니다. (실제 발송되며 건당 비용이 발생할 수 있습니다)</p>
+                    <form id="solapi-test-form" class="flex flex-wrap items-end gap-4">
+                        <input type="hidden" name="csrf_token" value="">
+                        <div class="flex flex-col">
+                            <label class="text-[10px] text-gray-500 font-black uppercase mb-1">수신 휴대폰 번호</label>
+                            <input type="text" name="phone" placeholder="01012345678" class="border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold w-40" maxlength="11">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-[10px] text-gray-500 font-black uppercase mb-1">발송 타입</label>
+                            <select name="test_type" class="border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-bold bg-white">
+                                <option value="order_created">주문 완료 알림</option>
+                                <option value="delivery_complete">배송 완료 알림</option>
+                                <option value="recovery">재방문 쿠폰</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs hover:bg-teal-700">테스트 발송</button>
+                    </form>
+                    <p id="solapi-test-result" class="mt-4 text-sm font-bold hidden"></p>
+                </div>
+                <script>
+                (function(){
+                    var form = document.getElementById('solapi-test-form');
+                    if (form) form.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        var phone = (form.querySelector('input[name=phone]') || {}).value;
+                        var testType = (form.querySelector('select[name=test_type]') || {}).value;
+                        var resultEl = document.getElementById('solapi-test-result');
+                        if (!phone || phone.length < 10) { if (resultEl) { resultEl.textContent = '휴대폰 번호를 입력해 주세요.'; resultEl.classList.remove('hidden'); resultEl.className = 'mt-4 text-sm font-bold text-red-600'; } return; }
+                        resultEl.classList.remove('hidden'); resultEl.textContent = '발송 중...'; resultEl.className = 'mt-4 text-sm font-bold text-gray-600';
+                        fetch('/admin/solapi/test_send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ phone: phone.replace(/\\D/g,''), test_type: testType }) })
+                            .then(function(r) { return r.json(); })
+                            .then(function(data) {
+                                if (data && data.success) { resultEl.textContent = '발송 요청이 완료되었습니다. 수신기로 확인해 보세요.'; resultEl.className = 'mt-4 text-sm font-bold text-teal-600'; }
+                                else { resultEl.textContent = (data && data.message) ? data.message : '발송 실패'; resultEl.className = 'mt-4 text-sm font-bold text-red-600'; }
+                            })
+                            .catch(function() { resultEl.textContent = '요청 중 오류가 발생했습니다.'; resultEl.className = 'mt-4 text-sm font-bold text-red-600'; });
+                    });
+                })();
+                </script>
+                <p class="text-[10px] text-gray-500 mt-6">설정 방법: <a href="https://solapi.com" target="_blank" rel="noopener" class="text-teal-600 font-black underline">솔라피</a> · <a href="/docs/SOLAPI_SETUP.md" class="text-teal-600 font-black underline">docs/SOLAPI_SETUP.md</a></p>
+            </div>
+
         {% elif tab == 'revenue_report' %}
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">수익·지출 종합 통계 (결제넘버 기준)</h3>
@@ -10639,6 +10773,18 @@ def admin_dashboard():
             </div>
 
         {% elif tab == 'members' %}
+            <div class="mb-8 p-6 md:p-8 rounded-[2.5rem] border border-gray-50 shadow-sm bg-white">
+                <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-4 font-black">게시판 현황</h3>
+                <ul class="space-y-3">
+                    {% for b in board_stats %}
+                    <li class="flex items-center justify-between py-2 border-b border-gray-100">
+                        <a href="{{ b.link }}" class="font-black text-gray-800 hover:text-teal-600 transition">{{ b.name }}</a>
+                        <span class="text-teal-600 font-black">{{ b.count }}건</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <p class="mt-4 text-[10px] text-gray-400 font-bold">게시판별 글 수를 확인하고 링크로 이동할 수 있습니다.</p>
+            </div>
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">회원관리</h3>
                 <p class="text-[11px] text-gray-500 font-bold mb-4">가입 회원 정보 전체 출력 (비밀번호는 보안상 비표시)</p>
@@ -11800,6 +11946,7 @@ def admin_dashboard():
             <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
                 <span class="text-[10px] text-teal-600 font-black uppercase w-28 shrink-0">2. 마케팅·회원</span>
                 {% if is_master %}<a href="/admin?tab=messages" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'messages' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메시지 발송</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=solapi_check" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'solapi_check' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">솔라피 확인</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=popup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs trans
 ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">알림팝업</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=utm" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'utm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">유입/광고</a>{% endif %}
@@ -11933,28 +12080,6 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                             {% endfor %}
                         </tbody>
                     </table>
-                </div>
-            </div>
-            <div class="mt-12 grid grid-cols-1 lg:grid-cols-2 gap-10 text-left">
-                <div class="bg-white p-6 md:p-8 rounded-[2.5rem] border border-gray-50 shadow-sm">
-                    <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-4 font-black">주문완료 현황 (최근 50건)</h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left min-w-[400px] text-[10px] md:text-xs">
-                            <thead class="bg-gray-50 border-b border-gray-100 font-bold"><tr><th class="p-3">주문번호</th><th class="p-3">일시</th><th class="p-3 text-right">금액</th><th class="p-3 text-center">상태</th></tr></thead>
-                            <tbody>
-                                {% for o in order_completion_list %}
-                                <tr class="border-b border-gray-50 hover:bg-gray-50/50"><td class="p-3 font-mono text-gray-800">{{ (o.order_id or '-')[-12:] }}</td><td class="p-3 text-gray-600">{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '-' }}</td><td class="p-3 text-right font-black text-teal-600">{{ "{:,}".format(o.total_price or 0) }}원</td><td class="p-3 text-center"><span class="{% if o.status == '결제취소' %}text-red-500{% else %}text-teal-600{% endif %} font-bold">{{ o.status or '-' }}</span></td></tr>
-                                {% else %}
-                                <tr><td colspan="4" class="p-6 text-center text-gray-400">주문 내역이 없습니다.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="bg-white p-6 md:p-8 rounded-[2.5rem] border border-gray-50 shadow-sm">
-                    <h3 class="text-sm text-gray-500 uppercase tracking-widest mb-4 font-black">게시판 현황</h3>
-                    <ul class="space-y-3">{% for b in board_stats %}<li class="flex items-center justify-between py-2 border-b border-gray-100"><a href="{{ b.link }}" class="font-black text-gray-800 hover:text-teal-600 transition">{{ b.name }}</a><span class="text-teal-600 font-black">{{ b.count }}건</span></li>{% endfor %}</ul>
-                    <p class="mt-4 text-[10px] text-gray-400 font-bold">게시판별 글 수를 확인하고 링크로 이동할 수 있습니다.</p>
                 </div>
             </div>
 
@@ -14681,26 +14806,14 @@ def init_db():
             db.session.add(Category(name="프리미엄 공동구매", tax_type="과세", order=1, description="유통 단계를 파격적으로 줄인 송도 전용 공구 상품입니다."));
         db.session.commit()
 
-# [수정 위치: app.py 파일 가장 마지막 부분]
-
-import subprocess
-
-# --- 수정 전 기존 코드 ---
-# if __name__ == "__main__":
-#     init_db()
-#     if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
-#         subprocess.Popen(["python", delivery_script])
-#     app.run(host="0.0.0.0", port=5000, debug=True)
-
-# --- 수정 후 (이 부분으로 교체하세요) ---
 # 관리자 라우트는 admin_routes.py에서 한 번에 등록 (app.py 경량화)
 from admin_routes import register_admin_routes
 register_admin_routes(app)
 
 if __name__ == "__main__":
     with app.app_context():
-        # 쇼핑몰 테이블과 배송 테이블을 각각의 DB 파일에 생성합니다.
-        db.create_all() # BINDS 설정에 따라 자동으로 분리 생성됨
+        # 모든 테이블을 현재 DATABASE_URL 기준 DB에 생성
+        db.create_all()
         
         # [복구] 배송 시스템 최초 관리자 생성 로직 추가
         from delivery_system import AdminUser

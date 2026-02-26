@@ -6,7 +6,7 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll([
         '/',
-        '/static/logo/side1.jpg',
+        '/static/logo/sede1roding.png',
         '/static/offline.html'
       ]).catch(() => {});
     }).then(() => self.skipWaiting())
@@ -35,8 +35,8 @@ self.addEventListener('push', (event) => {
   }
   var opts = {
     body: data.body,
-    icon: '/static/logo/side1.jpg',
-    badge: '/static/logo/side1.jpg',
+    icon: '/static/logo/sede1roding.png',
+    badge: '/static/logo/sede1roding.png',
     tag: 'basket-uncle-msg',
     requireInteraction: false,
     data: { url: data.url }
