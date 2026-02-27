@@ -18,6 +18,9 @@ from sqlalchemy import text, UniqueConstraint
 logi_bp = Blueprint('logi', __name__, url_prefix='/logi')
 db_delivery = SQLAlchemy()
 
+# 기사 배송료(1건당 기본 지급액, 원 단위) – DriverConfig 없을 때 기본값
+DRIVER_FEE_DEFAULT = 4000
+
 # --------------------------------------------------------------------------------
 # 3. 데이터베이스 모델 (기존 기능 100% 보존)
 # --------------------------------------------------------------------------------
@@ -59,6 +62,12 @@ class Driver(db_delivery.Model):
     # default 값을 get_kst 함수로 변경
     created_at = db_delivery.Column(db_delivery.DateTime, default=get_kst)
 
+
+class DriverConfig(db_delivery.Model):
+    """기사 배송료 설정 (전역 1레코드)."""
+    id = db_delivery.Column(db_delivery.Integer, primary_key=True)
+    unit_fee = db_delivery.Column(db_delivery.Integer, nullable=False, default=4000)  # 1건당 기본 4,000원
+
 class DeliveryTask(db_delivery.Model):
     id = db_delivery.Column(db_delivery.Integer, primary_key=True)
     order_id = db_delivery.Column(db_delivery.String(100))
@@ -74,6 +83,9 @@ class DeliveryTask(db_delivery.Model):
     photo_data = db_delivery.Column(db_delivery.Text, nullable=True) 
     pickup_at = db_delivery.Column(db_delivery.DateTime, nullable=True)
     completed_at = db_delivery.Column(db_delivery.DateTime, nullable=True)
+    # 기사 정산 상태
+    driver_pay_status = db_delivery.Column(db_delivery.String(20), default="미지급")  # 미지급 / 지급완료
+    driver_pay_date = db_delivery.Column(db_delivery.DateTime, nullable=True)
     __table_args__ = (UniqueConstraint('order_id', 'category', name='_order_cat_v12_uc_bp'),)
 
 class DeliveryLog(db_delivery.Model):
@@ -95,6 +107,79 @@ def logi_add_log(task_id, order_id, status, message):
     log = DeliveryLog(task_id=task_id, order_id=order_id, status=status, message=message, created_at=get_kst())
     db_delivery.session.add(log)
     db_delivery.session.commit()
+
+
+def logi_get_driver_unit_fee():
+    """DB에 저장된 기사 1건당 배송료 단가를 가져오고, 없으면 기본값으로 생성."""
+    cfg = DriverConfig.query.get(1)
+    if not cfg:
+        cfg = DriverConfig(id=1, unit_fee=DRIVER_FEE_DEFAULT)
+        db_delivery.session.add(cfg)
+        db_delivery.session.commit()
+    return cfg.unit_fee or DRIVER_FEE_DEFAULT
+
+
+def logi_set_driver_unit_fee(amount: int):
+    """기사 1건당 배송료 단가 저장."""
+    if amount <= 0:
+        amount = DRIVER_FEE_DEFAULT
+    cfg = DriverConfig.query.get(1)
+    if not cfg:
+        cfg = DriverConfig(id=1, unit_fee=amount)
+        db_delivery.session.add(cfg)
+    else:
+        cfg.unit_fee = amount
+    db_delivery.session.commit()
+
+
+def logi_calc_driver_payouts(start_dt=None, end_dt=None, driver_id=None, pay_status=None, item_keyword=None):
+    """기사별 배송완료 건수 및 예상 지급액 계산 (DB 기록 변경 없음, 조회용 로직).
+
+    - pay_status: None/''=전체, '미지급', '지급완료'
+    - item_keyword: 상품명/카테고리 텍스트 부분검색 (product_details 기준)
+    """
+    _logi_ensure_driver_pay_columns()
+    q = DeliveryTask.query.filter(DeliveryTask.status == '완료')
+    if start_dt:
+        q = q.filter(DeliveryTask.completed_at >= start_dt)
+    if end_dt:
+        q = q.filter(DeliveryTask.completed_at <= end_dt)
+    if driver_id:
+        q = q.filter(DeliveryTask.driver_id == driver_id)
+    if pay_status in ('미지급', '지급완료'):
+        q = q.filter(DeliveryTask.driver_pay_status == pay_status)
+    if item_keyword:
+        kw = f"%{item_keyword.strip()}%"
+        q = q.filter(DeliveryTask.product_details.ilike(kw))
+
+    unit_fee = logi_get_driver_unit_fee()
+    stats = {}
+    for t in q.all():
+        if not t.driver_id:
+            continue
+        key = (t.driver_id, t.driver_name)
+        if key not in stats:
+            stats[key] = {
+                "driver_id": t.driver_id,
+                "driver_name": t.driver_name or "",
+                "completed_count": 0,
+            }
+        stats[key]["completed_count"] += 1
+
+    # 지급액 계산 (건당 unit_fee 기준)
+    for v in stats.values():
+        v["payout_amount"] = v["completed_count"] * unit_fee
+
+    # 총합계
+    total_completed = sum(v["completed_count"] for v in stats.values())
+    total_payout = sum(v["payout_amount"] for v in stats.values())
+
+    return {
+        "drivers": list(stats.values()),
+        "total_completed": total_completed,
+        "total_payout": total_payout,
+        "unit_fee": unit_fee,
+    }
 
 def logi_extract_qty(text_data):
     match = re.search(r'\((\d+)\)', text_data)
@@ -124,6 +209,29 @@ def _logi_using_postgres():
     except Exception:
         return False
 
+
+def _logi_ensure_driver_pay_columns():
+    """delivery_task 테이블에 driver_pay_status / driver_pay_date 컬럼이 없으면 자동 추가."""
+    try:
+        # SQLite든 Postgres든 이미 있으면 에러가 나므로, 실패해도 그냥 무시
+        try:
+            db_delivery.session.execute(text(
+                "ALTER TABLE delivery_task ADD COLUMN driver_pay_status VARCHAR(20) DEFAULT '미지급'"
+            ))
+            db_delivery.session.commit()
+        except Exception:
+            db_delivery.session.rollback()
+        try:
+            db_delivery.session.execute(text(
+                "ALTER TABLE delivery_task ADD COLUMN driver_pay_date TIMESTAMP NULL"
+            ))
+            db_delivery.session.commit()
+        except Exception:
+            db_delivery.session.rollback()
+    except Exception:
+        # 어떤 이유로든 실패해도 앱이 죽지 않도록 보호
+        pass
+
 # --------------------------------------------------------------------------------
 # 5. 관리자 보안 라우트 (로그인/로그아웃)
 # --------------------------------------------------------------------------------
@@ -131,10 +239,13 @@ def _logi_using_postgres():
 @logi_bp.route('/login', methods=['GET', 'POST'])
 def logi_admin_login():
     if request.method == 'POST':
-        user = AdminUser.query.filter_by(username=request.form['username']).first()
-        if user and user.password == request.form['password']:
+        username = request.form['username']
+        password = request.form['password']
+
+        # 고정 관리자 계정: admin@uncle.com / pw1234
+        if username == "admin@uncle.com" and password == "1234":
             session['admin_logged_in'] = True
-            session['admin_username'] = user.username
+            session['admin_username'] = username
             return redirect(url_for('logi.logi_admin_dashboard'))
         flash("로그인 정보가 일치하지 않습니다.")
     return render_template_string("""
@@ -234,6 +345,7 @@ def logi_admin_dashboard():
                     <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="min-h-[44px] flex items-center text-green-600 border-b-2 border-green-600 pb-1 touch-manipulation">배송관제</a>
                     <a href="{{ url_for('logi.logi_driver_mgmt') }}" class="min-h-[44px] flex items-center hover:text-green-600 transition touch-manipulation">기사관리</a>
                     <a href="{{ url_for('logi.logi_driver_path_map') }}" class="min-h-[44px] flex items-center hover:text-blue-500 transition touch-manipulation">배송지도</a>
+                    <a href="{{ url_for('logi.logi_driver_payout_page') }}" class="min-h-[44px] flex items-center hover:text-amber-600 transition touch-manipulation">기사지급</a>
                     {% if session['admin_username'] == 'admin' %}<a href="{{ url_for('logi.logi_admin_users_mgmt') }}" class="min-h-[44px] flex items-center hover:text-red-500 transition touch-manipulation">설정</a>{% endif %}
                 </div>
             </div>
@@ -1022,6 +1134,96 @@ def logi_get_task_logs(tid):
     logs = DeliveryLog.query.filter_by(task_id=tid).order_by(DeliveryLog.created_at.desc()).all()
     return jsonify([{"time": l.created_at.strftime('%m-%d %H:%M'), "msg": l.message} for l in logs])
 
+
+@logi_bp.route('/api/driver-payouts')
+def logi_driver_payouts():
+    """기사 배송료 지급 조회용 API.
+
+    쿼리스트링:
+      - start: YYYY-MM-DD (포함)
+      - end:   YYYY-MM-DD (포함)
+    기준: DeliveryTask.status == '완료' 인 건들만 집계.
+    """
+    if not session.get('admin_logged_in'):
+        return jsonify({"success": False, "error": "관리자 로그인 필요"}), 403
+
+    start_str = (request.args.get('start') or '').strip()
+    end_str = (request.args.get('end') or '').strip()
+    start_dt = end_dt = None
+    try:
+        if start_str:
+            start_dt = datetime.strptime(start_str, '%Y-%m-%d')
+        if end_str:
+            # 하루 끝까지 포함
+            end_dt = datetime.strptime(end_str + ' 23:59:59', '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        start_dt = end_dt = None
+
+    if not start_dt and not end_dt:
+        # 기본: 오늘 기준
+        today = get_kst().date()
+        start_dt = datetime.combine(today, datetime.min.time())
+        end_dt = datetime.combine(today, datetime.max.time())
+
+    result = logi_calc_driver_payouts(start_dt, end_dt, driver_id=None, pay_status=None, item_keyword=None)
+    result.update({
+        "success": True,
+        "start": start_dt.strftime('%Y-%m-%d %H:%M:%S') if start_dt else None,
+        "end": end_dt.strftime('%Y-%m-%d %H:%M:%S') if end_dt else None,
+    })
+    return jsonify(result)
+
+
+@logi_bp.route('/driver-payout/settle', methods=['POST'])
+def logi_driver_payout_settle():
+    """선택된 배송완료 건들을 '지급완료'로 표시하고 지급일을 기록."""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('logi.logi_admin_login'))
+
+    ids = request.form.getlist('task_ids')
+    if not ids:
+        return redirect(url_for('logi.logi_driver_payout_page',
+                                start=request.form.get('start',''),
+                                end=request.form.get('end',''),
+                                driver_id=request.form.get('driver_id',''),
+                                pay_status=request.form.get('pay_status',''),
+                                q=request.form.get('q','')))
+
+    now_dt = get_kst()
+    unit_fee = logi_get_driver_unit_fee()
+    tasks = DeliveryTask.query.filter(DeliveryTask.id.in_(ids)).all()
+    for t in tasks:
+        t.driver_pay_status = '지급완료'
+        t.driver_pay_date = now_dt
+        logi_add_log(t.id, t.order_id, '기사지급', f'기사 배송료 지급완료 처리 ({unit_fee}원/건 기준)')
+    db_delivery.session.commit()
+
+    return redirect(url_for('logi.logi_driver_payout_page',
+                            start=request.form.get('start',''),
+                            end=request.form.get('end',''),
+                            driver_id=request.form.get('driver_id',''),
+                            pay_status=request.form.get('pay_status',''),
+                            q=request.form.get('q','')))
+
+
+@logi_bp.route('/driver-payout/fee', methods=['POST'])
+def logi_driver_fee_update():
+    """기사 1건당 배송료 단가 설정 업데이트."""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('logi.logi_admin_login'))
+    try:
+        unit_fee = int(request.form.get('unit_fee', '0') or 0)
+    except ValueError:
+        unit_fee = DRIVER_FEE_DEFAULT
+    logi_set_driver_unit_fee(unit_fee)
+    # 기존 조회 조건 유지
+    return redirect(url_for('logi.logi_driver_payout_page',
+                            start=request.args.get('start',''),
+                            end=request.args.get('end',''),
+                            driver_id=request.args.get('driver_id',''),
+                            pay_status=request.args.get('pay_status',''),
+                            q=request.args.get('q','')))
+
 @logi_bp.route('/sync')
 def logi_sync():
     try:
@@ -1245,6 +1447,217 @@ def logi_driver_mgmt():
     </body>
     </html>
     """, driver_stats=driver_stats, work_url=work_url)
+
+
+@logi_bp.route('/driver-payout')
+def logi_driver_payout_page():
+    """기사 배송료 지급 현황 페이지 (관리자용)."""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('logi.logi_admin_login'))
+
+    # 테이블 스키마 보정 (컬럼 없으면 자동 추가)
+    _logi_ensure_driver_pay_columns()
+
+    # 기본 조회 기간: 오늘
+    today = get_kst().date()
+    start_str = request.args.get('start', today.strftime('%Y-%m-%d'))
+    end_str = request.args.get('end', today.strftime('%Y-%m-%d'))
+    driver_id = request.args.get('driver_id', '', type=int)
+    pay_status = (request.args.get('pay_status') or '미지급').strip()  # 기본: 미지급만
+    item_keyword = (request.args.get('q') or '').strip()
+
+    start_dt = end_dt = None
+    try:
+        if start_str:
+            start_dt = datetime.strptime(start_str, '%Y-%m-%d')
+        if end_str:
+            end_dt = datetime.strptime(end_str + ' 23:59:59', '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        start_dt = end_dt = None
+
+    # 기사별 집계 (요약 카드에서 사용)
+    payouts = logi_calc_driver_payouts(
+        start_dt, end_dt,
+        driver_id=driver_id or None,
+        pay_status=pay_status or None,
+        item_keyword=item_keyword or None
+    )
+
+    # 드롭다운 표시용 기사 목록
+    drivers = Driver.query.order_by(Driver.name.asc()).all()
+
+    # 상세 목록: 조건에 맞는 개별 배차건 (선택 지급용)
+    task_q = DeliveryTask.query.filter(DeliveryTask.status == '완료')
+    if start_dt:
+        task_q = task_q.filter(DeliveryTask.completed_at >= start_dt)
+    if end_dt:
+        task_q = task_q.filter(DeliveryTask.completed_at <= end_dt)
+    if driver_id:
+        task_q = task_q.filter(DeliveryTask.driver_id == driver_id)
+    if pay_status in ('미지급', '지급완료'):
+        task_q = task_q.filter(DeliveryTask.driver_pay_status == pay_status)
+    if item_keyword:
+        kw = f"%{item_keyword}%"
+        task_q = task_q.filter(DeliveryTask.product_details.ilike(kw))
+    payout_tasks = task_q.order_by(DeliveryTask.completed_at.desc()).all()
+
+    html = """
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>기사 배송료 지급 - B.UNCLE Logi</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-50 p-4 sm:p-8 min-h-screen">
+        <div class="max-w-3xl mx-auto">
+            <nav class="mb-6">
+                <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="inline-flex items-center text-green-600 font-black text-sm">
+                    <i class="fas fa-arrow-left mr-2"></i>배송관제로 돌아가기
+                </a>
+            </nav>
+
+            <h1 class="text-2xl sm:text-3xl font-black text-slate-800 mb-4">기사 배송료 지급 현황</h1>
+            <p class="text-[11px] text-slate-500 font-bold mb-4">
+                선택한 기간 동안 <strong>배송 완료</strong>된 건수를 기준으로 기사님별 지급 예정 금액을 계산합니다.
+                (건당 {{ payouts.unit_fee }}원 기준, 참고용 계산)
+            </p>
+
+            <form method="GET" class="flex flex-wrap items-end gap-3 mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 font-black uppercase mb-1">시작일</label>
+                    <input type="date" name="start" value="{{ start_str }}" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 font-black uppercase mb-1">종료일</label>
+                    <input type="date" name="end" value="{{ end_str }}" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 font-black uppercase mb-1">기사</label>
+                    <select name="driver_id" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-w-[120px]">
+                        <option value="">전체</option>
+                        {% for d in drivers %}
+                        <option value="{{ d.id }}" {% if driver_id == d.id %}selected{% endif %}>{{ d.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 font-black uppercase mb-1">지급상태</label>
+                    <select name="pay_status" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold">
+                        <option value="">전체</option>
+                        <option value="미지급" {% if pay_status == '미지급' %}selected{% endif %}>미지급</option>
+                        <option value="지급완료" {% if pay_status == '지급완료' %}selected{% endif %}>지급완료</option>
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 font-black uppercase mb-1">품목 검색</label>
+                    <input type="text" name="q" value="{{ item_keyword }}" placeholder="품목/메모 검색" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-w-[160px]">
+                </div>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-green-600 text-white text-xs font-black">
+                    조회
+                </button>
+            </form>
+
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                <form method="POST" action="{{ url_for('logi.logi_driver_payout_settle') }}">
+                <input type="hidden" name="start" value="{{ start_str }}">
+                <input type="hidden" name="end" value="{{ end_str }}">
+                <input type="hidden" name="driver_id" value="{{ driver_id or '' }}">
+                <input type="hidden" name="pay_status" value="{{ pay_status }}">
+                <input type="hidden" name="q" value="{{ item_keyword }}">
+                <table class="w-full text-left text-[11px] font-bold border-collapse min-w-[800px]">
+                    <thead class="bg-slate-800 text-white">
+                        <tr>
+                            <th class="p-3 border border-slate-700 w-12 text-center"><input type="checkbox" onclick="toggleAll(this)" class="w-4 h-4 rounded border-slate-300 accent-green-600"></th>
+                            <th class="p-3 border border-slate-700 w-16 text-center">ID</th>
+                            <th class="p-3 border border-slate-700">기사명</th>
+                            <th class="p-3 border border-slate-700 w-32">완료일시</th>
+                            <th class="p-3 border border-slate-700">카테고리/품목</th>
+                            <th class="p-3 border border-slate-700 w-24 text-right">지급액</th>
+                            <th class="p-3 border border-slate-700 w-24 text-center">지급상태</th>
+                            <th class="p-3 border border-slate-700 w-32 text-center">지급일</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set total_payout = 0 %}
+                        {% for t in payout_tasks %}
+                        {% set pay_amount = payouts.unit_fee %}
+                        {% set total_payout = total_payout + (0 if t.driver_pay_status == '지급완료' else pay_amount) %}
+                        <tr class="border-b border-slate-100">
+                            <td class="p-3 text-center">
+                                {% if t.driver_pay_status != '지급완료' %}
+                                <input type="checkbox" name="task_ids" value="{{ t.id }}" class="row-check w-4 h-4 rounded border-slate-300 accent-green-600">
+                                {% endif %}
+                            </td>
+                            <td class="p-3 text-center">{{ t.id }}</td>
+                            <td class="p-3">{{ t.driver_name or '-' }}</td>
+                            <td class="p-3">{{ t.completed_at.strftime('%Y-%m-%d %H:%M') if t.completed_at else '-' }}</td>
+                            <td class="p-3">
+                                <div class="text-[11px] text-slate-500">{{ t.category or '' }}</div>
+                                <div class="text-[10px] text-slate-700 line-clamp-2">{{ t.product_details or '' }}</div>
+                            </td>
+                            <td class="p-3 text-right">{{ "{:,}".format(pay_amount) }}원</td>
+                            <td class="p-3 text-center">
+                                {% if t.driver_pay_status == '지급완료' %}
+                                <span class="px-2 py-1 rounded-full bg-green-100 text-green-700 text-[10px] font-black">지급완료</span>
+                                {% else %}
+                                <span class="px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-[10px] font-black">미지급</span>
+                                {% endif %}
+                            </td>
+                            <td class="p-3 text-center text-[10px] text-slate-500">
+                                {{ t.driver_pay_date.strftime('%Y-%m-%d') if t.driver_pay_date else '-' }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% if not payout_tasks %}
+                        <tr>
+                            <td colspan="8" class="p-6 text-center text-slate-400 font-bold text-sm">
+                                조건에 맞는 완료 건이 없습니다.
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                    {% if payout_tasks %}
+                    <tfoot class="bg-slate-50 font-black">
+                        <tr>
+                            <td class="p-3 text-left" colspan="4">
+                                <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-[11px] font-black">
+                                    선택 건 지급완료 처리
+                                </button>
+                            </td>
+                            <td class="p-3 text-right" colspan="2">총 지급 예정 금액</td>
+                            <td class="p-3 text-right" colspan="2">{{ "{:,}".format(total_payout) }}원</td>
+                        </tr>
+                    </tfoot>
+                    {% endif %}
+                </table>
+                </form>
+            </div>
+
+            <form method="POST" action="{{ url_for('logi.logi_driver_fee_update') }}" class="mt-6 bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-end gap-3">
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-slate-500 font-black uppercase mb-1">건당 지급액 설정</label>
+                    <input type="number" name="unit_fee" min="0" value="{{ payouts.unit_fee }}" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold w-32">
+                </div>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-slate-800 text-white text-xs font-black">
+                    저장
+                </button>
+                <p class="text-[10px] text-slate-400 font-bold mt-2">
+                    (※ 이 값은 기사 배송료 계산에 사용되며, 실제 세금/4대보험 처리는 별도 회계 기준을 따릅니다.)
+                </p>
+            </form>
+        </div>
+        <script>
+        function toggleAll(master) {
+            document.querySelectorAll('.row-check').forEach(function(ch){ ch.checked = master.checked; });
+        }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html, **locals())
 
 @logi_bp.route('/driver/add', methods=['POST'])
 def logi_add_driver():

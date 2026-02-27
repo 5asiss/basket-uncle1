@@ -2511,7 +2511,9 @@ def admin_order_print():
                     </div>
                     <div class="w-1/3 text-right">
                         <p class="text-[9px] text-gray-400 font-black uppercase mb-1">Order ID</p>
-                        <p class="invoice-order-id text-[18px] font-black bg-gray-100 px-2 py-1 inline-block rounded">{{ o.order_id }}</p>
+                        <p class="invoice-order-id text-[16px] font-black bg-gray-100 px-2 py-1 rounded break-all leading-tight inline-block max-w-[7rem] text-right">
+                            {{ o.order_id }}
+                        </p>
                         <p class="text-[10px] text-gray-400 mt-1 font-bold">{{ o.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
                     </div>
                 </div>
@@ -3039,7 +3041,10 @@ def index():
                 <div class="p-3 md:p-4 flex flex-col flex-1">
                     <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                     <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
-                    <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}</p>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">
+                        {{ p.spec or '일반' }}
+                        {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                    </p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
                     <div class="mt-auto flex justify-between items-end gap-2">
                         <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
@@ -4687,10 +4692,18 @@ def category_view(cat_name):
                 </a>
                 <div class="p-5 md:p-10 flex flex-col flex-1 text-left">
                     <a href="/product/{{p.id}}">
-                        <h3 class="font-black text-gray-800 text-sm md:text-lg truncate mb-2 text-left">{{ p.name }}</h3>
+                        <h3 class="font-black text-gray-800 text-sm md:text-lg truncate mb-1 text-left">{{ p.name }}</h3>
                     </a>
-                    
-                    <p class="text-[10px] md:text-xs text-gray-400 font-bold mb-3">{{ p.spec or '일반' }}</p>
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5 text-left"
+                       data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">
+                    </p>
+                    <p class="text-[9px] md:text-[11px] text-teal-600 mb-2 font-medium truncate text-left">
+                        {{ p.description or '' }}
+                    </p>
+                    <p class="text-[10px] md:text-xs text-gray-400 font-bold mb-3">
+                        {{ p.spec or '일반' }}
+                        {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                    </p>
 
                     <div class="mt-auto flex justify-between items-center text-left">
                         <span class="text-base md:text-2xl font-black text-teal-600 text-left">{{ "{:,}".format(p.price) }}원</span>
@@ -8898,17 +8911,37 @@ def admin_revenue_report_download():
     from io import StringIO
     buf = StringIO()
     writer = csv.writer(buf)
-    writer.writerow(['결제넘버', '주문일시', '상태', '주문원금', '포인트사용', '실제수입', '정산지급'])
+    writer.writerow(['결제넘버', '주문일시', '상태', '공급가', '주문원금(판매금)', '포인트사용', '면세/과세', '합계(원금-공급가)', '카드예상수수료(3.3%)', '총합계'])
     for o in orders_in_range:
-        pay_rec = (o.total_price or 0) - (o.points_used or 0) if o.status != '결제취소' else 0
+        total_price = o.total_price or 0
+        points_used = o.points_used or 0
+        # 공급가: 주문 품목 기준
+        supply_total = 0
+        tax_type = '과세'
+        for oi in OrderItem.query.filter_by(order_id=o.id, cancelled=False).all():
+            p = Product.query.get(oi.product_id)
+            if p:
+                if getattr(p, 'supply_price', None) is not None:
+                    supply_total += int((p.supply_price or 0) * oi.quantity)
+                cat = Category.query.filter_by(name=p.category).first()
+                if getattr(cat, 'tax_type', '과세') == '면세':
+                    tax_type = '면세'
+        # 합계(원금-공급가): 포인트 사용과 무관하게 원금 대비 마진
+        gross_profit = total_price - supply_total
+        # 카드 예상 수수료(3.3%): 마진 기준
+        estimated_card_fee = int(round(gross_profit * 0.033)) if gross_profit > 0 else 0
+        # 총합계: 마진 - 카드수수료
+        grand_total = gross_profit - estimated_card_fee
         writer.writerow([
             o.order_id or '-',
             o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '-',
             o.status or '-',
-            o.total_price or 0,
-            o.points_used or 0,
-            pay_rec,
-            settlement_by_order.get(o.id, 0),
+            supply_total,
+            total_price,
+            points_used,
+            tax_type,
+            estimated_card_fee,
+            grand_total,
         ])
     filename = 'revenue_report_{}_{}.csv'.format(
         revenue_report_start.strftime('%Y%m%d'), revenue_report_end.strftime('%Y%m%d'))
@@ -9155,13 +9188,15 @@ def admin_dashboard():
                 cat = Category.query.filter_by(name=oi.product_category).first()
                 cat_type = getattr(cat, 'category_type', None) or '입점형'
                 if cat_type == '공급자형':
+                    # 공급자형: 공급가 기준 정산 (수수료·배송관리비 0)
                     p = Product.query.get(oi.product_id)
-                    base_price = (getattr(p, 'supply_price', None) or p.price) if p else oi.price
-                    sales_amount = base_price * oi.quantity
+                    supply_price = getattr(p, 'supply_price', None) or p.price
+                    sales_amount = supply_price * oi.quantity
                     fee = 0
                     delivery_fee_val = 0
                     total = sales_amount
                 else:
+                    # 입점형: 판매가 기준, 수수료 + 배송관리비 차감
                     sales_amount = oi.price * oi.quantity
                     fee = round(sales_amount * 0.055)
                     delivery_fee_val = delivery_fee_per_settlement
@@ -9204,6 +9239,7 @@ def admin_dashboard():
                 'tax_exempt': '면세' if s.tax_exempt else '과세',
                 'product_name': s.product_name,
                 'sales_amount': s.sales_amount,
+                'quantity': getattr(s, 'quantity', None) or 0,
                 'fee': s.fee,
                 'delivery_fee': s.delivery_fee,
                 'settlement_total': s.settlement_total,
@@ -9371,15 +9407,38 @@ def admin_dashboard():
             revenue_report_end = datetime.now()
         if revenue_report_start and revenue_report_end and revenue_report_start > revenue_report_end:
             revenue_report_start, revenue_report_end = revenue_report_end, revenue_report_start
-        # 수입: 결제완료 등 주문 원금, 포인트 사용, 실제 수입(원금 - 포인트)
+        # 수입: 주문원금(판매금), 포인트 사용, 실제수입(원금 - 포인트), 공급가, 카드 예상수수료(3.3%)
         q_completed = db.session.query(
             db.func.coalesce(db.func.sum(Order.total_price), 0).label('total'),
             db.func.coalesce(db.func.sum(Order.points_used), 0).label('points')
-        ).filter(Order.status != '결제취소', Order.created_at >= revenue_report_start, Order.created_at <= revenue_report_end)
+        ).filter(
+            Order.status != '결제취소',
+            Order.created_at >= revenue_report_start,
+            Order.created_at <= revenue_report_end
+        )
         row_completed = q_completed.first()
-        order_total = int(row_completed.total or 0)
-        points_used_sum = int(row_completed.points or 0)
-        payment_received = order_total - points_used_sum
+        order_total = int(row_completed.total or 0)               # 주문원금(판매금) 합계
+        points_used_sum = int(row_completed.points or 0)          # 포인트 사용 합계
+        payment_received = order_total - points_used_sum          # 실제 수입(현금+카드 유입)
+        # 공급가: 공급자형(공급가가 설정된 상품)의 공급가 총합 (Product.supply_price 기준, 없으면 price)
+        supply_sum = int(db.session.query(
+            db.func.coalesce(
+                db.func.sum(
+                    db.func.coalesce(Product.supply_price, Product.price) * OrderItem.quantity
+                ),
+                0
+            )
+        ).select_from(OrderItem
+        ).join(Product, Product.id == OrderItem.product_id
+        ).join(Order, Order.id == OrderItem.order_id
+        ).filter(
+            Product.supply_price.isnot(None),
+            Order.status != '결제취소',
+            Order.created_at >= revenue_report_start,
+            Order.created_at <= revenue_report_end
+        ).scalar() or 0)
+        # 카드 예상 수수료(3.3%): 실제 수입의 3.3%를 단순 추정
+        estimated_card_fee = int(round(payment_received * 0.033))
         # 환불(취소)
         refund_sum = db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(
             Order.status == '결제취소', Order.created_at >= revenue_report_start, Order.created_at <= revenue_report_end
@@ -9397,6 +9456,8 @@ def admin_dashboard():
             'order_total': order_total,
             'points_used': points_used_sum,
             'payment_received': payment_received,
+            'supply_total': supply_sum,
+            'estimated_card_fee': estimated_card_fee,
             'refund': refund_sum,
             'settlement_paid': settlement_paid,
             'net_profit': payment_received - refund_sum - settlement_paid,
@@ -9414,15 +9475,45 @@ def admin_dashboard():
             for sid, s in sett_rows:
                 settlement_by_order[sid] = int(s or 0)
         for o in orders_in_range:
-            pay_rec = (o.total_price or 0) - (o.points_used or 0) if o.status != '결제취소' else 0
+            total_price_val = o.total_price or 0
+            pay_rec = (total_price_val - (o.points_used or 0)) if o.status != '결제취소' else 0
+            # 공급가: 해당 주문 품목 중 supply_price 설정된 상품 기준
+            item_supply = 0
+            has_taxable = False
+            has_exempt = False
+            for oi in OrderItem.query.filter_by(order_id=o.id, cancelled=False).all():
+                p = Product.query.get(oi.product_id)
+                if not p:
+                    continue
+                if getattr(p, 'supply_price', None) is not None:
+                    item_supply += int((p.supply_price or 0) * oi.quantity)
+                cat = Category.query.filter_by(name=p.category).first()
+                tax_type_val = getattr(cat, 'tax_type', '과세')
+                if tax_type_val == '면세':
+                    has_exempt = True
+                else:
+                    has_taxable = True
+            # 주문 세금 구분: 면세만 있으면 면세, 그렇지 않으면 과세
+            if has_exempt and not has_taxable:
+                tax_type_str = '면세'
+            else:
+                tax_type_str = '과세'
+            # 실제수입(마진) = 주문원금 - 공급가
+            gross_profit = total_price_val - item_supply
+            # 카드 예상 수수료(3.3%) – 마진 기준
+            estimated_fee = int(round(gross_profit * 0.033)) if gross_profit > 0 else 0
             revenue_detail_rows.append({
                 'payment_no': o.order_id or '-',
                 'order_id': o.id,
                 'created_at': o.created_at,
                 'status': o.status or '-',
-                'total_price': o.total_price or 0,
+                'total_price': total_price_val,
                 'points_used': o.points_used or 0,
                 'payment_received': pay_rec,
+                'supply_price_total': item_supply,
+                'tax_type': tax_type_str,
+                'gross_profit': gross_profit,
+                'estimated_card_fee': estimated_fee,
                 'settlement_paid': settlement_by_order.get(o.id, 0),
             })
 
@@ -9647,7 +9738,7 @@ def admin_dashboard():
                     r['category_name'] = c.name
                     email_order_detail_lines.append(r)
 
-    # 발주관리 탭: 품목 상세(오더넘버·주문시간·품목·수량·공급가·세금·종합계액) + 날자별 소계·총합계
+    # 발주관리 탭: 품목 상세(오더넘버·주문시간·품목·수량·공급가·종합계액) + 날자별 소계·총합계
     purchase_order_start = None
     purchase_order_end = None
     purchase_order_category = '전체'
@@ -9655,6 +9746,8 @@ def admin_dashboard():
     purchase_order_by_date = {}
     purchase_order_grand_total = 0
     purchase_order_date_subtotals = {}
+    purchase_order_summary_by_product = []
+    purchase_order_selected_category = None
     purchase_order_categories = []
     if tab == 'purchase_order' and is_master:
         purchase_order_categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
@@ -9672,7 +9765,26 @@ def admin_dashboard():
         purchase_order_rows, purchase_order_by_date, purchase_order_grand_total = _get_purchase_order_detail_rows(
             purchase_order_start, purchase_order_end, purchase_order_category
         )
+        if purchase_order_category != '전체':
+            for c in purchase_order_categories:
+                if c.name == purchase_order_category:
+                    purchase_order_selected_category = c
+                    break
         purchase_order_date_subtotals = {dk: sum(r['line_total'] for r in rs) for dk, rs in purchase_order_by_date.items()}
+        # 품목별 합산 (발주완료 내역 요약용)
+        if purchase_order_rows:
+            from collections import defaultdict
+            _sum = defaultdict(lambda: {'quantity': 0, 'supply_price': 0, 'line_total': 0})
+            for r in purchase_order_rows:
+                name = r.get('product_name') or ''
+                _sum[name]['quantity'] += r.get('quantity', 0)
+                # 동일 품목은 공급가가 같다고 가정
+                if not _sum[name]['supply_price']:
+                    _sum[name]['supply_price'] = r.get('supply_price', 0)
+                _sum[name]['line_total'] += r.get('line_total', 0)
+            purchase_order_summary_by_product = [
+                {'product_name': n, **vals} for n, vals in sorted(_sum.items(), key=lambda x: -x[1]['line_total'])
+            ]
 
     # 통계(페이지뷰) 탭: 조회수·주문·상품·회원 등
     stats_page_views_today = stats_page_views_week = stats_page_views_total = {'main': 0, 'category': 0, 'product': 0, 'cart': 0}
@@ -9792,6 +9904,7 @@ def admin_dashboard():
                 <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
                 <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
+                {% if is_master %}<a href="/logi/driver-payout" target="_blank" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200 transition">기사정산(새창)</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
                 <a href="/admin?tab=stats" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'stats' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">통계</a>
             </div>
@@ -9843,9 +9956,9 @@ def admin_dashboard():
         {% endif %}
         {% if tab == 'purchase_order' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-indigo-200 bg-indigo-50/80 text-left">
-                <p class="font-black text-indigo-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📋</span> 발주관리 — 오더넘버·주문시간·품목·수량·공급가·세금·종합계액 (날자별 정리, 총합계)</p>
+                <p class="font-black text-indigo-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📋</span> 발주관리 — 오더넘버·주문시간·품목·수량·공급가·종합계액 (날자별 정리, 총합계)</p>
                 <p class="text-[11px] text-gray-700 mb-4">시간대를 지정한 뒤 발주 상세를 조회할 수 있습니다. 카테고리별 발송 시 내용이 날자별로 정리되며 총합계액이 하단에 표시됩니다. 미리보기로 발주서 이미지를 확인한 뒤 이메일 발송하세요.</p>
-                <form action="/admin?tab=purchase_order" method="GET" class="flex flex-wrap items-end gap-4 p-5 bg-white rounded-2xl border border-indigo-100 mb-6">
+                <form action="/admin?tab=purchase_order" method="GET" class="flex flex-wrap items-end gap-4 p-5 bg-white rounded-2xl border border-indigo-100 mb-4">
                     <input type="hidden" name="tab" value="purchase_order">
                     <div>
                         <label class="block text-[10px] font-black text-gray-600 mb-1">시작 일시</label>
@@ -9857,29 +9970,72 @@ def admin_dashboard():
                     </div>
                     <div>
                         <label class="block text-[10px] font-black text-gray-600 mb-1">카테고리</label>
-                        <select name="po_category" class="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
+                        <select name="po_category" class="border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold min-w-[160px]">
                             <option value="전체" {% if purchase_order_category == '전체' %}selected{% endif %}>전체</option>
                             {% for c in purchase_order_categories %}<option value="{{ c.name }}" {% if purchase_order_category == c.name %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
                         </select>
                     </div>
                     <button type="submit" class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-black text-xs hover:bg-indigo-700">조회</button>
                 </form>
+                {% if purchase_order_selected_category %}
+                <div class="mb-4 text-[11px] text-gray-600 font-bold px-1">
+                    선택 카테고리: <span class="text-indigo-700">{{ purchase_order_selected_category.name }}</span>
+                    · 관리자 이메일: <span class="text-teal-700">{{ purchase_order_selected_category.manager_email or '미등록' }}</span>
+                </div>
+                {% endif %}
                 {% if purchase_order_rows %}
                 <div class="flex flex-wrap items-center gap-3 mb-3">
-                    <a href="/admin/purchase_order/preview_image?{{ {'po_start': (purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else ''), 'po_end': (purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else ''), 'po_category': purchase_order_category}|urlencode }}" target="_blank" class="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs hover:bg-teal-700">🖼 발주서 이미지 미리보기</a>
+                    <a href="/admin/purchase_order/preview_page?{{ {'po_start': (purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else ''), 'po_end': (purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else ''), 'po_category': purchase_order_category}|urlencode }}" target="_blank" class="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs hover:bg-teal-700">🖼 발주서 이미지 미리보기</a>
                 </div>
                 <div class="bg-white rounded-2xl border border-indigo-100 overflow-x-auto mb-6">
                     <h4 class="text-sm font-black text-gray-800 p-4 border-b border-gray-100">발주 상세 ({{ purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else '' }} ~ {{ purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else '' }}) · 총합계 {{ "{:,}".format(purchase_order_grand_total) }}원</h4>
                     <table class="w-full text-left text-[11px] min-w-[800px]">
-                        <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-3">오더넘버</th><th class="p-3">주문시간</th><th class="p-3">품목</th><th class="p-3 text-right">수량</th><th class="p-3 text-right">공급가</th><th class="p-3 text-right">세금</th><th class="p-3 text-right">종합계액</th></tr></thead>
+                        <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-3">오더넘버</th><th class="p-3">주문시간</th><th class="p-3">품목</th><th class="p-3 text-right">수량</th><th class="p-3 text-right">공급가</th><th class="p-3 text-right">종합계액</th></tr></thead>
                         <tbody>
                             {% for date_key, rows in purchase_order_by_date|dictsort %}
                                 {% for row in rows %}
-                                <tr class="border-b border-gray-50"><td class="p-3">{{ row.order_id }}</td><td class="p-3">{{ row.order_time }}</td><td class="p-3 font-bold">{{ row.product_name }}</td><td class="p-3 text-right">{{ row.quantity }}</td><td class="p-3 text-right">{{ "{:,}".format(row.supply_price) }}</td><td class="p-3 text-right">{{ row.tax_display }}</td><td class="p-3 text-right font-black">{{ "{:,}".format(row.line_total) }}</td></tr>
+                                <tr class="border-b border-gray-50"><td class="p-3">{{ row.order_id }}</td><td class="p-3">{{ row.order_time }}</td><td class="p-3 font-bold">{{ row.product_name }}</td><td class="p-3 text-right">{{ row.quantity }}</td><td class="p-3 text-right">{{ "{:,}".format(row.supply_price) }}</td><td class="p-3 text-right font-black">{{ "{:,}".format(row.line_total) }}</td></tr>
                                 {% endfor %}
-                                <tr class="border-b border-gray-100 bg-amber-50"><td class="p-3 text-right font-black" colspan="6">{{ date_key }} 소계</td><td class="p-3 text-right font-black">{{ "{:,}".format(purchase_order_date_subtotals.get(date_key, 0)) }}</td></tr>
+                                <tr class="border-b border-gray-100 bg-amber-50"><td class="p-3 text-right font-black" colspan="5">{{ date_key }} 소계</td><td class="p-3 text-right font-black">{{ "{:,}".format(purchase_order_date_subtotals.get(date_key, 0)) }}</td></tr>
                             {% endfor %}
-                            <tr class="bg-teal-50 font-black"><td class="p-3" colspan="6">총합계</td><td class="p-3 text-right text-teal-700">{{ "{:,}".format(purchase_order_grand_total) }}원</td></tr>
+                            <tr class="bg-teal-50 font-black"><td class="p-3" colspan="5">총합계</td><td class="p-3 text-right text-teal-700">{{ "{:,}".format(purchase_order_grand_total) }}원</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="bg-white rounded-2xl border border-indigo-100 overflow-x-auto mb-6">
+                    <h4 class="text-sm font-black text-gray-800 p-4 border-b border-gray-100">발주완료 품목 합산 (현재 조회 구간 기준)</h4>
+                    <table class="w-full text-left text-[11px] min-w-[600px]">
+                        <thead class="bg-gray-50 border-b border-gray-100">
+                            <tr>
+                                <th class="p-3">품목</th>
+                                <th class="p-3 text-right">총 수량</th>
+                                <th class="p-3 text-right">공급가</th>
+                                <th class="p-3 text-right">종합계액</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set sum_qty = 0 %}
+                            {% set sum_total = 0 %}
+                            {% for r in purchase_order_summary_by_product %}
+                            {% set sum_qty = sum_qty + r.quantity %}
+                            {% set sum_total = sum_total + r.line_total %}
+                            <tr class="border-b border-gray-50">
+                                <td class="p-3 font-bold">{{ r.product_name }}</td>
+                                <td class="p-3 text-right">{{ r.quantity }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(r.supply_price) }}</td>
+                                <td class="p-3 text-right font-black">{{ "{:,}".format(r.line_total) }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% if purchase_order_summary_by_product %}
+                            <tr class="bg-teal-50 font-black">
+                                <td class="p-3">합계</td>
+                                <td class="p-3 text-right">{{ sum_qty }}</td>
+                                <td class="p-3 text-right">-</td>
+                                <td class="p-3 text-right text-teal-700">{{ "{:,}".format(sum_total) }}원</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="p-4 text-center text-gray-400 font-bold">현재 조회 조건에 해당하는 발주완료 내역이 없습니다.</td></tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>
@@ -9894,7 +10050,7 @@ def admin_dashboard():
                     <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-teal-700">발주서 이미지 생성 후 이메일 발송</button>
                 </form>
                 {% else %}
-                <p class="text-gray-500 text-sm font-bold py-4">위에서 시작·종료 일시와 카테고리를 선택한 뒤 [조회]를 누르면 해당 구간의 발주 상세(오더넘버·주문시간·품목·수량·공급가·세금·종합계액)가 날자별로 표시됩니다. [발주서 이미지 미리보기]로 이미지를 확인한 뒤 이메일을 입력하고 발송할 수 있습니다.</p>
+                <p class="text-gray-500 text-sm font-bold py-4">위에서 시작·종료 일시와 카테고리를 선택한 뒤 [조회]를 누르면 해당 구간의 발주 상세(오더넘버·주문시간·품목·수량·공급가·종합계액)가 날자별로 표시되고, 아래 표에서 발주완료 품목 합산 내역을 함께 볼 수 있습니다. [발주서 이미지 미리보기]로 이미지를 확인한 뒤 이메일을 입력하고 발송할 수 있습니다.</p>
                 {% endif %}
             </div>
         {% endif %}
@@ -12033,30 +12189,62 @@ def admin_dashboard():
                     {% endif %}
                 </div>
                 <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto -mx-3 md:mx-0">
-                    <table class="w-full text-left min-w-[800px] text-[11px] font-bold border-collapse">
+                    <table class="w-full text-left min-w-[1100px] text-[11px] font-bold border-collapse">
                         <thead class="bg-gray-800 text-white">
                             <tr>
                                 <th class="p-3 border border-gray-600">결제넘버</th>
-                                <th class="p-3 border border-gray-600 w-36">주문일시</th>
-                                <th class="p-3 border border-gray-600 w-20">상태</th>
-                                <th class="p-3 border border-gray-600 w-28 text-right">주문원금</th>
-                                <th class="p-3 border border-gray-600 w-24 text-right">포인트사용</th>
-                                <th class="p-3 border border-gray-600 w-28 text-right">실제수입</th>
-                                <th class="p-3 border border-gray-600 w-28 text-right">정산지급</th>
+                                <th class="p-3 border border-gray-600 w-32">주문일시</th>
+                                <th class="p-3 border border-gray-600 w-16">상태</th>
+                                <th class="p-3 border border-gray-600 w-24 text-right">공급가</th>
+                                <th class="p-3 border border-gray-600 w-28 text-right">주문원금(판매금)</th>
+                                <th class="p-3 border border-gray-600 w-28 text-right">포인트사용</th>
+                                <th class="p-3 border border-gray-600 w-20 text-center">면세/과세</th>
+                                <th class="p-3 border border-gray-600 w-24 text-right">합계 (원금-공급가)</th>
+                                <th class="p-3 border border-gray-600 w-28 text-right">카드예상수수료(3.3%)</th>
+                                <th class="p-3 border border-gray-600 w-28 text-right">총합계</th>
                             </tr>
                         </thead>
                         <tbody>
+                            {% set grand_supply = 0 %}
+                            {% set grand_total_price = 0 %}
+                            {% set grand_points = 0 %}
+                            {% set grand_gross = 0 %}
+                            {% set grand_fee = 0 %}
+                            {% set grand_net = 0 %}
                             {% for r in revenue_detail_rows %}
+                            {% set line_total = r.gross_profit %}
+                            {% set line_net = line_total - r.estimated_card_fee %}
+                            {% set grand_supply = grand_supply + r.supply_price_total %}
+                            {% set grand_total_price = grand_total_price + r.total_price %}
+                            {% set grand_points = grand_points + r.points_used %}
+                            {% set grand_gross = grand_gross + line_total %}
+                            {% set grand_fee = grand_fee + r.estimated_card_fee %}
+                            {% set grand_net = grand_net + line_net %}
                             <tr class="border-b border-gray-100">
                                 <td class="p-3"><a href="/admin/order/{{ r.order_id }}/items" class="text-teal-600 hover:underline font-black">{{ r.payment_no }}</a></td>
                                 <td class="p-3">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
                                 <td class="p-3">{{ r.status }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(r.supply_price_total) }}</td>
                                 <td class="p-3 text-right">{{ "{:,}".format(r.total_price) }}</td>
                                 <td class="p-3 text-right">{{ "{:,}".format(r.points_used) }}</td>
-                                <td class="p-3 text-right">{{ "{:,}".format(r.payment_received) }}</td>
-                                <td class="p-3 text-right">{{ "{:,}".format(r.settlement_paid) }}</td>
+                                <td class="p-3 text-center">{{ r.tax_type if r.tax_type is defined else '과세' }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(line_total) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(r.estimated_card_fee) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(line_net) }}</td>
                             </tr>
                             {% endfor %}
+                            {% if revenue_detail_rows %}
+                            <tr class="bg-gray-50 font-black border-t-2 border-gray-400">
+                                <td class="p-3 text-right" colspan="3">총합계</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(grand_supply) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(grand_total_price) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(grand_points) }}</td>
+                                <td class="p-3 text-center">-</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(grand_gross) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(grand_fee) }}</td>
+                                <td class="p-3 text-right">{{ "{:,}".format(grand_net) }}</td>
+                            </tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>
@@ -14603,7 +14791,7 @@ def admin_seller_send_manual_email():
 
 
 def _get_purchase_order_detail_rows(start_dt, end_dt, category_filter=None):
-    """발주관리: 기간·카테고리별 주문 품목 상세. 오더넘버, 주문시간, 품목, 수량, 공급가, 세금(면세0/과세), 종합계액.
+    """발주관리: 기간·카테고리별 주문 품목 상세. 오더넘버, 주문시간, 품목, 수량, 공급가, 종합계액(공급가×수량).
     반환: (rows list, rows_by_date dict, grand_total int). rows_by_date: 'YYYY-MM-DD' -> [rows], 날자별 소계용."""
     from collections import defaultdict
     q = db.session.query(OrderItem, Order, Product).join(
@@ -14622,13 +14810,8 @@ def _get_purchase_order_detail_rows(start_dt, end_dt, category_filter=None):
     rows_by_date = defaultdict(list)
     for oi, ord, p in items:
         supply = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else 0
-        tax_type = (getattr(p, 'tax_type', None) or getattr(oi, 'tax_type', None) or '과세').strip()
-        if tax_type == '면세':
-            tax_amt = 0
-            line_total = supply * (oi.quantity or 0)
-        else:
-            tax_amt = int(round(supply * 0.1 * (oi.quantity or 0)))
-            line_total = int(round(supply * 1.1 * (oi.quantity or 0)))
+        # 세금 컬럼은 더 이상 사용하지 않고, 종합계액은 공급가×수량으로만 계산
+        line_total = supply * (oi.quantity or 0)
         order_time_str = (ord.created_at.strftime('%Y-%m-%d %H:%M') if ord.created_at else '')
         date_key = (ord.created_at.strftime('%Y-%m-%d') if ord.created_at else '')
         r = {
@@ -14637,9 +14820,6 @@ def _get_purchase_order_detail_rows(start_dt, end_dt, category_filter=None):
             'product_name': (oi.product_name or '')[:50],
             'quantity': oi.quantity or 0,
             'supply_price': supply,
-            'tax_type': tax_type,
-            'tax_amount': tax_amt,
-            'tax_display': '0' if tax_type == '면세' else str(tax_amt),
             'line_total': line_total,
         }
         rows.append(r)
@@ -14649,10 +14829,13 @@ def _get_purchase_order_detail_rows(start_dt, end_dt, category_filter=None):
 
 
 def _build_purchase_order_image(rows, rows_by_date, grand_total, font_size=12):
-    """발주 상세 행으로 PNG 이미지 생성. 날자별 소계 + 총합계. 한글 폰트 사용."""
+    """발주 상세 행으로 PNG 이미지 생성. 날자별 소계 + 총합계. 한글 폰트 사용.
+
+    컬럼: 오더넘버 / 주문시간 / 품목 / 수량 / 공급가 / 종합계액 (세금 컬럼 사용 안 함)
+    """
     from PIL import ImageDraw
     font, font_header = _pil_font_for_table(font_size)
-    headers = ['오더넘버', '주문시간', '품목', '수량', '공급가', '세금', '종합계액']
+    headers = ['오더넘버', '주문시간', '품목', '수량', '공급가', '종합계액']
     row_cells_list = []
     for date_key in sorted(rows_by_date.keys()):
         for r in rows_by_date[date_key]:
@@ -14662,12 +14845,11 @@ def _build_purchase_order_image(rows, rows_by_date, grand_total, font_size=12):
                 str(r.get('product_name', ''))[:14],
                 str(r.get('quantity', '')),
                 "{:,}".format(r.get('supply_price', 0)),
-                str(r.get('tax_display', '0')),
                 "{:,}".format(r.get('line_total', 0)),
             ])
         sub = sum(x['line_total'] for x in rows_by_date[date_key])
-        row_cells_list.append(['', '', date_key + ' 소계', '', '', '', "{:,}".format(sub)])
-    row_cells_list.append(['', '', '총합계', '', '', '', "{:,}".format(grand_total)])
+        row_cells_list.append(['', '', date_key + ' 소계', '', '', "{:,}".format(sub)])
+    row_cells_list.append(['', '', '총합계', '', '', "{:,}".format(grand_total)])
     col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font, padding=16, min_w=40, max_w=280)
     cell_h = 36
     img_w = sum(col_w)
@@ -14768,6 +14950,42 @@ def admin_purchase_order_preview_image():
     png_bytes = _build_purchase_order_image(rows, rows_by_date, grand_total)
     from flask import Response
     return Response(png_bytes, mimetype='image/png', headers={'Content-Disposition': 'inline; filename=발주서_미리보기.png'})
+
+
+@login_required
+def admin_purchase_order_preview_page():
+    """발주서 이미지 미리보기용 HTML 래퍼 페이지."""
+    if not current_user.is_admin:
+        return redirect('/admin')
+    po_start_str = (request.args.get('po_start') or '').strip()
+    po_end_str = (request.args.get('po_end') or '').strip()
+    po_category = (request.args.get('po_category') or '전체').strip() or '전체'
+    # 동일 파라미터로 이미지 엔드포인트 호출
+    from urllib.parse import urlencode
+    qs = urlencode({'po_start': po_start_str, 'po_end': po_end_str, 'po_category': po_category})
+    img_url = f"/admin/purchase_order/preview_image?{qs}"
+    html = f"""
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <title>발주서 이미지 미리보기</title>
+        <style>
+            body {{ margin:0; padding:0; background:#111; color:#fff; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }}
+            .wrap {{ min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding:16px; box-sizing:border-box; }}
+            img {{ max-width:100%; height:auto; box-shadow:0 20px 50px rgba(0,0,0,0.6); border-radius:16px; background:#fff; }}
+            h1 {{ font-size:14px; margin-bottom:12px; color:#e5e7eb; }}
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <h1>발주서 이미지 미리보기 ({po_category})</h1>
+            <img src="{img_url}" alt="발주서 이미지">
+        </div>
+    </body>
+    </html>
+    """
+    from flask import Response
+    return Response(html, mimetype='text/html; charset=utf-8')
 
 
 @login_required
