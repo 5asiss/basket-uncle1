@@ -4962,9 +4962,38 @@ def product_detail(pid):
             db.session.commit()
     except Exception:
         db.session.rollback()
+
+    # 이전 대량등록/수정 데이터 중 image_url·detail_image_url 에 파일명만 들어간 경우 보정
+    try:
+        changed = False
+        if getattr(p, 'image_url', None) and not (
+            p.image_url.startswith('http://') or p.image_url.startswith('https://') or p.image_url.startswith('/')
+        ):
+            p.image_url = '/static/uploads/' + p.image_url.lstrip('/')
+            changed = True
+        raw_detail = getattr(p, 'detail_image_url', '') or ''
+        detail_images = []
+        if raw_detail:
+            for s in raw_detail.split(','):
+                s = (s or '').strip()
+                if not s:
+                    continue
+                if not (s.startswith('http://') or s.startswith('https://') or s.startswith('/')):
+                    s = '/static/uploads/' + s.lstrip('/')
+                    changed = True
+                detail_images.append(s)
+        else:
+            detail_images = []
+        if changed:
+            # 보정된 경로 DB에 저장
+            p.detail_image_url = ",".join(detail_images)
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        detail_images = p.detail_image_url.split(',') if p.detail_image_url else []
+
     _record_page_view('product')
     is_expired = (p.deadline and p.deadline < datetime.now())
-    detail_images = p.detail_image_url.split(',') if p.detail_image_url else []
     cat_info = Category.query.filter_by(name=p.category).first()
     
     # 1. 연관 추천 상품: 키워드(상품명 첫 단어) 기반
