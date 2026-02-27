@@ -4923,8 +4923,43 @@ def product_detail(pid):
     """상품 상세 정보 페이지 (최근등록상품 복구 및 추천 카테고리 추가 완료본)"""
     p = Product.query.get_or_404(pid)
     try:
+        # 조회수 증가
         p.view_count = (getattr(p, 'view_count', 0) or 0) + 1
-        db.session.commit()
+        # 예전 대량등록/수정에서 로컬 절대경로(C:\...)로 저장된 이미지가 있으면 Cloudinary/업로드 폴더로 자동 교정
+        fixed = False
+        try:
+            img_fixed = _bulk_try_copy_from_absolute_path(getattr(p, 'image_url', '') or '', app.config['UPLOAD_FOLDER'])
+            if img_fixed:
+                p.image_url = img_fixed
+                fixed = True
+        except Exception:
+            pass
+        try:
+            raw_detail = getattr(p, 'detail_image_url', '') or ''
+            if raw_detail:
+                imgs = [s.strip() for s in raw_detail.split(',') if s.strip()]
+                new_imgs = []
+                changed = False
+                for s in imgs:
+                    fixed_url = None
+                    try:
+                        fixed_url = _bulk_try_copy_from_absolute_path(s, app.config['UPLOAD_FOLDER'])
+                    except Exception:
+                        fixed_url = None
+                    if fixed_url:
+                        new_imgs.append(fixed_url)
+                        changed = True
+                    else:
+                        new_imgs.append(s)
+                if changed:
+                    p.detail_image_url = ",".join(new_imgs)
+                    fixed = True
+        except Exception:
+            pass
+        if fixed:
+            db.session.commit()
+        else:
+            db.session.commit()
     except Exception:
         db.session.rollback()
     _record_page_view('product')
