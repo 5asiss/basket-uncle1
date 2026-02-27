@@ -846,17 +846,25 @@ def save_uploaded_file(file):
         if not file_bytes:
             print("[save_uploaded_file] file.read() returned empty bytes")
             return None
+        # 1) Cloudinary 업로드 시도 (실패하면 로컬 저장으로 자동 폴백)
         if cloudinary_url:
-            upload_res = cloudinary.uploader.upload(
-                file_bytes,
-                folder="basket-uncle/main",
-            )
-            url = upload_res.get("secure_url") or upload_res.get("url")
-            if not url:
-                print(f"[save_uploaded_file] Cloudinary returned no URL: {upload_res}")
-            elif "/upload/" in url:
-                url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
-            return url
+            try:
+                upload_res = cloudinary.uploader.upload(
+                    file_bytes,
+                    folder="basket-uncle/main",
+                )
+                url = upload_res.get("secure_url") or upload_res.get("url")
+                if not url:
+                    print(f"[save_uploaded_file] Cloudinary returned no URL: {upload_res}")
+                else:
+                    if "/upload/" in url:
+                        url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
+                    return url
+            except Exception as ce:
+                print(f"[save_uploaded_file] Cloudinary upload failed, fallback to local: {ce}")
+                import traceback; traceback.print_exc()
+
+        # 2) 로컬 저장 (Cloudinary 미설정이거나 실패 시)
         img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
         size = (800, 800)
@@ -4991,6 +4999,10 @@ def product_detail(pid):
     except Exception:
         db.session.rollback()
         detail_images = p.detail_image_url.split(',') if p.detail_image_url else []
+
+    # 상세이미지가 비어 있으면 대표 이미지를 한 장이라도 상세 영역에 보여주기
+    if (not detail_images) and getattr(p, 'image_url', None):
+        detail_images = [p.image_url]
 
     _record_page_view('product')
     is_expired = (p.deadline and p.deadline < datetime.now())
@@ -13799,10 +13811,16 @@ def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
 
 
 def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
-    """대표이미지 전체 경로(예: C:\\...\\1.jpg) 기준으로 같은 폴더의 2.jpg~10.jpg를 Cloudinary 또는 로컬에 복사."""
+    """대표이미지 전체 경로 기준으로 같은 폴더의 상세이미지(2~10번)를 Cloudinary 또는 로컬에 복사.
+
+    - 기존: 파일명이 1.jpg, 2.jpg, ... 10.jpg 형태인 경우만 지원
+    - 확장: 파일명이 "상품명+숫자" 형식인 경우도 지원 (예: '간장 오리주물럭 300g01_1.jpg', '...01_2.jpg')
+      → 파일명에서 마지막 숫자 덩어리를 인덱스로 보고, 2~10은 상세이미지로 처리
+    """
     if not main_absolute_path or not isinstance(main_absolute_path, str):
         return []
     import shutil
+    import re
     path = main_absolute_path.strip().strip('"').strip("'").strip()
     if not path or not os.path.isfile(path):
         return []
@@ -13810,14 +13828,32 @@ def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
     upload_abs = os.path.abspath(upload_dir)
     os.makedirs(upload_abs, exist_ok=True)
     exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp')
+
+    # 디렉토리 내 이미지 파일들을 스캔하면서 "인덱스 번호"를 추출해 2~10번만 상세로 사용
+    by_idx = {}
+    try:
+        for f in os.listdir(dir_path):
+            base, ext = os.path.splitext(f)
+            if ext.lower() not in exts:
+                continue
+            full_path = os.path.join(dir_path, f)
+            if not os.path.isfile(full_path):
+                continue
+            # 파일명에서 마지막 숫자 덩어리를 인덱스로 사용 (없으면 1로 간주)
+            m = re.search(r'(\d+)\s*$', base.strip())
+            try:
+                idx = int(m.group(1)) if m else 1
+            except Exception:
+                idx = 1
+            if 1 <= idx <= 10:
+                by_idx[idx] = full_path
+    except Exception as e:
+        print(f"[_bulk_copy_detail] scan ERROR: {e}")
+        return []
+
     urls = []
     for num in range(2, 11):
-        candidate = None
-        for e in exts:
-            p = os.path.join(dir_path, str(num) + e)
-            if os.path.isfile(p):
-                candidate = p
-                break
+        candidate = by_idx.get(num)
         if not candidate:
             continue
         try:
@@ -13866,6 +13902,8 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
         return main_url, detail_urls
 
     product_folder = None
+
+    # 1) 우선 "상품명과 같은 폴더"를 찾는 기존 방식
     candidate = os.path.join(images_root, product_name.strip())
     if os.path.isdir(candidate):
         product_folder = candidate
@@ -13895,22 +13933,48 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
         except Exception:
             pass
 
-    if not product_folder or not os.path.isdir(product_folder):
-        return main_url, detail_urls
-
     by_num = {}
-    try:
-        for f in os.listdir(product_folder):
-            base, ext = os.path.splitext(f)
-            if ext.lower() not in IMAGE_EXT:
-                continue
-            try:
-                n = int(base.strip())
-                if 1 <= n <= 10:
-                    by_num[n] = os.path.join(product_folder, f)
-            except ValueError:
-                continue
-    except Exception:
+
+    if product_folder and os.path.isdir(product_folder):
+        # 1-A) 폴더 안에 1.jpg~10.jpg 있는 구조 (기존 방식)
+        try:
+            for f in os.listdir(product_folder):
+                base, ext = os.path.splitext(f)
+                if ext.lower() not in IMAGE_EXT:
+                    continue
+                try:
+                    n = int(base.strip())
+                    if 1 <= n <= 10:
+                        by_num[n] = os.path.join(product_folder, f)
+                except ValueError:
+                    continue
+        except Exception:
+            return main_url, detail_urls
+    else:
+        # 1-B) 폴더가 없고, "상품명 + 숫자" 형식의 파일이 images_root (또는 하위) 에 흩어져 있는 경우
+        # 예: "간장 오리주물럭 300g01_1.jpg", "고추장 오돌뼈 200g01_.JPG"
+        try:
+            for root, _, files in os.walk(images_root):
+                for f in files:
+                    base, ext = os.path.splitext(f)
+                    if ext.lower() not in IMAGE_EXT:
+                        continue
+                    base_norm = norm_for_match(base)
+                    if not base_norm.startswith(product_name_match):
+                        continue
+                    # 상품명 이후 뒤에 붙은 부분에서 마지막 숫자 덩어리를 인덱스로 사용 (없으면 1)
+                    suffix = base_norm[len(product_name_match):].strip()
+                    m = re.search(r'(\d+)\s*$', suffix)
+                    try:
+                        idx = int(m.group(1)) if m else 1
+                    except Exception:
+                        idx = 1
+                    if 1 <= idx <= 10:
+                        by_num[idx] = os.path.join(root, f)
+        except Exception:
+            return main_url, detail_urls
+
+    if not by_num:
         return main_url, detail_urls
 
     upload_dir_abs = os.path.abspath(upload_dir)
@@ -15614,7 +15678,9 @@ def admin_product_add():
         if not check_admin_permission(cat_name): return redirect('/admin')
         main_img = save_uploaded_file(request.files.get('main_image'))
         detail_files = request.files.getlist('detail_images')
-        detail_img_url_str = ",".join(filter(None, [save_detail_image(f) for f in detail_files if f.filename != '']))
+        detail_img_url_str = ",".join(
+            filter(None, [save_uploaded_file(f) for f in detail_files if f and f.filename])
+        )
         deadline_val = datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M') if request.form.get('deadline') else None
         rt = request.form.get('reset_time', '').strip()[:5] if request.form.get('reset_time') else None
         rq = request.form.get('reset_to_quantity', '').strip()
@@ -15737,12 +15803,15 @@ def admin_product_edit(pid):
         
         # 메인 이미지 변경 시 처리
         main_img = save_uploaded_file(request.files.get('main_image'))
-        if main_img: p.image_url = main_img
+        if main_img:
+            p.image_url = main_img
         
         # 상세 이미지 변경 시 처리
         detail_files = request.files.getlist('detail_images')
         if detail_files and detail_files[0].filename != '':
-            p.detail_image_url = ",".join(filter(None, [save_detail_image(f) for f in detail_files if f.filename != '']))
+            p.detail_image_url = ",".join(
+                filter(None, [save_uploaded_file(f) for f in detail_files if f and f.filename])
+            )
             
         db.session.commit()
         flash("상품 정보가 성공적으로 수정되었습니다.")
