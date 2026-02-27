@@ -4971,30 +4971,48 @@ def product_detail(pid):
     except Exception:
         db.session.rollback()
 
-    # 이전 대량등록/수정 데이터 중 image_url·detail_image_url 에 파일명만 들어간 경우 보정
+    # 이전 대량등록/수정 데이터 중 image_url·detail_image_url 보정 및 Cloudinary URL 특수 처리
     try:
         changed = False
+        # 1) 대표 이미지가 파일명만 있는 경우 업로드 폴더 기준으로 보정
         if getattr(p, 'image_url', None) and not (
             p.image_url.startswith('http://') or p.image_url.startswith('https://') or p.image_url.startswith('/')
         ):
             p.image_url = '/static/uploads/' + p.image_url.lstrip('/')
             changed = True
+
         raw_detail = getattr(p, 'detail_image_url', '') or ''
         detail_images = []
+
         if raw_detail:
-            for s in raw_detail.split(','):
-                s = (s or '').strip()
-                if not s:
-                    continue
-                if not (s.startswith('http://') or s.startswith('https://') or s.startswith('/')):
-                    s = '/static/uploads/' + s.lstrip('/')
+            # 2) 이전 잘못된 보정으로 인해 Cloudinary URL 중간에 ',/static/uploads/' 가 끼어버린 경우 복구
+            if 'res.cloudinary.com' in raw_detail and ',/static/uploads/' in raw_detail:
+                fixed_raw = raw_detail.replace(',/static/uploads/', ',')
+                if fixed_raw != raw_detail:
+                    raw_detail = fixed_raw
+                    p.detail_image_url = fixed_raw
                     changed = True
-                detail_images.append(s)
+
+            # 3) Cloudinary 단일 URL인 경우(내부에 콤마가 있어도 전체를 하나의 URL로 취급)
+            if 'res.cloudinary.com' in raw_detail and raw_detail.count('http') == 1:
+                detail_images = [raw_detail.strip()]
+            else:
+                # 4) 그 외의 경우: 콤마로 나눈 뒤, 파일명만 있는 값은 /static/uploads/ 기준으로 보정
+                for s in raw_detail.split(','):
+                    s = (s or '').strip()
+                    if not s:
+                        continue
+                    if not (s.startswith('http://') or s.startswith('https://') or s.startswith('/')):
+                        s = '/static/uploads/' + s.lstrip('/')
+                        changed = True
+                    detail_images.append(s)
         else:
             detail_images = []
+
         if changed:
             # 보정된 경로 DB에 저장
-            p.detail_image_url = ",".join(detail_images)
+            if detail_images:
+                p.detail_image_url = ",".join(detail_images)
             db.session.commit()
     except Exception:
         db.session.rollback()
@@ -5406,6 +5424,21 @@ def product_detail(pid):
                                   recommend_cats_detail=recommend_cats_detail,
                                   cat_previews_detail=cat_previews_detail,
                                   category_delivery_desc=category_delivery_desc)
+
+
+@app.route('/admin/debug/product/<int:pid>')
+@login_required
+def admin_debug_product(pid):
+    """임시 디버그: 상품 이미지 필드(raw) 확인용."""
+    if not current_user.is_admin:
+        return redirect('/')
+    p = Product.query.get_or_404(pid)
+    return jsonify({
+        "id": p.id,
+        "name": p.name,
+        "image_url": p.image_url,
+        "detail_image_url_raw": p.detail_image_url,
+    })
 @app.route('/category/seller/<int:cid>')
 def seller_info_page(cid):
     """판매 사업자 정보 상세 페이지"""
