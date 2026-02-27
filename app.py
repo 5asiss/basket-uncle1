@@ -830,7 +830,6 @@ def save_uploaded_file(file):
     """핸드폰 사진 비율 정리(중앙 크롭)·압축(WebP). Cloudinary가 설정되어 있으면 Cloudinary로 업로드."""
     if not file or not getattr(file, 'filename', None):
         return None
-    # 스트림 처음부터 읽을 수 있도록 (fetch FormData 등으로 전달된 파일)
     if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
         try: file.stream.seek(0)
         except Exception: pass
@@ -840,30 +839,34 @@ def save_uploaded_file(file):
     if not _is_allowed_image_filename(fn):
         return None
     try:
-        # Cloudinary 우선 사용
-        if cloudinary_url:
-            if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
-                try: file.stream.seek(0)
-                except Exception: pass
-            upload_res = cloudinary.uploader.upload(
-                file,
-                folder="basket-uncle/main",
-                transformation={"width": 800, "height": 800, "crop": "fill"}
-            )
-            return upload_res.get("secure_url") or upload_res.get("url")
-        # Fallback: 로컬 저장
         if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
             try: file.stream.seek(0)
             except Exception: pass
-        new_filename = f"uncle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
-        save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
-        img = Image.open(file)
+        file_bytes = file.read()
+        if not file_bytes:
+            print("[save_uploaded_file] file.read() returned empty bytes")
+            return None
+        if cloudinary_url:
+            upload_res = cloudinary.uploader.upload(
+                file_bytes,
+                folder="basket-uncle/main",
+                transformation={"width": 800, "height": 800, "crop": "fill"}
+            )
+            url = upload_res.get("secure_url") or upload_res.get("url")
+            if not url:
+                print(f"[save_uploaded_file] Cloudinary returned no URL: {upload_res}")
+            return url
+        img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
         size = (800, 800)
         img = ImageOps.fit(img, size, Image.Resampling.LANCZOS)
+        new_filename = f"uncle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
         img.save(save_path, "WEBP", quality=85)
         return f"/static/uploads/{new_filename}"
-    except Exception:
+    except Exception as e:
+        print(f"[save_uploaded_file] ERROR: {e}")
+        import traceback; traceback.print_exc()
         return None
 
 
@@ -872,9 +875,15 @@ def save_review_image(file):
     if not file or file.filename == '' or not _is_allowed_image_filename(file.filename):
         return None
     try:
+        if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
+            try: file.stream.seek(0)
+            except Exception: pass
+        file_bytes = file.read()
+        if not file_bytes:
+            return None
         if cloudinary_url:
             upload_res = cloudinary.uploader.upload(
-                file,
+                file_bytes,
                 folder="basket-uncle/reviews",
                 transformation={"width": 640, "height": 640, "crop": "fill"}
             )
@@ -883,13 +892,14 @@ def save_review_image(file):
         os.makedirs(review_folder, exist_ok=True)
         new_filename = f"review_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(review_folder, new_filename)
-        img = Image.open(file)
+        img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
         size = (640, 640)
         img = ImageOps.fit(img, size, Image.Resampling.LANCZOS)
         img.save(save_path, "WEBP", quality=82)
         return f"/static/uploads/reviews/{new_filename}"
-    except Exception:
+    except Exception as e:
+        print(f"[save_review_image] ERROR: {e}")
         return None
 
 def save_board_image(file):
@@ -897,9 +907,15 @@ def save_board_image(file):
     if not file or file.filename == '' or not _is_allowed_image_filename(file.filename):
         return None
     try:
+        if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
+            try: file.stream.seek(0)
+            except Exception: pass
+        file_bytes = file.read()
+        if not file_bytes:
+            return None
         if cloudinary_url:
             upload_res = cloudinary.uploader.upload(
-                file,
+                file_bytes,
                 folder="basket-uncle/board",
                 transformation={"width": 800, "height": 800, "crop": "fill"}
             )
@@ -908,13 +924,14 @@ def save_board_image(file):
         os.makedirs(board_folder, exist_ok=True)
         new_filename = f"board_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(board_folder, new_filename)
-        img = Image.open(file)
+        img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
         size = (800, 800)
         img = ImageOps.fit(img, size, Image.Resampling.LANCZOS)
         img.save(save_path, "WEBP", quality=85)
         return f"/static/uploads/board/{new_filename}"
-    except Exception:
+    except Exception as e:
+        print(f"[save_board_image] ERROR: {e}")
         return None
 
 
@@ -4905,9 +4922,9 @@ def product_detail(pid):
     ).order_by(Product.stock.desc(), Product.id.desc()).limit(8).all()
 
     content = """
-    <div class="max-w-5xl xl:max-w-7xl mx-auto px-0 md:px-6 xl:px-10 pb-16 font-black text-left">
+    <div class="max-w-5xl xl:max-w-[1400px] 2xl:max-w-[1600px] mx-auto px-0 md:px-8 lg:px-12 xl:px-16 2xl:px-20 pb-16 font-black text-left">
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-16 xl:gap-20 items-start">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-12 lg:gap-16 xl:gap-20 items-start">
             <div class="relative w-full aspect-square bg-white overflow-hidden md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100">
                 {% if p.description %}
                 <div class="absolute top-6 left-0 z-20">
@@ -5022,7 +5039,7 @@ def product_detail(pid):
                     </p>
                     <i class="fas fa-quote-right text-teal-200 text-4xl mt-6"></i>
                 </div>
-                <div class="flex flex-col gap-0 max-w-4xl xl:max-w-5xl mx-auto">
+                <div class="flex flex-col gap-0 max-w-4xl xl:max-w-6xl 2xl:max-w-7xl mx-auto">
                     {% if detail_images %}
                         {% for img in detail_images %}
                         <img src="{{ img.strip() }}" class="w-full shadow-sm" loading="lazy" onerror="this.style.display='none'">
@@ -5209,7 +5226,7 @@ def product_detail(pid):
             <h3 class="font-black text-2xl md:text-4xl mb-12 flex items-center gap-4 tracking-tighter text-left">
                 <span class="w-2 h-10 bg-teal-600 rounded-full"></span> 📦 카테고리 더 둘러보기
             </h3>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 xl:gap-10">
                 {% for c_info in recommend_cats_detail %}
                 <div class="bg-gray-50 p-6 md:p-8 rounded-[3rem] border border-gray-100 shadow-inner text-left">
                     <h3 class="text-lg md:text-xl font-black mb-6 flex justify-between items-center">
@@ -5242,7 +5259,7 @@ def product_detail(pid):
             </div>
         </div>
 
-        <div class="mt-24 px-4 md:px-0 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="mt-24 px-4 md:px-0 grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl xl:max-w-5xl mx-auto">
             <a href="/category/최신상품" class="bg-gray-800 text-white py-8 rounded-[2.5rem] text-center text-base font-black shadow-xl hover:bg-black transition flex items-center justify-center gap-4">
                 <i class="fas fa-rocket text-xl text-blue-400"></i> 최신 상품 전체보기
             </a>
@@ -5607,6 +5624,39 @@ def _auth_status_json():
         },
         "hint": "각 redirect_uri를 해당 개발자 콘솔에 동일하게 등록해야 합니다. FLASK_SECRET_KEY가 없으면 세션이 유지되지 않아 콜백 시 오류가 납니다.",
     })
+
+
+@app.route('/admin/cloudinary_check')
+@login_required
+def admin_cloudinary_check():
+    """Cloudinary 연결 진단 (관리자 전용). 테스트 업로드 수행."""
+    if not getattr(current_user, 'is_admin', False):
+        return jsonify({"error": "관리자 전용"}), 403
+    info = {
+        "CLOUDINARY_URL_set": bool(cloudinary_url),
+        "CLOUDINARY_URL_prefix": (cloudinary_url or "")[:30] + "..." if cloudinary_url else "(empty)",
+    }
+    if cloudinary_url:
+        try:
+            cfg = cloudinary.config()
+            info["cloud_name"] = cfg.cloud_name or "(none)"
+            info["api_key"] = cfg.api_key or "(none)"
+            info["api_secret_set"] = bool(cfg.api_secret)
+        except Exception as e:
+            info["config_error"] = str(e)
+        try:
+            from PIL import Image as _Img
+            test_img = _Img.new("RGB", (10, 10), (0, 128, 128))
+            buf = BytesIO()
+            test_img.save(buf, format="PNG")
+            buf.seek(0)
+            res = cloudinary.uploader.upload(buf.getvalue(), folder="basket-uncle/test", public_id="conn_test", overwrite=True)
+            info["test_upload"] = "SUCCESS"
+            info["test_url"] = res.get("secure_url") or res.get("url")
+        except Exception as e:
+            info["test_upload"] = "FAIL"
+            info["test_error"] = str(e)
+    return jsonify(info)
 
 
 @login_required
@@ -9737,6 +9787,7 @@ def admin_dashboard():
                     <span class="text-[11px] text-gray-500 font-bold">선택 상품 일괄:</span>
                     <button type="submit" name="action" value="end_sale" class="bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-amber-600" onclick="return document.querySelectorAll('.product-row-cb:checked').length && confirm('선택한 상품을 모두 판매종료 하시겠습니까?');">선택 상품 판매종료</button>
                     <button type="submit" name="action" value="reactivate" class="bg-teal-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-teal-600" onclick="return document.querySelectorAll('.product-row-cb:checked').length && confirm('선택한 상품을 모두 재등록 하시겠습니까?');">선택 상품 재등록</button>
+                    <button type="submit" name="action" value="delete" class="bg-red-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-red-600" onclick="return document.querySelectorAll('.product-row-cb:checked').length && confirm('선택한 상품을 완전히 삭제합니다. 복구할 수 없습니다. 계속할까요?');">선택 상품 삭제</button>
                 </div>
             <div class="bg-white rounded-[2rem] shadow-sm border border-gray-50 overflow-hidden overflow-x-auto -mx-3 md:mx-0">
                 <table class="w-full text-left min-w-[560px]">
@@ -13046,6 +13097,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                     <span class="text-[11px] text-gray-500 font-bold">선택 상품 일괄:</span>
                     <button type="submit" name="action" value="end_sale" class="bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-amber-600" onclick="return document.querySelectorAll('#products-bulk-form-2 .product-row-cb-2:checked').length && confirm('선택한 상품을 모두 판매종료 하시겠습니까?');">선택 상품 판매종료</button>
                     <button type="submit" name="action" value="reactivate" class="bg-teal-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-teal-600" onclick="return document.querySelectorAll('#products-bulk-form-2 .product-row-cb-2:checked').length && confirm('선택한 상품을 모두 재등록 하시겠습니까?');">선택 상품 재등록</button>
+                    <button type="submit" name="action" value="delete" class="bg-red-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-red-600" onclick="return document.querySelectorAll('#products-bulk-form-2 .product-row-cb-2:checked').length && confirm('선택한 상품을 완전히 삭제합니다. 복구할 수 없습니다. 계속할까요?');">선택 상품 삭제</button>
                 </div>
             <div class="bg-white rounded-[2rem] shadow-sm border border-gray-50 overflow-hidden text-left">
                 <table class="w-full text-left">
@@ -15785,26 +15837,42 @@ def admin_product_bulk_sale_action():
     """선택 상품 일괄 판매종료 또는 재등록. POST: product_ids=[...], action=end_sale|reactivate"""
     ids = request.form.getlist('product_ids')
     action = (request.form.get('action') or '').strip()
-    if not ids or action not in ('end_sale', 'reactivate'):
+    if not ids or action not in ('end_sale', 'reactivate', 'delete'):
         flash("선택된 상품이 없거나 작업을 선택해 주세요.")
         return redirect(request.referrer or '/admin?tab=products')
-    set_active = action == 'reactivate'
     count = 0
-    for pid in ids:
-        try:
-            pid = int(pid)
-        except (ValueError, TypeError):
-            continue
-        p = Product.query.get(pid)
-        if not p or not check_admin_permission(p.category):
-            continue
-        p.is_active = set_active
-        count += 1
-    db.session.commit()
-    if action == 'end_sale':
-        flash(f"선택한 {count}개 상품을 판매종료 했습니다.")
+    if action == 'delete':
+        for pid in ids:
+            try:
+                pid = int(pid)
+            except (ValueError, TypeError):
+                continue
+            p = Product.query.get(pid)
+            if not p or not check_admin_permission(p.category):
+                continue
+            Review.query.filter_by(product_id=pid).delete(synchronize_session=False)
+            Cart.query.filter_by(product_id=pid).delete(synchronize_session=False)
+            db.session.delete(p)
+            count += 1
+        db.session.commit()
+        flash(f"선택한 {count}개 상품을 삭제했습니다.")
     else:
-        flash(f"선택한 {count}개 상품을 재등록 했습니다.")
+        set_active = action == 'reactivate'
+        for pid in ids:
+            try:
+                pid = int(pid)
+            except (ValueError, TypeError):
+                continue
+            p = Product.query.get(pid)
+            if not p or not check_admin_permission(p.category):
+                continue
+            p.is_active = set_active
+            count += 1
+        db.session.commit()
+        if action == 'end_sale':
+            flash(f"선택한 {count}개 상품을 판매종료 했습니다.")
+        else:
+            flash(f"선택한 {count}개 상품을 재등록 했습니다.")
     return redirect(request.referrer or '/admin?tab=products')
 
 @login_required
