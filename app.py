@@ -2794,9 +2794,21 @@ def index():
 }
 .page-main .hero-link:hover { color: #fff; border-color: rgba(255,255,255,0.5); }
 .page-main #products {
-    max-width: 80rem;
+    max-width: 100rem;
     margin: 0 auto;
     padding: clamp(3rem, 8vw, 5rem) 1.5rem;
+}
+@media (min-width: 1280px) {
+    .page-main #products { padding-left: 3rem; padding-right: 3rem; }
+}
+.page-main .product-card .p-3 { }
+@media (min-width: 1024px) {
+    .page-main .product-card h3 { font-size: 0.9375rem; }
+    .page-main .product-card .price { font-size: 1.15rem; }
+}
+@media (min-width: 1280px) {
+    .page-main .product-card h3 { font-size: 1rem; line-height: 1.4; }
+    .page-main .product-card .price { font-size: 1.25rem; }
 }
 .page-main .section-title {
     font-size: clamp(1.15rem, 2.2vw, 1.6rem);
@@ -2876,11 +2888,11 @@ def index():
         <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
             <h2 class="section-title bar-green"><span class="bar"></span> 카테고리</h2>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 lg:gap-4">
             {% for cat, prods in grouped_products.items() %}
-            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center p-5 rounded-2xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-lg transition-all text-center">
-                <span class="w-12 h-12 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 text-xl mb-2"><i class="fas fa-th-large"></i></span>
-                <span class="text-xs md:text-sm font-black text-slate-700">{{ cat.name }}</span>
+            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center p-5 lg:p-6 rounded-2xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-lg transition-all text-center">
+                <span class="w-12 h-12 lg:w-14 lg:h-14 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 text-xl lg:text-2xl mb-2"><i class="fas fa-th-large"></i></span>
+                <span class="text-xs md:text-sm lg:text-base font-black text-slate-700">{{ cat.name }}</span>
                 <span class="text-[10px] text-slate-400 font-bold mt-0.5">{{ prods|length }}종</span>
             </a>
             {% endfor %}
@@ -2908,7 +2920,7 @@ def index():
             <h2 class="section-title bar-orange"><span class="bar"></span> 🔥 오늘 마감 임박</h2>
             <a href="/category/오늘마감" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-5">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
             {% for p in closing_today %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-red-50 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -2938,7 +2950,7 @@ def index():
             <h2 class="section-title bar-green"><span class="bar"></span> ✨ 최신 상품</h2>
             <a href="/category/최신상품" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-5">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
             {% for p in random_latest %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -2973,7 +2985,7 @@ def index():
             <div><h2 class="section-title bar-green"><span class="bar"></span> {{ cat.name }}</h2>{% if cat.description %}<p class="text-[10px] text-slate-400 font-bold mt-1">{{ cat.description }}</p>{% endif %}</div>
             <a href="/category/{{ cat.name }}" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-5">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
             {% for p in products %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -4893,9 +4905,9 @@ def product_detail(pid):
     ).order_by(Product.stock.desc(), Product.id.desc()).limit(8).all()
 
     content = """
-    <div class="max-w-5xl mx-auto px-0 md:px-6 pb-16 font-black text-left">
+    <div class="max-w-5xl xl:max-w-7xl mx-auto px-0 md:px-6 xl:px-10 pb-16 font-black text-left">
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-16 items-start">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-16 xl:gap-20 items-start">
             <div class="relative w-full aspect-square bg-white overflow-hidden md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100">
                 {% if p.description %}
                 <div class="absolute top-6 left-0 z-20">
@@ -4925,7 +4937,7 @@ def product_detail(pid):
                     <a href="/category/{{ p.category }}" class="hover:text-teal-600 text-teal-600">{{ p.category }}</a>
                 </nav>
 
-                <h2 class="text-3xl md:text-5xl text-gray-900 mb-4 leading-tight tracking-tighter break-keep">
+                <h2 class="text-3xl md:text-5xl xl:text-6xl text-gray-900 mb-4 leading-tight tracking-tighter break-keep">
                     {{ p.name }}
                     {% if p.badge %}
                     <span class="block mt-2 text-orange-500 text-sm md:text-lg font-black italic tracking-normal">
@@ -4935,22 +4947,22 @@ def product_detail(pid):
                 </h2>
 
                 <div class="flex items-baseline gap-2 mb-10">
-                    <span class="text-4xl md:text-6xl text-teal-600 font-black italic tracking-tighter">{{ "{:,}".format(p.price) }}</span>
+                    <span class="text-4xl md:text-6xl xl:text-7xl text-teal-600 font-black italic tracking-tighter">{{ "{:,}".format(p.price) }}</span>
                     <span class="text-xl text-gray-400 font-bold">원</span>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 mb-10">
-                    <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100 shadow-sm">
-                        <p class="text-[9px] text-gray-400 uppercase mb-1 font-black">Standard</p>
-                        <p class="text-sm md:text-base font-black text-gray-700">{{ p.spec or '기본규격' }}</p>
+                <div class="grid grid-cols-2 gap-3 lg:gap-4 mb-10">
+                    <div class="bg-gray-50 p-5 lg:p-6 rounded-2xl border border-gray-100 shadow-sm">
+                        <p class="text-[9px] lg:text-[11px] text-gray-400 uppercase mb-1 font-black">Standard</p>
+                        <p class="text-sm md:text-base lg:text-lg font-black text-gray-700">{{ p.spec or '기본규격' }}</p>
                     </div>
-                    <div class="bg-gray-50 p-5 rounded-2xl border border-gray-100 shadow-sm">
-                        <p class="text-[9px] text-gray-400 uppercase mb-1 font-black">Stock Status</p>
-                        <p class="text-sm md:text-base font-black text-gray-700">{{ p.stock }}개 남음</p>
+                    <div class="bg-gray-50 p-5 lg:p-6 rounded-2xl border border-gray-100 shadow-sm">
+                        <p class="text-[9px] lg:text-[11px] text-gray-400 uppercase mb-1 font-black">Stock Status</p>
+                        <p class="text-sm md:text-base lg:text-lg font-black text-gray-700">{{ p.stock }}개 남음</p>
                     </div>
-                    <div class="bg-blue-50 p-5 rounded-2xl border border-blue-100 col-span-2 shadow-sm">
-                        <p class="text-[9px] text-blue-400 uppercase mb-1 font-black">Direct Delivery (송도전용)</p>
-                        <p class="text-sm md:text-base font-black text-blue-700">
+                    <div class="bg-blue-50 p-5 lg:p-6 rounded-2xl border border-blue-100 col-span-2 shadow-sm">
+                        <p class="text-[9px] lg:text-[11px] text-blue-400 uppercase mb-1 font-black">Direct Delivery (송도전용)</p>
+                        <p class="text-sm md:text-base lg:text-lg font-black text-blue-700">
                             <i class="fas fa-truck-fast mr-2"></i>바구니삼촌 {{ p.description }} 내 직접 배송
                         </p>
                         <p class="text-[10px] text-blue-600 font-bold mt-2">배송료: {{ category_delivery_desc }}</p>
@@ -4975,7 +4987,7 @@ def product_detail(pid):
                     <h3 class="text-base md:text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
                         <span class="w-1.5 h-6 bg-teal-500 rounded-full"></span> 같은 카테고리 상품
                     </h3>
-                    <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 lg:gap-4 mb-4">
                         {% for cp in same_category_products[:4] %}
                         <a href="/product/{{ cp.id }}" class="group block bg-white rounded-2xl border border-gray-100 p-3 shadow-sm hover:shadow-lg hover:border-teal-200 transition-all text-left">
                             <div class="aspect-square rounded-xl overflow-hidden bg-gray-50 mb-2">
@@ -5010,7 +5022,7 @@ def product_detail(pid):
                     </p>
                     <i class="fas fa-quote-right text-teal-200 text-4xl mt-6"></i>
                 </div>
-                <div class="flex flex-col gap-0 max-w-4xl mx-auto">
+                <div class="flex flex-col gap-0 max-w-4xl xl:max-w-5xl mx-auto">
                     {% if detail_images %}
                         {% for img in detail_images %}
                         <img src="{{ img.strip() }}" class="w-full shadow-sm" loading="lazy" onerror="this.style.display='none'">
@@ -5027,7 +5039,7 @@ def product_detail(pid):
                 <span class="w-2 h-10 bg-orange-400 rounded-full"></span> 📸 생생한 구매 후기
             </h3>
             {% if product_reviews %}
-            <div id="reviews-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div id="reviews-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-5">
                 {% for r in product_reviews %}
                 {% set v = review_vote_info.get(r.id, {}) %}
                 <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col sm:flex-row gap-4 hover:shadow-md transition-all" data-review-id="{{ r.id }}">
@@ -9421,11 +9433,14 @@ def admin_dashboard():
                     r['category_name'] = c.name
                     email_order_detail_lines.append(r)
 
-    # 발주관리 탭: 품목 수량별 도매업체 발주 정보 (이미지 생성·이메일 발송)
+    # 발주관리 탭: 품목 상세(오더넘버·주문시간·품목·수량·공급가·세금·종합계액) + 날자별 소계·총합계
     purchase_order_start = None
     purchase_order_end = None
     purchase_order_category = '전체'
     purchase_order_rows = []
+    purchase_order_by_date = {}
+    purchase_order_grand_total = 0
+    purchase_order_date_subtotals = {}
     purchase_order_categories = []
     if tab == 'purchase_order' and is_master:
         purchase_order_categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
@@ -9440,22 +9455,10 @@ def admin_dashboard():
             purchase_order_end = datetime.strptime(po_end_str.replace('T', ' '), '%Y-%m-%d %H:%M')
         except Exception:
             purchase_order_end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        from collections import defaultdict
-        q_oi = db.session.query(OrderItem.product_category, OrderItem.product_name, OrderItem.quantity).join(
-            Order, OrderItem.order_id == Order.id
-        ).filter(
-            Order.status != '결제취소',
-            OrderItem.cancelled == False,
-            Order.created_at >= purchase_order_start,
-            Order.created_at <= purchase_order_end
+        purchase_order_rows, purchase_order_by_date, purchase_order_grand_total = _get_purchase_order_detail_rows(
+            purchase_order_start, purchase_order_end, purchase_order_category
         )
-        if purchase_order_category and purchase_order_category != '전체':
-            q_oi = q_oi.filter(OrderItem.product_category == purchase_order_category)
-        rows_oi = q_oi.all()
-        agg_po = defaultdict(int)
-        for cat, pname, qty in rows_oi:
-            agg_po[(cat or '', pname or '')] += int(qty or 0)
-        purchase_order_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v} for k, v in sorted(agg_po.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))]
+        purchase_order_date_subtotals = {dk: sum(r['line_total'] for r in rs) for dk, rs in purchase_order_by_date.items()}
 
     # 통계(페이지뷰) 탭: 조회수·주문·상품·회원 등
     stats_page_views_today = stats_page_views_week = stats_page_views_total = {'main': 0, 'category': 0, 'product': 0, 'cart': 0}
@@ -9626,8 +9629,8 @@ def admin_dashboard():
         {% endif %}
         {% if tab == 'purchase_order' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-indigo-200 bg-indigo-50/80 text-left">
-                <p class="font-black text-indigo-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📋</span> 발주관리 — 품목 수량별 도매업체 발주 정보 (이미지로 전송)</p>
-                <p class="text-[11px] text-gray-700 mb-4">시간대를 지정한 뒤 품목·수량 집계를 이미지로 만들고, 수신 이메일만 입력하면 바로 발송할 수 있습니다.</p>
+                <p class="font-black text-indigo-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📋</span> 발주관리 — 오더넘버·주문시간·품목·수량·공급가·세금·종합계액 (날자별 정리, 총합계)</p>
+                <p class="text-[11px] text-gray-700 mb-4">시간대를 지정한 뒤 발주 상세를 조회할 수 있습니다. 카테고리별 발송 시 내용이 날자별로 정리되며 총합계액이 하단에 표시됩니다. 미리보기로 발주서 이미지를 확인한 뒤 이메일 발송하세요.</p>
                 <form action="/admin?tab=purchase_order" method="GET" class="flex flex-wrap items-end gap-4 p-5 bg-white rounded-2xl border border-indigo-100 mb-6">
                     <input type="hidden" name="tab" value="purchase_order">
                     <div>
@@ -9648,14 +9651,21 @@ def admin_dashboard():
                     <button type="submit" class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-black text-xs hover:bg-indigo-700">조회</button>
                 </form>
                 {% if purchase_order_rows %}
-                <div class="bg-white rounded-2xl border border-indigo-100 overflow-hidden mb-6">
-                    <h4 class="text-sm font-black text-gray-800 p-4 border-b border-gray-100">품목 수량별 집계 ({{ purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else '' }} ~ {{ purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else '' }})</h4>
-                    <table class="w-full text-left text-[11px]">
-                        <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-3">카테고리</th><th class="p-3">상품명</th><th class="p-3 text-right">수량</th></tr></thead>
+                <div class="flex flex-wrap items-center gap-3 mb-3">
+                    <a href="/admin/purchase_order/preview_image?{{ {'po_start': (purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else ''), 'po_end': (purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else ''), 'po_category': purchase_order_category}|urlencode }}" target="_blank" class="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs hover:bg-teal-700">🖼 발주서 이미지 미리보기</a>
+                </div>
+                <div class="bg-white rounded-2xl border border-indigo-100 overflow-x-auto mb-6">
+                    <h4 class="text-sm font-black text-gray-800 p-4 border-b border-gray-100">발주 상세 ({{ purchase_order_start.strftime('%Y-%m-%d %H:%M') if purchase_order_start else '' }} ~ {{ purchase_order_end.strftime('%Y-%m-%d %H:%M') if purchase_order_end else '' }}) · 총합계 {{ "{:,}".format(purchase_order_grand_total) }}원</h4>
+                    <table class="w-full text-left text-[11px] min-w-[800px]">
+                        <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-3">오더넘버</th><th class="p-3">주문시간</th><th class="p-3">품목</th><th class="p-3 text-right">수량</th><th class="p-3 text-right">공급가</th><th class="p-3 text-right">세금</th><th class="p-3 text-right">종합계액</th></tr></thead>
                         <tbody>
-                            {% for row in purchase_order_rows %}
-                            <tr class="border-b border-gray-50"><td class="p-3">{{ row.category }}</td><td class="p-3 font-bold">{{ row.product_name }}</td><td class="p-3 text-right font-black">{{ row.total_quantity }}</td></tr>
+                            {% for date_key, rows in purchase_order_by_date|dictsort %}
+                                {% for row in rows %}
+                                <tr class="border-b border-gray-50"><td class="p-3">{{ row.order_id }}</td><td class="p-3">{{ row.order_time }}</td><td class="p-3 font-bold">{{ row.product_name }}</td><td class="p-3 text-right">{{ row.quantity }}</td><td class="p-3 text-right">{{ "{:,}".format(row.supply_price) }}</td><td class="p-3 text-right">{{ row.tax_display }}</td><td class="p-3 text-right font-black">{{ "{:,}".format(row.line_total) }}</td></tr>
+                                {% endfor %}
+                                <tr class="border-b border-gray-100 bg-amber-50"><td class="p-3 text-right font-black" colspan="6">{{ date_key }} 소계</td><td class="p-3 text-right font-black">{{ "{:,}".format(purchase_order_date_subtotals.get(date_key, 0)) }}</td></tr>
                             {% endfor %}
+                            <tr class="bg-teal-50 font-black"><td class="p-3" colspan="6">총합계</td><td class="p-3 text-right text-teal-700">{{ "{:,}".format(purchase_order_grand_total) }}원</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -9667,10 +9677,10 @@ def admin_dashboard():
                         <label class="block text-[10px] font-black text-gray-600 mb-1">수신 이메일</label>
                         <input type="email" name="to_email" required placeholder="도매업체 이메일 주소" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold">
                     </div>
-                    <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-teal-700">이미지 생성 후 이메일 발송</button>
+                    <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-teal-700">발주서 이미지 생성 후 이메일 발송</button>
                 </form>
                 {% else %}
-                <p class="text-gray-500 text-sm font-bold py-4">위에서 시작·종료 일시와 카테고리를 선택한 뒤 [조회]를 누르면 해당 구간의 품목 수량 집계가 표시됩니다. 이메일을 입력하고 [이미지 생성 후 이메일 발송]으로 도매업체에 바로 보낼 수 있습니다.</p>
+                <p class="text-gray-500 text-sm font-bold py-4">위에서 시작·종료 일시와 카테고리를 선택한 뒤 [조회]를 누르면 해당 구간의 발주 상세(오더넘버·주문시간·품목·수량·공급가·세금·종합계액)가 날자별로 표시됩니다. [발주서 이미지 미리보기]로 이미지를 확인한 뒤 이메일을 입력하고 발송할 수 있습니다.</p>
                 {% endif %}
             </div>
         {% endif %}
@@ -14291,9 +14301,101 @@ def admin_seller_send_manual_email():
     return jsonify({"success": True, "message": "이메일을 발송했습니다."})
 
 
+def _get_purchase_order_detail_rows(start_dt, end_dt, category_filter=None):
+    """발주관리: 기간·카테고리별 주문 품목 상세. 오더넘버, 주문시간, 품목, 수량, 공급가, 세금(면세0/과세), 종합계액.
+    반환: (rows list, rows_by_date dict, grand_total int). rows_by_date: 'YYYY-MM-DD' -> [rows], 날자별 소계용."""
+    from collections import defaultdict
+    q = db.session.query(OrderItem, Order, Product).join(
+        Order, OrderItem.order_id == Order.id
+    ).outerjoin(Product, OrderItem.product_id == Product.id).filter(
+        Order.status != '결제취소',
+        OrderItem.cancelled == False,
+        Order.created_at >= start_dt,
+        Order.created_at <= end_dt
+    )
+    if category_filter and category_filter != '전체':
+        q = q.filter(OrderItem.product_category == category_filter)
+    q = q.order_by(Order.created_at.asc(), Order.id.asc(), OrderItem.id.asc())
+    items = q.all()
+    rows = []
+    rows_by_date = defaultdict(list)
+    for oi, ord, p in items:
+        supply = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else 0
+        tax_type = (getattr(p, 'tax_type', None) or getattr(oi, 'tax_type', None) or '과세').strip()
+        if tax_type == '면세':
+            tax_amt = 0
+            line_total = supply * (oi.quantity or 0)
+        else:
+            tax_amt = int(round(supply * 0.1 * (oi.quantity or 0)))
+            line_total = int(round(supply * 1.1 * (oi.quantity or 0)))
+        order_time_str = (ord.created_at.strftime('%Y-%m-%d %H:%M') if ord.created_at else '')
+        date_key = (ord.created_at.strftime('%Y-%m-%d') if ord.created_at else '')
+        r = {
+            'order_id': getattr(ord, 'order_id', None) or '',
+            'order_time': order_time_str,
+            'product_name': (oi.product_name or '')[:50],
+            'quantity': oi.quantity or 0,
+            'supply_price': supply,
+            'tax_type': tax_type,
+            'tax_amount': tax_amt,
+            'tax_display': '0' if tax_type == '면세' else str(tax_amt),
+            'line_total': line_total,
+        }
+        rows.append(r)
+        rows_by_date[date_key].append(r)
+    grand_total = sum(x['line_total'] for x in rows)
+    return rows, dict(rows_by_date), grand_total
+
+
+def _build_purchase_order_image(rows, rows_by_date, grand_total, font_size=12):
+    """발주 상세 행으로 PNG 이미지 생성. 날자별 소계 + 총합계. 한글 폰트 사용."""
+    from PIL import ImageDraw
+    font, font_header = _pil_font_for_table(font_size)
+    headers = ['오더넘버', '주문시간', '품목', '수량', '공급가', '세금', '종합계액']
+    row_cells_list = []
+    for date_key in sorted(rows_by_date.keys()):
+        for r in rows_by_date[date_key]:
+            row_cells_list.append([
+                str(r.get('order_id', ''))[:16],
+                str(r.get('order_time', ''))[:16],
+                str(r.get('product_name', ''))[:14],
+                str(r.get('quantity', '')),
+                "{:,}".format(r.get('supply_price', 0)),
+                str(r.get('tax_display', '0')),
+                "{:,}".format(r.get('line_total', 0)),
+            ])
+        sub = sum(x['line_total'] for x in rows_by_date[date_key])
+        row_cells_list.append(['', '', date_key + ' 소계', '', '', '', "{:,}".format(sub)])
+    row_cells_list.append(['', '', '총합계', '', '', '', "{:,}".format(grand_total)])
+    col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font, padding=16, min_w=40, max_w=280)
+    cell_h = 36
+    img_w = sum(col_w)
+    img_h = cell_h * (1 + len(row_cells_list))
+    img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    y = 0
+    for i, h in enumerate(headers):
+        x = sum(col_w[:i])
+        draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(0, 0, 0), fill=(55, 65, 81))
+        draw.text((x + 6, y + 8), h, fill=(255, 255, 255), font=font_header)
+    y += cell_h
+    for cells in row_cells_list:
+        is_sub = (len(cells) >= 4 and cells[2] and '소계' in str(cells[2]))
+        is_total = (len(cells) >= 4 and cells[2] == '총합계')
+        fill_bg = (240, 253, 244) if is_total else ((255, 251, 235) if is_sub else (255, 255, 255))
+        for i, cell in enumerate(cells):
+            x = sum(col_w[:i])
+            draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(200, 200, 200), fill=fill_bg)
+            draw.text((x + 6, y + 8), cell, fill=(0, 0, 0), font=font)
+        y += cell_h
+    out = BytesIO()
+    img.save(out, format='PNG')
+    return out.getvalue()
+
+
 @login_required
 def admin_purchase_order_send_image():
-    """발주관리: 품목 수량별 집계를 이미지로 만들어 지정 이메일로 발송."""
+    """발주관리: 품목 상세(오더넘버·주문시간·품목·수량·공급가·세금·종합계액) 이미지로 만들어 지정 이메일로 발송. 날자별 소계·총합계 포함."""
     if not current_user.is_admin:
         flash("권한이 없습니다.")
         return redirect('/admin')
@@ -14313,58 +14415,21 @@ def admin_purchase_order_send_image():
         end_dt = datetime.strptime(po_end_str.replace('T', ' '), '%Y-%m-%d %H:%M') if po_end_str else now.replace(hour=23, minute=59, second=59, microsecond=0)
     except Exception:
         end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
-    from collections import defaultdict
-    q_oi = db.session.query(OrderItem.product_category, OrderItem.product_name, OrderItem.quantity).join(
-        Order, OrderItem.order_id == Order.id
-    ).filter(
-        Order.status != '결제취소',
-        OrderItem.cancelled == False,
-        Order.created_at >= start_dt,
-        Order.created_at <= end_dt
-    )
-    if po_category and po_category != '전체':
-        q_oi = q_oi.filter(OrderItem.product_category == po_category)
-    rows_oi = q_oi.all()
-    agg_po = defaultdict(int)
-    for cat, pname, qty in rows_oi:
-        agg_po[(cat or '', pname or '')] += int(qty or 0)
-    purchase_order_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v} for k, v in sorted(agg_po.items(), key=lambda x: (-x[1], x[0][0], x[0][1]))]
-    if not purchase_order_rows:
+    rows, rows_by_date, grand_total = _get_purchase_order_detail_rows(start_dt, end_dt, po_category)
+    if not rows:
         flash("해당 구간에 품목이 없어 이미지를 만들 수 없습니다.")
         return redirect('/admin?tab=purchase_order')
-    from PIL import ImageDraw
-    font, font_header = _pil_font_for_table(14)
-    headers = ['카테고리', '상품명', '수량']
-    row_cells_list = [[str(r.get('category', '')), str(r.get('product_name', '')), str(r.get('total_quantity', ''))] for r in purchase_order_rows]
-    col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font)
-    cell_h = 38
-    img_w = sum(col_w)
-    img_h = cell_h * (1 + len(purchase_order_rows))
-    img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
-    draw = ImageDraw.Draw(img)
-    y = 0
-    for i, h in enumerate(headers):
-        x = sum(col_w[:i])
-        draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(0, 0, 0), fill=(55, 65, 81))
-        draw.text((x + 8, y + 10), h, fill=(255, 255, 255), font=font_header)
-    y += cell_h
-    for cells in row_cells_list:
-        for i, cell in enumerate(cells):
-            x = sum(col_w[:i])
-            draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(200, 200, 200))
-            draw.text((x + 8, y + 10), cell, fill=(0, 0, 0), font=font)
-        y += cell_h
-    out = BytesIO()
-    img.save(out, format='PNG')
-    png_bytes = out.getvalue()
-    filename = f"발주_품목수량_{start_dt.strftime('%Y%m%d_%H%M')}_{end_dt.strftime('%H%M')}.png"
-    subject = f"[바구니삼촌] 발주 품목 수량 ({start_dt.strftime('%Y-%m-%d %H:%M')} ~ {end_dt.strftime('%Y-%m-%d %H:%M')})"
+    png_bytes = _build_purchase_order_image(rows, rows_by_date, grand_total)
+    filename = f"발주서_{start_dt.strftime('%Y%m%d_%H%M')}_{end_dt.strftime('%H%M')}.png"
+    subject = f"[바구니삼촌] 발주서 ({start_dt.strftime('%Y-%m-%d %H:%M')} ~ {end_dt.strftime('%Y-%m-%d %H:%M')})"
     body = f"""안녕하세요, 바구니삼촌입니다.
 
-아래 기간의 품목·수량 집계를 이미지로 첨부하여 보내드립니다.
+아래 기간의 발주서를 이미지로 첨부하여 보내드립니다.
+오더넘버·주문시간·품목·수량·공급가·세금·종합계액이 포함되어 있으며, 날자별 소계 및 총합계가 하단에 표시됩니다.
 
 기간: {start_dt.strftime('%Y-%m-%d %H:%M')} ~ {end_dt.strftime('%Y-%m-%d %H:%M')}
 카테고리: {po_category}
+총합계액: {grand_total:,}원
 
 첨부 이미지를 확인해 주시기 바랍니다.
 """
@@ -14373,10 +14438,35 @@ def admin_purchase_order_send_image():
     except Exception as e:
         flash("이메일 발송 실패: " + (str(e) or "이메일 설정을 확인해 주세요."))
         return redirect('/admin?tab=purchase_order')
-    flash(f"발주 이미지를 {to_email} 로 발송했습니다.")
+    flash(f"발주서 이미지를 {to_email} 로 발송했습니다.")
     from urllib.parse import urlencode
     qs = urlencode({'tab': 'purchase_order', 'po_start': po_start_str or start_dt.strftime('%Y-%m-%d %H:%M'), 'po_end': po_end_str or end_dt.strftime('%Y-%m-%d %H:%M'), 'po_category': po_category})
     return redirect('/admin?' + qs)
+
+
+@login_required
+def admin_purchase_order_preview_image():
+    """발주서 이미지 미리보기 (관리자 화면에서 확인용). GET: po_start, po_end, po_category → PNG 반환."""
+    if not current_user.is_admin:
+        return redirect('/admin')
+    po_start_str = (request.args.get('po_start') or '').strip()
+    po_end_str = (request.args.get('po_end') or '').strip()
+    po_category = (request.args.get('po_category') or '전체').strip() or '전체'
+    now = datetime.now()
+    try:
+        start_dt = datetime.strptime(po_start_str.replace('T', ' ').replace('+', ' '), '%Y-%m-%d %H:%M') if po_start_str else now.replace(hour=0, minute=0, second=0, microsecond=0)
+    except Exception:
+        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        end_dt = datetime.strptime(po_end_str.replace('T', ' ').replace('+', ' '), '%Y-%m-%d %H:%M') if po_end_str else now.replace(hour=23, minute=59, second=59, microsecond=0)
+    except Exception:
+        end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    rows, rows_by_date, grand_total = _get_purchase_order_detail_rows(start_dt, end_dt, po_category)
+    if not rows:
+        return redirect('/admin?tab=purchase_order')
+    png_bytes = _build_purchase_order_image(rows, rows_by_date, grand_total)
+    from flask import Response
+    return Response(png_bytes, mimetype='image/png', headers={'Content-Disposition': 'inline; filename=발주서_미리보기.png'})
 
 
 @login_required
@@ -15990,21 +16080,26 @@ def _pil_font_for_table(size=12):
 
 
 def _pil_table_col_widths(headers, row_cells_list, font_header, font, padding=24, min_w=50, max_w=900):
-    """헤더+행 셀 텍스트 기준으로 열 너비(픽셀) 계산. padding만큼 여백, min_w~max_w 범위."""
+    """헤더+행 셀 텍스트 기준으로 열 너비(픽셀) 계산. padding만큼 여백, min_w~max_w 범위. 한글은 글자당 약 14px 폴백."""
     n = len(headers)
     col_w = []
     for j in range(n):
         try:
             w = font_header.getlength(headers[j])
         except Exception:
-            w = len(headers[j]) * 10
+            w = 0
+        if w <= 0:
+            w = len(headers[j]) * 14
         for row in row_cells_list:
             if j < len(row):
                 s = str(row[j])
                 try:
-                    w = max(w, font.getlength(s))
+                    w2 = font.getlength(s)
                 except Exception:
-                    w = max(w, len(s) * 9)
+                    w2 = 0
+                if w2 <= 0:
+                    w2 = len(s) * 14
+                w = max(w, w2)
         w = max(min_w, min(max_w, int(w) + padding))
         col_w.append(w)
     return tuple(col_w)

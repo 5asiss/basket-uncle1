@@ -62,6 +62,7 @@ def register_admin_routes(app):
         admin_email_order_line_status_update,
         admin_email_order_create_view_link,
         admin_purchase_order_send_image,
+        admin_purchase_order_preview_image,
         admin_backup_run,
         admin_backup_cron,
         admin_review_delete,
@@ -172,6 +173,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/email_order/line_status', view_func=login_required(admin_email_order_line_status_update), methods=['POST'])
     admin_bp.add_url_rule('/admin/email_order/create_view_link', view_func=login_required(admin_email_order_create_view_link), methods=['POST'])
     admin_bp.add_url_rule('/admin/purchase_order/send_image', view_func=login_required(admin_purchase_order_send_image), methods=['POST'])
+    admin_bp.add_url_rule('/admin/purchase_order/preview_image', view_func=login_required(admin_purchase_order_preview_image))
     # backup
     admin_bp.add_url_rule('/admin/backup/run', view_func=login_required(admin_backup_run), methods=['POST'])
     admin_bp.add_url_rule('/admin/backup/cron', view_func=admin_backup_cron)
