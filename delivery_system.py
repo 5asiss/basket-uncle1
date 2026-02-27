@@ -277,7 +277,11 @@ def logi_admin_logout():
 
 @logi_bp.route('/')
 def logi_admin_dashboard():
-    if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('logi.logi_admin_login'))
+
+    # 새로 추가된 기사 정산 컬럼이 없을 수 있으므로, 대시보드 진입 시 한 번 보정
+    _logi_ensure_driver_pay_columns()
     
     st_filter = request.args.get('status', 'all')
     cat_filter = request.args.get('category', '전체')
