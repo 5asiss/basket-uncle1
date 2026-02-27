@@ -4993,11 +4993,18 @@ def product_detail(pid):
                     p.detail_image_url = fixed_raw
                     changed = True
 
-            # 3) Cloudinary 단일 URL인 경우(내부에 콤마가 있어도 전체를 하나의 URL로 취급)
-            if 'res.cloudinary.com' in raw_detail and raw_detail.count('http') == 1:
-                detail_images = [raw_detail.strip()]
+            # 3) Cloudinary URL이 포함된 경우: 'https://' 단위로 자른 뒤 각각을 하나의 URL로 사용
+            if 'res.cloudinary.com' in raw_detail:
+                parts = raw_detail.split('https://')
+                urls = []
+                for part in parts:
+                    part = part.strip().strip(',')
+                    if not part:
+                        continue
+                    urls.append('https://' + part)
+                detail_images = urls
             else:
-                # 4) 그 외의 경우: 콤마로 나눈 뒤, 파일명만 있는 값은 /static/uploads/ 기준으로 보정
+                # 4) 일반 로컬/상대 경로: 콤마로 나눈 뒤, 파일명만 있는 값은 /static/uploads/ 기준으로 보정
                 for s in raw_detail.split(','):
                     s = (s or '').strip()
                     if not s:
