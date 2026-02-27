@@ -850,11 +850,12 @@ def save_uploaded_file(file):
             upload_res = cloudinary.uploader.upload(
                 file_bytes,
                 folder="basket-uncle/main",
-                transformation={"width": 800, "height": 800, "crop": "fill"}
             )
             url = upload_res.get("secure_url") or upload_res.get("url")
             if not url:
                 print(f"[save_uploaded_file] Cloudinary returned no URL: {upload_res}")
+            elif "/upload/" in url:
+                url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
             return url
         img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
@@ -871,7 +872,7 @@ def save_uploaded_file(file):
 
 
 def save_detail_image(file):
-    """상세이미지 업로드. 가로 최대 1200px, 세로는 원본 비율 유지(잘리지 않음). Cloudinary/로컬 대응."""
+    """상세이미지 업로드. Cloudinary 시 원본 업로드 후 URL에 w_1200,c_limit 변환 적용. 로컬 시 가로 1200px 리사이즈."""
     if not file or not getattr(file, 'filename', None):
         return None
     if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
@@ -893,9 +894,11 @@ def save_detail_image(file):
             upload_res = cloudinary.uploader.upload(
                 file_bytes,
                 folder="basket-uncle/detail",
-                transformation={"width": 1200, "crop": "limit"}
             )
-            return upload_res.get("secure_url") or upload_res.get("url")
+            url = upload_res.get("secure_url") or upload_res.get("url")
+            if url and "/upload/" in url:
+                url = url.replace("/upload/", "/upload/w_1200,c_limit/")
+            return url
         img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
         w, h = img.size
@@ -926,9 +929,11 @@ def save_review_image(file):
             upload_res = cloudinary.uploader.upload(
                 file_bytes,
                 folder="basket-uncle/reviews",
-                transformation={"width": 640, "height": 640, "crop": "fill"}
             )
-            return upload_res.get("secure_url") or upload_res.get("url")
+            url = upload_res.get("secure_url") or upload_res.get("url")
+            if url and "/upload/" in url:
+                url = url.replace("/upload/", "/upload/w_640,h_640,c_fill/")
+            return url
         review_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'reviews')
         os.makedirs(review_folder, exist_ok=True)
         new_filename = f"review_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
@@ -958,9 +963,11 @@ def save_board_image(file):
             upload_res = cloudinary.uploader.upload(
                 file_bytes,
                 folder="basket-uncle/board",
-                transformation={"width": 800, "height": 800, "crop": "fill"}
             )
-            return upload_res.get("secure_url") or upload_res.get("url")
+            url = upload_res.get("secure_url") or upload_res.get("url")
+            if url and "/upload/" in url:
+                url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
+            return url
         board_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'board')
         os.makedirs(board_folder, exist_ok=True)
         new_filename = f"board_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
@@ -13709,8 +13716,11 @@ def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
         if cloudinary_url:
             with open(path, 'rb') as fh:
                 file_bytes = fh.read()
-            res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main", transformation={"width": 800, "height": 800, "crop": "fill"})
-            return res.get("secure_url") or res.get("url")
+            res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main")
+            url = res.get("secure_url") or res.get("url")
+            if url and "/upload/" in url:
+                url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
+            return url
         ext = (os.path.splitext(path)[1] or '.jpg').lower()
         if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
             ext = '.jpg'
@@ -13750,9 +13760,11 @@ def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
             if cloudinary_url:
                 with open(candidate, 'rb') as fh:
                     file_bytes = fh.read()
-                res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail", transformation={"width": 1200, "crop": "limit"})
+                res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail")
                 url = res.get("secure_url") or res.get("url")
                 if url:
+                    if "/upload/" in url:
+                        url = url.replace("/upload/", "/upload/w_1200,c_limit/")
                     urls.append(url)
             else:
                 ext = os.path.splitext(candidate)[1].lower()
@@ -13850,10 +13862,15 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
                 with open(src, 'rb') as fh:
                     file_bytes = fh.read()
                 if num == 1:
-                    res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main", transformation={"width": 800, "height": 800, "crop": "fill"})
+                    res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main")
+                    url = res.get("secure_url") or res.get("url") or ""
+                    if url and "/upload/" in url:
+                        url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
                 else:
-                    res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail", transformation={"width": 1200, "crop": "limit"})
-                url = res.get("secure_url") or res.get("url")
+                    res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail")
+                    url = res.get("secure_url") or res.get("url") or ""
+                    if url and "/upload/" in url:
+                        url = url.replace("/upload/", "/upload/w_1200,c_limit/")
             else:
                 new_name = f"bulk_{num}_{ts}_{uuid.uuid4().hex[:8]}{ext}"
                 dest = os.path.join(upload_dir_abs, new_name)
