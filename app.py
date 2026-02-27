@@ -870,6 +870,47 @@ def save_uploaded_file(file):
         return None
 
 
+def save_detail_image(file):
+    """상세이미지 업로드. 가로 최대 1200px, 세로는 원본 비율 유지(잘리지 않음). Cloudinary/로컬 대응."""
+    if not file or not getattr(file, 'filename', None):
+        return None
+    if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
+        try: file.stream.seek(0)
+        except Exception: pass
+    fn = (file.filename or '').strip()
+    if not fn:
+        fn = 'upload.jpg'
+    if not _is_allowed_image_filename(fn):
+        return None
+    try:
+        if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
+            try: file.stream.seek(0)
+            except Exception: pass
+        file_bytes = file.read()
+        if not file_bytes:
+            return None
+        if cloudinary_url:
+            upload_res = cloudinary.uploader.upload(
+                file_bytes,
+                folder="basket-uncle/detail",
+                transformation={"width": 1200, "crop": "limit"}
+            )
+            return upload_res.get("secure_url") or upload_res.get("url")
+        img = Image.open(BytesIO(file_bytes))
+        img = ImageOps.exif_transpose(img)
+        w, h = img.size
+        if w > 1200:
+            ratio = 1200 / w
+            img = img.resize((1200, int(h * ratio)), Image.Resampling.LANCZOS)
+        new_filename = f"detail_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+        img.save(save_path, "WEBP", quality=88)
+        return f"/static/uploads/{new_filename}"
+    except Exception as e:
+        print(f"[save_detail_image] ERROR: {e}")
+        return None
+
+
 def save_review_image(file):
     """리뷰용 이미지 최적화 후 저장 (최대 640px). Cloudinary 설정 시 Cloudinary 사용."""
     if not file or file.filename == '' or not _is_allowed_image_filename(file.filename):
@@ -4925,7 +4966,7 @@ def product_detail(pid):
     <div class="max-w-5xl xl:max-w-[1400px] 2xl:max-w-[1600px] mx-auto px-0 md:px-8 lg:px-12 xl:px-16 2xl:px-20 pb-16 font-black text-left">
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-12 lg:gap-16 xl:gap-20 items-start">
-            <div class="relative w-full aspect-square bg-white overflow-hidden md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100">
+            <div class="relative w-full bg-white overflow-hidden md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100">
                 {% if p.description %}
                 <div class="absolute top-6 left-0 z-20">
                     <span class="px-5 py-2 text-xs md:text-sm font-black text-white shadow-xl rounded-r-full 
@@ -4938,7 +4979,7 @@ def product_detail(pid):
                 </div>
                 {% endif %}
 
-                <img src="{{ p.image_url }}" class="w-full h-full object-contain p-6 md:p-12" loading="lazy">
+                <img src="{{ p.image_url }}" class="w-full h-auto p-6 md:p-12" loading="lazy">
                 
                 {% if is_expired or p.stock <= 0 %}
                 <div class="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px]">
@@ -13654,33 +13695,37 @@ def _bulk_image_filename_only(s):
 
 
 def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
-    """엑셀 셀에 로컬 전체 경로가 있으면 해당 파일을 upload_dir에 복사하고 URL 반환. 없거나 실패 시 None."""
+    """엑셀 셀에 로컬 전체 경로가 있으면 Cloudinary 또는 upload_dir에 복사하고 URL 반환. 없거나 실패 시 None."""
     if not raw_value or not isinstance(raw_value, str):
         return None
     import shutil
     path = raw_value.strip().strip('"').strip("'").strip()
     if not path:
         return None
-    # 절대 경로로 보이는 경우만 시도 (Windows C:\ 또는 \, Unix /)
     is_absolute = (len(path) >= 2 and path[1] == ':') or path.startswith('/') or path.startswith('\\') or ('\\' in path and path[0].isalpha())
     if not is_absolute or not os.path.isfile(path):
         return None
-    ext = (os.path.splitext(path)[1] or '.jpg').lower()
-    if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
-        ext = '.jpg'
-    new_name = f"bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
-    dest = os.path.join(os.path.abspath(upload_dir), new_name)
     try:
+        if cloudinary_url:
+            with open(path, 'rb') as fh:
+                file_bytes = fh.read()
+            res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main", transformation={"width": 800, "height": 800, "crop": "fill"})
+            return res.get("secure_url") or res.get("url")
+        ext = (os.path.splitext(path)[1] or '.jpg').lower()
+        if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
+            ext = '.jpg'
+        new_name = f"bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+        dest = os.path.join(os.path.abspath(upload_dir), new_name)
         shutil.copy2(path, dest)
         if os.path.isfile(dest):
             return f"/static/uploads/{new_name}"
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[_bulk_try_copy_from_absolute_path] ERROR: {e}")
     return None
 
 
 def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
-    """대표이미지 전체 경로(예: C:\\...\\1.jpg) 기준으로 같은 폴더의 2.jpg~10.jpg를 복사해 상세이미지 URL 목록 반환."""
+    """대표이미지 전체 경로(예: C:\\...\\1.jpg) 기준으로 같은 폴더의 2.jpg~10.jpg를 Cloudinary 또는 로컬에 복사."""
     if not main_absolute_path or not isinstance(main_absolute_path, str):
         return []
     import shutil
@@ -13701,15 +13746,23 @@ def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
                 break
         if not candidate:
             continue
-        ext = os.path.splitext(candidate)[1].lower()
-        new_name = f"bulk_{num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
-        dest = os.path.join(upload_abs, new_name)
         try:
-            shutil.copy2(candidate, dest)
-            if os.path.isfile(dest):
-                urls.append(f"/static/uploads/{new_name}")
-        except Exception:
-            pass
+            if cloudinary_url:
+                with open(candidate, 'rb') as fh:
+                    file_bytes = fh.read()
+                res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail", transformation={"width": 1200, "crop": "limit"})
+                url = res.get("secure_url") or res.get("url")
+                if url:
+                    urls.append(url)
+            else:
+                ext = os.path.splitext(candidate)[1].lower()
+                new_name = f"bulk_{num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+                dest = os.path.join(upload_abs, new_name)
+                shutil.copy2(candidate, dest)
+                if os.path.isfile(dest):
+                    urls.append(f"/static/uploads/{new_name}")
+        except Exception as e:
+            print(f"[_bulk_copy_detail] num={num} ERROR: {e}")
     return urls
 
 
@@ -13792,18 +13845,29 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
         if not src or not os.path.isfile(src):
             continue
         ext = os.path.splitext(src)[1].lower()
-        new_name = f"bulk_{num}_{ts}_{uuid.uuid4().hex[:8]}{ext}"
-        dest = os.path.join(upload_dir_abs, new_name)
         try:
-            shutil.copy2(src, dest)
-            if not os.path.isfile(dest):
-                continue
-            url = f"/static/uploads/{new_name}"
-            if num == 1:
-                main_url = url
+            if cloudinary_url:
+                with open(src, 'rb') as fh:
+                    file_bytes = fh.read()
+                if num == 1:
+                    res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main", transformation={"width": 800, "height": 800, "crop": "fill"})
+                else:
+                    res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail", transformation={"width": 1200, "crop": "limit"})
+                url = res.get("secure_url") or res.get("url")
             else:
-                detail_urls.append(url)
-        except Exception:
+                new_name = f"bulk_{num}_{ts}_{uuid.uuid4().hex[:8]}{ext}"
+                dest = os.path.join(upload_dir_abs, new_name)
+                shutil.copy2(src, dest)
+                if not os.path.isfile(dest):
+                    continue
+                url = f"/static/uploads/{new_name}"
+            if url:
+                if num == 1:
+                    main_url = url
+                else:
+                    detail_urls.append(url)
+        except Exception as e:
+            print(f"[_bulk_collect_images_from_folder] num={num} ERROR: {e}")
             continue
     if not detail_urls and main_url:
         detail_urls = [main_url]
@@ -15469,7 +15533,7 @@ def admin_product_add():
         if not check_admin_permission(cat_name): return redirect('/admin')
         main_img = save_uploaded_file(request.files.get('main_image'))
         detail_files = request.files.getlist('detail_images')
-        detail_img_url_str = ",".join(filter(None, [save_uploaded_file(f) for f in detail_files if f.filename != '']))
+        detail_img_url_str = ",".join(filter(None, [save_detail_image(f) for f in detail_files if f.filename != '']))
         deadline_val = datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M') if request.form.get('deadline') else None
         rt = request.form.get('reset_time', '').strip()[:5] if request.form.get('reset_time') else None
         rq = request.form.get('reset_to_quantity', '').strip()
@@ -15597,7 +15661,7 @@ def admin_product_edit(pid):
         # 상세 이미지 변경 시 처리
         detail_files = request.files.getlist('detail_images')
         if detail_files and detail_files[0].filename != '':
-            p.detail_image_url = ",".join(filter(None, [save_uploaded_file(f) for f in detail_files if f.filename != '']))
+            p.detail_image_url = ",".join(filter(None, [save_detail_image(f) for f in detail_files if f.filename != '']))
             
         db.session.commit()
         flash("상품 정보가 성공적으로 수정되었습니다.")
