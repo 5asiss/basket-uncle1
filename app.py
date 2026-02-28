@@ -7882,46 +7882,61 @@ def order_payment():
     <script src="https://js.tosspayments.com/v1/payment"></script>
     <script>
     // 1. 토스페이먼츠 초기화
-    var tossPayments = TossPayments("{TOSS_CLIENT_KEY}");
-    var isProcessing = false; // 중복 결제 방지 상태 변수
+    const tossPayments = TossPayments("{TOSS_CLIENT_KEY}");
+    let isProcessing = false;
+    const paymentButton = document.getElementById('payment-button');
 
-    document.getElementById('payment-button').addEventListener('click', function() {{
-        // 2. 중복 클릭 체크
-        if (isProcessing) {{
-            alert("현재 결제가 진행 중입니다. 잠시만 기다려 주세요.");
-            return;
-        }}
+    if (paymentButton) {{
+        const defaultLabel = paymentButton.innerHTML;
 
-        try {{
-            isProcessing = true; // 처리 시작
-            this.innerHTML = '<i class="fas fa-spinner animate-spin"></i> 연결 중...';
-            this.classList.add('opacity-50', 'cursor-not-allowed');
+        paymentButton.addEventListener('click', function () {{
+            if (isProcessing) {{
+                alert("결제창을 불러오는 중입니다. 잠시만 기다려 주세요.");
+                return;
+            }}
 
-            tossPayments.requestPayment('카드', {{
-                amount: { total },
-                taxFreeAmount: { min(tax_free, total) },
-                orderId: '{ order_id }',
-                orderName: '{ order_name }',
-                customerName: '{ current_user.name }',
-                successUrl: window.location.origin + '/payment/success',
-                failUrl: window.location.origin + '/payment/fail'
-            }}).catch(function (error) {{
-                // 결제창 호출 실패 시 상태 복구
+            try {{
+                isProcessing = true;
+                paymentButton.disabled = true;
+                paymentButton.classList.add('opacity-60', 'cursor-not-allowed');
+                paymentButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 결제창 준비 중...';
+
+                const paymentAmount = Number({ total });
+                const taxFreeAmount = Math.min(paymentAmount, Number({ tax_free }));
+
+                tossPayments
+                    .requestPayment('CARD', {{
+                        amount: paymentAmount,
+                        taxFreeAmount,
+                        orderId: '{ order_id }',
+                        orderName: '{ order_name }',
+                        customerEmail: '{ current_user.email }',
+                        customerName: '{ current_user.name }',
+                        successUrl: window.location.origin + '/payment/success',
+                        failUrl: window.location.origin + '/payment/fail'
+                    }})
+                    .catch(function (error) {{
+                        if (error.code === 'USER_CANCEL') {{
+                            alert('사용자가 결제를 취소했습니다.');
+                        }} else {{
+                            alert('결제 오류: ' + error.message);
+                        }}
+                    }})
+                    .finally(function () {{
+                        isProcessing = false;
+                        paymentButton.disabled = false;
+                        paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
+                        paymentButton.innerHTML = defaultLabel;
+                    }});
+            }} catch (err) {{
+                alert('시스템 오류가 발생했습니다: ' + err.message);
                 isProcessing = false;
-                document.getElementById('payment-button').innerHTML = '<i class="fas fa-credit-card"></i> 결제창 열기';
-                document.getElementById('payment-button').classList.remove('opacity-50', 'cursor-not-allowed');
-                
-                if (error.code === 'USER_CANCEL') {{
-                    alert("결제가 취소되었습니다.");
-                }} else {{
-                    alert("결제 오류: " + error.message);
-                }}
-            }});
-        }} catch (err) {{
-            alert("시스템 오류가 발생했습니다: " + err.message);
-            isProcessing = false;
-        }}
-    }});
+                paymentButton.disabled = false;
+                paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
+                paymentButton.innerHTML = defaultLabel;
+            }}
+        }});
+    }}
     </script>
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
@@ -17618,7 +17633,6 @@ with app.app_context():
         except Exception:
             db.session.rollback()
     init_db() # 기존 쇼핑몰 초기화 함수 호출
-    
     
     # 로컬 테스트 및 Render 배포 호환 포트 설정 (기본 5000)
     port = int(os.environ.get("PORT", 5000))
