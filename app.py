@@ -15261,9 +15261,9 @@ def admin_product_bulk_upload():
             if not image_url:
                 main_img = _bulk_image_filename_only(main_img_raw)
                 if main_img and not _bulk_is_placeholder_image(main_img):
-                    server_path = os.path.join(upload_dir, main_img)
-                    if os.path.isfile(server_path):
-                        image_url = f"/static/uploads/{main_img.lstrip('/')}"
+                    found = _bulk_find_upload_file(upload_dir, main_img)
+                    if found:
+                        image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
                     else:
                         missing_main = main_img
             path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
@@ -15284,8 +15284,9 @@ def admin_product_bulk_upload():
                         else:
                             fn_img = _bulk_image_filename_only(p)
                             if fn_img:
-                                if os.path.isfile(os.path.join(upload_dir, fn_img)):
-                                    detail_parts.append(f"/static/uploads/{fn_img}")
+                                found = _bulk_find_upload_file(upload_dir, fn_img)
+                                if found:
+                                    detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                                 else:
                                     missing_details.append(fn_img)
                     if detail_parts:
@@ -15364,6 +15365,31 @@ def _bulk_image_filename_only(s):
     if '/' in t or '\\' in t:
         return os.path.basename(t)
     return t
+
+
+def _bulk_find_upload_file(upload_dir, filename):
+    """upload_dir 안에 filename과 일치하는 파일이 있으면 URL용 파일명 반환, 없으면 None.
+    Windows에서는 대소문자 구분 없이 매칭."""
+    if not filename or not isinstance(filename, str):
+        return None
+    name = filename.strip().strip('"').strip("'").replace("\\", "/").lstrip("/")
+    if "/" in name:
+        name = os.path.basename(name)
+    if not name:
+        return None
+    direct = os.path.join(upload_dir, name)
+    if os.path.isfile(direct):
+        return name
+    if os.name == "nt":
+        want_low = name.lower()
+        try:
+            for fn in os.listdir(upload_dir):
+                p = os.path.join(upload_dir, fn)
+                if os.path.isfile(p) and fn.lower() == want_low:
+                    return fn
+        except OSError:
+            pass
+    return None
 
 
 def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
