@@ -1406,6 +1406,18 @@ FOOTER_HTML = """
         <a href="/mypage/messages" class="bg-white text-teal-600 px-4 py-1.5 rounded-lg font-black hover:bg-teal-50">확인</a>
         <button type="button" id="message-notice-close" class="text-white/90 hover:text-white text-xl leading-none" aria-label="닫기">×</button>
     </div>
+    <!-- 메시지 팝업 알림 (메시지 전송되면 항상 표시) -->
+    <div id="message-popup" class="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-sm z-[63] bg-white border border-stone-200 rounded-2xl shadow-xl p-4 transform translate-y-full opacity-0 transition-all duration-300" style="display: none;">
+        <div class="flex items-start gap-3">
+            <span id="message-popup-icon" class="flex-shrink-0 w-10 h-10 rounded-full bg-teal-100 text-teal-600 flex items-center justify-center"><i class="fas fa-bell text-lg"></i></span>
+            <div class="flex-1 min-w-0">
+                <p id="message-popup-title" class="font-bold text-stone-900 text-sm">알림</p>
+                <p id="message-popup-body" class="text-stone-600 text-xs mt-0.5 line-clamp-2"></p>
+                <a id="message-popup-link" href="/mypage/messages" class="inline-block mt-2 text-teal-600 font-bold text-xs hover:underline">알림 확인</a>
+            </div>
+            <button type="button" id="message-popup-close" class="text-stone-400 hover:text-stone-600 text-lg leading-none" aria-label="닫기">×</button>
+        </div>
+    </div>
     <script>
     (function(){
         if (!{{ 'true' if current_user.is_authenticated else 'false' }}) return;
@@ -1437,6 +1449,48 @@ FOOTER_HTML = """
         setInterval(function() {
             if (!shouldShow()) return;
             fetch('/api/messages/unread_count', { credentials: 'same-origin' }).then(function(r) { if (r.status !== 200) return; return r.json(); }).then(function(data) { if (data && data.count > 0) showBar(data.count); }).catch(function(){});
+        }, 60000);
+    })();
+    (function(){
+        if (!{{ 'true' if current_user.is_authenticated else 'false' }}) return;
+        var popup = document.getElementById('message-popup');
+        if (!popup) return;
+        var keyPrefix = 'message_popup_shown_';
+        function showMessagePopup(data) {
+            if (!data || !data.has || !data.id) return;
+            var shown = sessionStorage.getItem(keyPrefix + data.id);
+            if (shown) return;
+            sessionStorage.setItem(keyPrefix + data.id, '1');
+            var titleEl = document.getElementById('message-popup-title');
+            var bodyEl = document.getElementById('message-popup-body');
+            var linkEl = document.getElementById('message-popup-link');
+            var iconEl = document.getElementById('message-popup-icon');
+            if (titleEl) titleEl.textContent = data.title || '알림';
+            if (bodyEl) bodyEl.textContent = data.body || '';
+            if (linkEl) linkEl.href = '/mypage/messages';
+            if (iconEl) {
+                var iconClass = (data.msg_type === 'delivery_complete') ? 'fa-truck-fast' : 'fa-bell';
+                var i = iconEl.querySelector('i');
+                if (i) { i.className = 'fas ' + iconClass + ' text-lg'; }
+            }
+            popup.style.display = 'block';
+            requestAnimationFrame(function() { popup.classList.remove('translate-y-full', 'opacity-0'); });
+        }
+        function hideMessagePopup() {
+            popup.classList.add('translate-y-full', 'opacity-0');
+            setTimeout(function() { popup.style.display = 'none'; }, 300);
+        }
+        fetch('/api/messages/latest_unread', { credentials: 'same-origin' }).then(function(r) {
+            if (r.status !== 200) return null;
+            return r.json();
+        }).then(function(data) { showMessagePopup(data); }).catch(function(){});
+        var closeBtn = document.getElementById('message-popup-close');
+        if (closeBtn) closeBtn.addEventListener('click', hideMessagePopup);
+        setInterval(function() {
+            fetch('/api/messages/latest_unread', { credentials: 'same-origin' }).then(function(r) {
+                if (r.status !== 200) return null;
+                return r.json();
+            }).then(function(data) { showMessagePopup(data); }).catch(function(){});
         }, 60000);
     })();
     </script>
@@ -2191,6 +2245,43 @@ def api_messages_unread_count():
     """로그인 사용자의 미읽음 메시지 개수 (알림 바 표시용)."""
     n = UserMessage.query.filter_by(user_id=current_user.id, read_at=None).count()
     return jsonify({"count": n})
+
+
+@app.route('/api/messages/latest_delivery_complete')
+@login_required
+def api_messages_latest_delivery_complete():
+    """미읽음 배송완료 메시지 1건 반환 (앱 내 배송완료 팝업용). 없으면 has: false."""
+    m = UserMessage.query.filter_by(
+        user_id=current_user.id,
+        read_at=None,
+        msg_type='delivery_complete'
+    ).order_by(UserMessage.id.desc()).first()
+    if not m:
+        return jsonify({"has": False})
+    return jsonify({
+        "has": True,
+        "id": m.id,
+        "title": m.title or "배송이 완료되었습니다",
+        "body": (m.body or "")[:200],
+        "order_id": m.related_order_id,
+    })
+
+
+@app.route('/api/messages/latest_unread')
+@login_required
+def api_messages_latest_unread():
+    """미읽음 메시지 중 최신 1건 반환 (메시지 전송 시 항상 팝업 알림용). 없으면 has: false."""
+    m = UserMessage.query.filter_by(user_id=current_user.id, read_at=None).order_by(UserMessage.id.desc()).first()
+    if not m:
+        return jsonify({"has": False})
+    return jsonify({
+        "has": True,
+        "id": m.id,
+        "title": m.title or "알림",
+        "body": (m.body or "")[:200],
+        "msg_type": m.msg_type or "custom",
+        "order_id": m.related_order_id,
+    })
 
 
 @app.route('/api/popup/current')
