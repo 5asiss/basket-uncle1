@@ -22,9 +22,11 @@ build/
 *.db
 instance/
 *.sqlite3
+# ↑ instance/ 안의 backups/ 폴더는 백업 zip 저장 위치. Git에 포함되지 않으며, 앱·배포·git에서 삭제하지 않음.
 
-# 업로드/미디어 (선택: 서버에서 생성)
-# static/uploads/
+# 업로드/미디어 (배포 시 기존 파일이 다시 올라오지 않도록 제외)
+static/uploads/*
+!static/uploads/.gitkeep
 
 # IDE/OS
 .idea/
