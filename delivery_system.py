@@ -99,9 +99,6 @@ class DeliveryLog(db_delivery.Model):
 # --------------------------------------------------------------------------------
 # 4. 유틸리티 함수 (함수명 겹침 방지 접두어 사용)
 # --------------------------------------------------------------------------------
-def get_kst():
-    """한국 표준시(UTC+9) 반환 함수"""
-    return datetime.utcnow() + timedelta(hours=9)
 def logi_add_log(task_id, order_id, status, message):
     # 로그 생성 시 시점을 한국 시간으로 고정
     log = DeliveryLog(task_id=task_id, order_id=order_id, status=status, message=message, created_at=get_kst())
@@ -316,7 +313,7 @@ def logi_admin_dashboard():
     unassigned_count = DeliveryTask.query.filter(DeliveryTask.status == '대기', DeliveryTask.driver_id == None).count()
     assigned_count = DeliveryTask.query.filter_by(status='배정완료').count()
     picking_count = DeliveryTask.query.filter_by(status='픽업').count()
-    complete_today = DeliveryTask.query.filter_by(status='완료').filter(DeliveryTask.completed_at >= datetime.now().replace(hour=0,minute=0,second=0)).count()
+    complete_today = DeliveryTask.query.filter_by(status='완료').filter(DeliveryTask.completed_at >= get_kst().replace(hour=0,minute=0,second=0)).count()
 
     item_sum = logi_get_item_summary(tasks)
     drivers = Driver.query.all()
@@ -736,8 +733,8 @@ def logi_driver_work():
     # 1. 탭 상태 및 날짜 설정
     view_status = request.args.get('view', 'assigned')
     selected_days = int(request.args.get('days', 1)) # 기본값 오늘(1일)
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    since_date = datetime.now() - timedelta(days=selected_days)
+    today_start = get_kst().replace(hour=0, minute=0, second=0, microsecond=0)
+    since_date = get_kst() - timedelta(days=selected_days)
 
     # 2. [핵심] 상단 현황판용 숫자 계산 (탭 이동과 상관없이 항상 전체 통계 유지)
     # 배정됨: 대기 또는 배정완료 상태인 전체 건수
@@ -753,14 +750,14 @@ def logi_driver_work():
     # 1. 현황판용 수치 계산 (탭 클릭과 관계없이 항상 전체 요약 유지)
     assigned_count = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id, DeliveryTask.status.in_(['배정완료', '대기'])).count()
     picking_count = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id, DeliveryTask.status == '픽업').count()
-    complete_today = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id, DeliveryTask.status == '완료', DeliveryTask.completed_at >= datetime.now().replace(hour=0,minute=0,second=0)).count()
+    complete_today = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id, DeliveryTask.status == '완료', DeliveryTask.completed_at >= get_kst().replace(hour=0,minute=0,second=0)).count()
 
     # 2. 완료 내역 조회용 기간 설정 (기본 1일)
     selected_days = int(request.args.get('days', 1))
-    since_date = datetime.now().replace(hour=0, minute=0, second=0) - timedelta(days=selected_days-1)
+    since_date = get_kst().replace(hour=0, minute=0, second=0) - timedelta(days=selected_days-1)
 
     # 3. 탭별 데이터 필터링
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = get_kst().strftime('%Y-%m-%d')
     start_date_str = request.args.get('start_date', today_str)
     end_date_str = request.args.get('end_date', today_str)
     base_query = DeliveryTask.query.filter(DeliveryTask.driver_id == driver.id)
@@ -1347,7 +1344,7 @@ def logi_bulk_pickup():
     for tid in data.get('task_ids'):
         t = DeliveryTask.query.get(tid)
         if t and t.status in ['배정완료', '대기']: 
-            t.status, t.pickup_at = '픽업', datetime.now()
+            t.status, t.pickup_at = '픽업', get_kst()
             logi_add_log(t.id, t.order_id, '픽업', '일괄 상차 완료 처리')
             # 메인 앱에 배송중 반영 및 고객 메시지 발송
             try:
@@ -1364,7 +1361,7 @@ def logi_update_task_status(tid, new_status):
     if t:
         if t.status == '완료': return "수정불가", 403
         old = t.status; t.status = new_status
-        if new_status == '픽업': t.pickup_at = datetime.now()
+        if new_status == '픽업': t.pickup_at = get_kst()
         logi_add_log(t.id, t.order_id, new_status, f'{old} -> {new_status} 상태 변경')
         db_delivery.session.commit()
         # 픽업 시 메인 앱 배송중 반영 및 고객 메시지 발송
@@ -1381,7 +1378,7 @@ def logi_update_task_status(tid, new_status):
 def logi_complete_action(tid):
     t = DeliveryTask.query.get(tid); d = request.json or {}
     if t:
-        t.status, t.completed_at, t.photo_data = '완료', datetime.now(), d.get('photo')
+        t.status, t.completed_at, t.photo_data = '완료', get_kst(), d.get('photo')
         logi_add_log(t.id, t.order_id, '완료', '기사 배송 완료 및 안내 전송')
         db_delivery.session.commit()
         # 메인 앱에 배송완료 반영 및 고객 메시지(사진 포함) 발송
@@ -1406,7 +1403,7 @@ def logi_driver_mgmt():
     if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
     drivers = Driver.query.all()
     work_url = request.host_url.rstrip('/') + "/logi/work"
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = get_kst().replace(hour=0, minute=0, second=0, microsecond=0)
     driver_stats = []
     for d in drivers:
         assigned = DeliveryTask.query.filter(DeliveryTask.driver_id == d.id, DeliveryTask.status == '배정완료').count()
@@ -1805,7 +1802,7 @@ def logi_delete_admin(uid):
 @logi_bp.route('/admin/map')
 def logi_driver_path_map():
     if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
-    tasks = DeliveryTask.query.filter(DeliveryTask.status == '완료', DeliveryTask.completed_at >= datetime.now().replace(hour=0,minute=0,second=0)).all()
+    tasks = DeliveryTask.query.filter(DeliveryTask.status == '완료', DeliveryTask.completed_at >= get_kst().replace(hour=0,minute=0,second=0)).all()
     return render_template_string("""
     <script src="https://cdn.tailwindcss.com"></script>
     <body class="bg-slate-50 p-6">

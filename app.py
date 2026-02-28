@@ -155,6 +155,7 @@ from models import (
     UserMessage, MessageTemplate, PushSubscription, RestaurantRequest, RestaurantRecommend,
     RestaurantVote, PartnershipInquiry, FreeBoard, DeliveryRequest, DeliveryRequestVote,
     BoardComment, DailyStat, SellerOrderConfirmation, EmailOrderLineStatus, OrderViewLink, SitePopup, DeliveryZone,
+    MainDisplayConfig,
     MemberGradeConfig, PointConfig, PointLog, MarketingCost, Review, ReviewVote, UserConsent, Settlement,
     POINT_TYPE_ACCUMULATED, POINT_TYPE_EVENT, POINT_TYPE_CASH,
 )
@@ -347,7 +348,7 @@ def _bunji_code_from_address(address_str):
 def _make_order_virt_id(delivery_address):
     """오더넘버: order + 번지수(5자리) + 주문날짜2자리(MM) + 숫자증가(001~). 유일 보장."""
     prefix = "order"
-    mm = datetime.now().strftime("%m")  # 01~12
+    mm = now_kst().strftime("%m")  # 01~12 (KST)
     # 기존 order_id 중 prefix 다음 5자리가 숫자인 것의 최대값+1 (번지수)
     candidates = db.session.query(Order.order_id).filter(Order.order_id.like(prefix + "%")).all()
     next_idx = 1
@@ -390,6 +391,20 @@ def _get_quick_region_list(zone):
 def _get_zone():
     """최신 배송권역 1건."""
     return DeliveryZone.query.order_by(DeliveryZone.updated_at.desc()).first()
+
+
+def get_main_display_config():
+    """메인 화면 노출 설정. (메인 카테고리 개수, 카테고리당 상품 개수, 최신상품 개수, 마감임박 개수). 없으면 기본값 반환."""
+    _ensure_main_display_config_columns()
+    row = MainDisplayConfig.query.get(1)
+    if row:
+        return (
+            max(1, min(50, getattr(row, 'main_category_count', 8) or 8)),
+            max(1, min(100, getattr(row, 'main_products_per_category', 20) or 20)),
+            max(1, min(100, getattr(row, 'main_latest_count', 30) or 30)),
+            max(1, min(100, getattr(row, 'main_closing_count', 50) or 50)),
+        )
+    return (8, 20, 30, 50)
 
 
 def _normalize_address_for_zone(address_str):
@@ -704,7 +719,7 @@ def _point_use_count_in_days(user_id, ptype, days):
     """해당 유형 포인트를 최근 days일 내 사용한 횟수(주문 기준)."""
     if not user_id or days <= 0:
         return 0
-    since = datetime.now() - timedelta(days=days)
+    since = now_kst() - timedelta(days=days)
     return PointLog.query.filter(
         PointLog.user_id == user_id,
         PointLog.point_type == ptype,
@@ -876,7 +891,7 @@ def save_uploaded_file(file):
         img = ImageOps.exif_transpose(img)
         size = (800, 800)
         img = ImageOps.fit(img, size, Image.Resampling.LANCZOS)
-        new_filename = f"uncle_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        new_filename = f"uncle_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
         img.save(save_path, "WEBP", quality=85)
         return f"/static/uploads/{new_filename}"
@@ -920,7 +935,7 @@ def save_detail_image(file):
         if w > 1200:
             ratio = 1200 / w
             img = img.resize((1200, int(h * ratio)), Image.Resampling.LANCZOS)
-        new_filename = f"detail_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        new_filename = f"detail_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
         img.save(save_path, "WEBP", quality=88)
         return f"/static/uploads/{new_filename}"
@@ -951,7 +966,7 @@ def save_review_image(file):
             return url
         review_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'reviews')
         os.makedirs(review_folder, exist_ok=True)
-        new_filename = f"review_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        new_filename = f"review_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(review_folder, new_filename)
         img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
@@ -985,7 +1000,7 @@ def save_board_image(file):
             return url
         board_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'board')
         os.makedirs(board_folder, exist_ok=True)
-        new_filename = f"board_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.webp"
+        new_filename = f"board_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(board_folder, new_filename)
         img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
@@ -1896,7 +1911,7 @@ def admin_settlement_complete():
             total_sales=amount,
             settlement_amount=amount,
             status='입금완료',
-            completed_at=datetime.now()
+            completed_at=now_kst()
         )
         db.session.add(new_settle)
         
@@ -1943,7 +1958,7 @@ def admin_settlement_order_status():
     o.settlement_status = settlement_status
     if settlement_status == '입금완료':
         o.is_settled = True
-        o.settled_at = datetime.now()
+        o.settled_at = now_kst()
     else:
         o.is_settled = False
         o.settled_at = None
@@ -1951,11 +1966,11 @@ def admin_settlement_order_status():
     for oi in OrderItem.query.filter_by(order_id=o.id).all():
         oi.settlement_status = settlement_status
         if settlement_status == '입금완료':
-            oi.settled_at = datetime.now()
+            oi.settled_at = now_kst()
         else:
             oi.settled_at = None
-        db.session.add(OrderItemLog(order_id=o.id, order_item_id=oi.id, log_type='settlement_status', old_value=old_settlement, new_value=settlement_status, created_at=datetime.now()))
-    db.session.add(OrderItemLog(order_id=o.id, order_item_id=None, log_type='settlement_status', old_value=old_settlement, new_value=settlement_status, created_at=datetime.now()))
+        db.session.add(OrderItemLog(order_id=o.id, order_item_id=oi.id, log_type='settlement_status', old_value=old_settlement, new_value=settlement_status, created_at=now_kst()))
+    db.session.add(OrderItemLog(order_id=o.id, order_item_id=None, log_type='settlement_status', old_value=old_settlement, new_value=settlement_status, created_at=now_kst()))
     try:
         db.session.commit()
     except Exception as e:
@@ -2043,15 +2058,15 @@ def admin_settlement_item_status():
     old_settlement = getattr(oi, 'settlement_status', None) or '입금대기'
     oi.settlement_status = settlement_status
     if settlement_status == '입금완료':
-        oi.settled_at = datetime.now()
+        oi.settled_at = now_kst()
     else:
         oi.settled_at = None
-    db.session.add(OrderItemLog(order_id=o.id, order_item_id=oi.id, log_type='settlement_status', old_value=old_settlement, new_value=settlement_status, created_at=datetime.now()))
+    db.session.add(OrderItemLog(order_id=o.id, order_item_id=oi.id, log_type='settlement_status', old_value=old_settlement, new_value=settlement_status, created_at=now_kst()))
     # Settlement 테이블도 동기화 (정산 상세는 Settlement 기준 조회)
     st = Settlement.query.filter_by(order_item_id=oi.id).first()
     if st:
         st.settlement_status = settlement_status
-        st.settled_at = datetime.now() if settlement_status == '입금완료' else None
+        st.settled_at = now_kst() if settlement_status == '입금완료' else None
     db.session.commit()
     return jsonify({"success": True, "message": "품목 입금상태가 변경되었습니다."})
 
@@ -2083,14 +2098,14 @@ def admin_settlement_bulk_item_status():
         old_st = getattr(oi, 'settlement_status', None) or '입금대기'
         oi.settlement_status = settlement_status
         if settlement_status == '입금완료':
-            oi.settled_at = datetime.now()
+            oi.settled_at = now_kst()
         else:
             oi.settled_at = None
-        db.session.add(OrderItemLog(order_id=oi.order_id, order_item_id=oi.id, log_type='settlement_status', old_value=old_st, new_value=settlement_status, created_at=datetime.now()))
+        db.session.add(OrderItemLog(order_id=oi.order_id, order_item_id=oi.id, log_type='settlement_status', old_value=old_st, new_value=settlement_status, created_at=now_kst()))
         st = Settlement.query.filter_by(order_item_id=oi.id).first()
         if st:
             st.settlement_status = settlement_status
-            st.settled_at = datetime.now() if settlement_status == '입금완료' else None
+            st.settled_at = now_kst() if settlement_status == '입금완료' else None
         updated += 1
     db.session.commit()
     return jsonify({"success": True, "message": f"{updated}건 입금상태가 변경되었습니다.", "updated": updated})
@@ -2733,24 +2748,25 @@ def search_view():
 
 @app.route('/')
 def index():
-    """메인 페이지 (디자인 유지). 카테고리는 8개만 노출, 더보기/전체보기로 전체 확인."""
+    """메인 페이지 (디자인 유지). 카테고리·상품 개수는 관리자 > 메인화면 설정에서 조정."""
     _record_page_view('main')
     run_product_stock_reset()
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
+    main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
     all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
-    main_categories = all_categories[:8]  # 메인에는 8개만
+    main_categories = all_categories[:main_cat_count]
     grouped_products = {}
     order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     
-    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(30).all()
-    random_latest = random.sample(latest_all, min(len(latest_all), 30)) if latest_all else []
+    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(latest_count).all()
+    random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
     
     today_end = now_kst().replace(hour=23, minute=59, second=59)
-    closing_today = Product.query.filter(Product.is_active == True, Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(50).all()
+    closing_today = Product.query.filter(Product.is_active == True, Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(closing_count).all()
     latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
 
     for cat in main_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(order_logic, Product.id.desc()).limit(20).all()
+        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(order_logic, Product.id.desc()).limit(products_per_cat).all()
         if prods: grouped_products[cat] = prods
 
     all_pids = set()
@@ -3013,7 +3029,10 @@ def index():
                 <div class="p-3 md:p-4 flex flex-col flex-1">
                     <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                     <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}</h3>
-                    <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.description or '' }}</p>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">
+                        {{ p.spec or '일반' }}
+                        {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                    </p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
                     <div class="mt-auto flex justify-between items-end gap-2">
                         <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
@@ -3086,7 +3105,10 @@ def index():
                 <div class="p-3 md:p-4 flex flex-col flex-1">
                     <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
                     <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
-                    <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}</p>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">
+                        {{ p.spec or '일반' }}
+                        {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                    </p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
                     <div class="mt-auto flex justify-between items-end gap-2">
                         <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
@@ -3175,17 +3197,17 @@ def index():
     categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
     grouped_products = {}
     
-    order_logic = (Product.stock <= 0) | (Product.deadline < datetime.now())
+    order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     
     # 최신 상품 30개 중 30개 랜덤
     latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(30).all()
     random_latest = random.sample(latest_all, min(len(latest_all), 30)) if latest_all else []
     
     # 오늘 마감 상품 (트래픽 절감용 상한)
-    today_end = datetime.now().replace(hour=23, minute=59, second=59)
+    today_end = now_kst().replace(hour=23, minute=59, second=59)
     closing_today = Product.query.filter(
         Product.is_active == True,
-        Product.deadline > datetime.now(),
+        Product.deadline > now_kst(),
         Product.deadline <= today_end
     ).order_by(Product.deadline.asc()).limit(50).all()
 
@@ -3272,19 +3294,27 @@ def index():
                     전체보기 <i class="fas fa-chevron-right text-[8px]"></i>
                 </a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-5 text-left">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 text-left">
                 {% for p in random_latest %}
-                <div class="product-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-xl">
-                    <a href="/product/{{p.id}}" class="relative aspect-square block bg-gray-50 overflow-hidden">
-                        <img src="{{ p.image_url or 'https://placehold.co/400x400?text=NEW' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
-                        <div class="absolute top-2 left-2"><span class="bg-blue-500 text-white text-[9px] md:text-[10px] px-2 py-0.5 rounded-lg uppercase font-black">NEW</span></div>
+                {% set is_expired = (p.deadline and p.deadline < now) %}
+                <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                    {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                    {% if p.description %}
+                    <div class="absolute top-2 left-0 z-20">
+                        <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
+                    </div>
+                    {% endif %}
+                    <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                        <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
-                    <div class="p-3 md:p-4 flex flex-col flex-1 text-left">
-                        <h3 class="font-black text-gray-800 text-[11px] md:text-sm line-clamp-2 mb-0.5">{{ p.name }}</h3>
-                        <p class="text-[9px] md:text-[11px] text-teal-600 mb-2 font-medium truncate">{{ p.description or '' }}</p>
+                    <div class="p-3 md:p-4 flex flex-col flex-1">
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
+                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm line-clamp-2 mb-0.5">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
+                        {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
                         <div class="mt-auto flex justify-between items-end">
-                            <span class="text-[12px] md:text-lg text-gray-900 font-black">{{ "{:,}".format(p.price) }}원</span>
-                            <button onclick="addToCart('{{p.id}}')" class="bg-teal-600 w-8 h-8 md:w-10 md:h-10 rounded-xl text-white flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px]"></i></button>
+                            <span class="text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                            {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                         </div>
                     </div>
                 </div>
@@ -3303,20 +3333,27 @@ def index():
                     전체보기 <i class="fas fa-chevron-right text-[8px]"></i>
                 </a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-5 text-left">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 text-left">
                 {% for p in closing_today %}
-                <div class="product-card bg-white rounded-2xl shadow-sm border border-red-50 overflow-hidden relative flex flex-col transition-all hover:shadow-xl">
-                    <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                        <img src="{{ p.image_url }}"loading="lazy" class="w-full h-full object-cover p-1.5 md:p-5">
-                        <div class="absolute bottom-2 left-2 md:bottom-5 md:left-5"><span class="bg-red-600 text-white text-[7px] md:text-[10px] px-1.5 py-0.5 md:px-3 md:py-1 rounded md:rounded-lg font-black animate-pulse uppercase">CLOSING</span></div>
+                {% set is_expired = (p.deadline and p.deadline < now) %}
+                <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                    {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                    {% if p.description %}
+                    <div class="absolute top-2 left-0 z-20">
+                        <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
+                    </div>
+                    {% endif %}
+                    <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                        <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
-                    <div class="p-3 md:p-7 flex flex-col flex-1 text-left">
-                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                        <h3 class="font-black text-gray-800 text-[11px] md:text-base truncate mb-0.5">{{ p.name }}</h3>
-                        <p class="text-[9px] md:text-[11px] text-teal-600 mb-2 font-medium truncate">{{ p.description or '' }}</p>
+                    <div class="p-3 md:p-4 flex flex-col flex-1">
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
+                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm line-clamp-2 mb-0.5">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
+                        {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
                         <div class="mt-auto flex justify-between items-end">
-                            <span class="text-[13px] md:text-2xl text-gray-900 font-black tracking-tighter">{{ "{:,}".format(p.price) }}원</span>
-                            <button onclick="addToCart('{{p.id}}')" class="bg-teal-600 w-8 h-8 md:w-14 md:h-14 rounded-xl md:rounded-[1.5rem] text-white shadow-xl hover:bg-teal-700 flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button>
+                            <span class="text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                            {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                         </div>
                     </div>
                 </div>
@@ -3338,28 +3375,27 @@ def index():
                     전체보기 <i class="fas fa-chevron-right text-[8px]"></i>
                 </a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-5 text-left">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 text-left">
                 {% for p in products %}
                 {% set is_expired = (p.deadline and p.deadline < now) %}
-                <div class="product-card bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-xl {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %} text-left">
-                    {% if is_expired or p.stock <= 0 %}<div class="sold-out-badge absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
-                    <a href="/product/{{p.id}}" class="relative aspect-square block bg-gray-50 overflow-hidden text-left">
+                <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                    {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                    {% if p.description %}
+                    <div class="absolute top-2 left-0 z-20">
+                        <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
+                    </div>
+                    {% endif %}
+                    <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                         <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
-                        <div class="absolute bottom-2 left-2 text-left">
-                            <span class="bg-black/70 text-white text-[9px] md:text-[10px] px-2 py-0.5 rounded font-black backdrop-blur-sm">잔여 {{ p.stock }}</span>
-                        </div>
                     </a>
-                    <div class="p-3 md:p-8 flex flex-col flex-1 text-left">
-                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5 text-left" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                        <h3 class="font-black text-gray-800 text-[11px] md:text-base truncate mb-0.5 text-left">{{ p.name }}</h3>
-                        <p class="text-[9px] md:text-[11px] text-teal-600 mb-2 font-medium truncate text-left">{{ p.description or '' }}</p>
-                        <div class="mt-auto flex justify-between items-end text-left">
-                            <span class="text-[13px] md:text-2xl font-black text-teal-600 text-left">{{ "{:,}".format(p.price) }}원</span>
-                            {% if not is_expired and p.stock > 0 %}
-                            <button onclick="addToCart('{{p.id}}')" class="bg-teal-600 w-8 h-8 md:w-14 md:h-14 rounded-xl md:rounded-[1.5rem] text-white shadow-xl hover:bg-teal-700 flex items-center justify-center transition active:scale-90 text-center">
-                                <i class="fas fa-plus text-[10px] md:text-xl"></i>
-                            </button>
-                            {% endif %}
+                    <div class="p-3 md:p-4 flex flex-col flex-1">
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
+                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm line-clamp-2 mb-0.5">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
+                        {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
+                        <div class="mt-auto flex justify-between items-end">
+                            <span class="text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                            {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                         </div>
                     </div>
                 </div>
@@ -3382,7 +3418,7 @@ def categories_all():
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
     all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
     grouped_products = {}
-    order_logic = (Product.stock <= 0) | (Product.deadline < datetime.now())
+    order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     for cat in all_categories:
         prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(order_logic, Product.id.desc()).limit(20).all()
         if prods:
@@ -3769,7 +3805,7 @@ def _delivery_request_ordered_ids():
 def _record_page_view(page_type):
     """일별 페이지뷰 기록. page_type: 'main', 'category', 'product', 'cart'. 실패 시 무시."""
     try:
-        today = datetime.now().date()
+        today = now_kst().date()
         row = DailyStat.query.filter_by(stat_date=today).first()
         if not row:
             row = DailyStat(stat_date=today)
@@ -4620,8 +4656,8 @@ def api_category_products(cat_name):
     if cat_name == '최신상품':
         query = query.order_by(Product.id.desc())
     elif cat_name == '오늘마감':
-        today_end = datetime.now().replace(hour=23, minute=59, second=59)
-        query = query.filter(Product.deadline > datetime.now(), Product.deadline <= today_end).order_by(Product.deadline.asc())
+        today_end = now_kst().replace(hour=23, minute=59, second=59)
+        query = query.filter(Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc())
     else:
         query = query.filter_by(category=cat_name).order_by(Product.id.desc())
     
@@ -4633,10 +4669,12 @@ def api_category_products(cat_name):
             "id": p.id,
             "name": p.name,
             "price": p.price,
-            "image_url": p.image_url,
+            "image_url": p.image_url or "",
             "description": p.description or "",
+            "spec": p.spec or "일반",
             "stock": p.stock,
-            "is_sold_out": (p.deadline and p.deadline < datetime.now()) or p.stock <= 0,
+            "badge": p.badge or "",
+            "is_sold_out": (p.deadline and p.deadline < now_kst()) or p.stock <= 0,
             "deadline": p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else ""
         })
     return jsonify(res_data)
@@ -4644,7 +4682,7 @@ def api_category_products(cat_name):
 def category_view(cat_name):
     """카테고리별 상품 목록 뷰 (무한 스크롤, 30개 단위, 스크롤 시 1초 대기 후 추가 로딩)"""
     _record_page_view('category')
-    order_logic = (Product.stock <= 0) | (Product.deadline < datetime.now())
+    order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     cat = None
     limit_num = 30
     
@@ -4652,8 +4690,8 @@ def category_view(cat_name):
         products = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(limit_num).all()
         display_name = "✨ 최신 상품"
     elif cat_name == '오늘마감':
-        today_end = datetime.now().replace(hour=23, minute=59, second=59)
-        products = Product.query.filter(Product.is_active == True, Product.deadline > datetime.now(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(limit_num).all()
+        today_end = now_kst().replace(hour=23, minute=59, second=59)
+        products = Product.query.filter(Product.is_active == True, Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(limit_num).all()
         display_name = "🔥 오늘 마감 임박!"
     else:
         cat = Category.query.filter_by(name=cat_name).first_or_404()
@@ -4669,6 +4707,11 @@ def category_view(cat_name):
     recommend_cats = categories_for_member_grade(grade).filter(Category.name != cat_name).limit(3).all()
     cat_previews = {c: Product.query.filter_by(category=c.name, is_active=True).limit(4).all() for c in recommend_cats}
     category_delivery_desc = get_category_delivery_description(cat_name) if cat else None
+    now = now_kst()
+    all_pids = [p.id for p in products]
+    review_counts = {}
+    if all_pids:
+        review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
 
     content = """
     <div class="max-w-7xl mx-auto px-4 md:px-6 py-20 text-left">
@@ -4678,45 +4721,30 @@ def category_view(cat_name):
             {% if cat and category_delivery_desc %}<p class="text-teal-600 font-bold mt-2 text-sm md:text-base">배송료: {{ category_delivery_desc }}</p>{% endif %}
         </div>
         
-        <div id="product-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-10 text-left mb-12">
+        <div id="product-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left mb-12">
             {% for p in products %}
-            <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %}">
-                
+            {% set is_expired = (p.deadline and p.deadline < now) %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
                 {% if p.description %}
-                <div class="absolute top-4 left-0 z-20">
-                    <span class="px-3 py-1.5 text-[9px] md:text-[11px] font-black text-white shadow-md rounded-r-full 
-                        {% if '당일' in p.description %} bg-red-600 
-                        {% elif '+1' in p.description %} bg-blue-600 
-                        {% elif '+2' in p.description %} bg-emerald-600 
-                        {% else %} bg-gray-600 {% endif %}">
-                        <i class="fas fa-truck-fast mr-1"></i> {{ p.description }}
-                    </span>
+                <div class="absolute top-2 left-0 z-20">
+                    <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
                 </div>
                 {% endif %}
-
-                <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                    <img src="{{ p.image_url }}" loading="lazy" class="w-full h-full object-cover p-4 md:p-8">
+                <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                    <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
-                <div class="p-5 md:p-10 flex flex-col flex-1 text-left">
-                    <a href="/product/{{p.id}}">
-                        <h3 class="font-black text-gray-800 text-sm md:text-lg truncate mb-1 text-left">{{ p.name }}</h3>
-                    </a>
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1.5 text-left"
-                       data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">
-                    </p>
-                    <p class="text-[9px] md:text-[11px] text-teal-600 mb-2 font-medium truncate text-left">
-                        {{ p.description or '' }}
-                    </p>
-                    <p class="text-[10px] md:text-xs text-gray-400 font-bold mb-3">
+                <div class="p-3 md:p-4 flex flex-col flex-1">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">
                         {{ p.spec or '일반' }}
                         {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
                     </p>
-
-                    <div class="mt-auto flex justify-between items-center text-left">
-                        <span class="text-base md:text-2xl font-black text-teal-600 text-left">{{ "{:,}".format(p.price) }}원</span>
-                        <button onclick="addToCart('{{p.id}}')" class="bg-teal-600 w-8 h-8 md:w-12 md:h-12 rounded-full text-white shadow-lg flex items-center justify-center transition active:scale-90 text-center">
-                            <i class="fas fa-plus text-[10px] md:text-base"></i>
-                        </button>
+                    {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
+                    <div class="mt-auto flex justify-between items-end gap-2">
+                        <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                        {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                     </div>
                 </div>
             </div>
@@ -4730,35 +4758,37 @@ def category_view(cat_name):
 
         <hr class="border-gray-100 mb-24">
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-10 text-left mb-24">
+        <div class="space-y-16 mb-24 text-left">
             {% for c_info, c_prods in cat_previews.items() %}
-            <div class="bg-gray-50 p-6 md:p-8 rounded-[3rem] border border-gray-100 shadow-inner text-left">
-                <h3 class="text-xl font-black mb-6 flex justify-between items-center text-left">
-                    {{ c_info.name }}
-                    <a href="/category/{{ c_info.name }}" class="text-xs text-gray-400 font-bold hover:text-teal-600">전체보기 ></a>
-                </h3>
-                <div class="grid grid-cols-2 gap-4">
+            <div>
+                <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
+                    <h3 class="section-title bar-green"><span class="bar"></span> {{ c_info.name }}</h3>
+                    <a href="/category/{{ c_info.name }}" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
                     {% for cp in c_prods %}
-                    <div class="bg-white p-3 rounded-2xl shadow-sm relative flex flex-col">
+                    {% set is_expired = (cp.deadline and cp.deadline < now) %}
+                    <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or cp.stock <= 0 %}sold-out opacity-80{% endif %}">
+                        {% if is_expired or cp.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
                         {% if cp.description %}
                         <div class="absolute top-2 left-0 z-20">
-                            <span class="px-2 py-1 text-[7px] md:text-[9px] font-black text-white shadow-sm rounded-r-full 
-                                {% if '당일' in cp.description %} bg-red-600 
-                                {% elif '+1' in cp.description %} bg-blue-600 
-                                {% elif '+2' in cp.description %} bg-emerald-600 
-                                {% else %} bg-gray-600 {% endif %}">
-                                {{ cp.description }}
-                            </span>
+                            <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in cp.description %} bg-red-600 {% elif '+1' in cp.description %} bg-blue-600 {% elif '+2' in cp.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ cp.description }}</span>
                         </div>
                         {% endif %}
-
-                        <a href="/product/{{ cp.id }}" class="block mb-2">
-                            <img src="{{ cp.image_url }}" class="w-full aspect-square object-contain rounded-xl p-1">
+                        <a href="/product/{{ cp.id }}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                            <img src="{{ cp.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                         </a>
-                        <div class="px-1">
-                            <p class="text-[10px] md:text-xs font-black text-gray-800 truncate">{{ cp.name }}</p>
-                            <p class="text-[8px] md:text-[10px] text-gray-400 font-bold mb-1">{{ cp.spec or '일반' }}</p>
-                            <p class="text-xs md:text-sm font-black text-teal-600">{{ "{:,}".format(cp.price) }}원</p>
+                        <div class="p-3 md:p-4 flex flex-col flex-1">
+                            <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (cp.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if cp.deadline else '' }}"></p>
+                            <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ cp.name }}{% if cp.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ cp.badge }}</span>{% endif %}</h3>
+                            <p class="text-[9px] text-slate-400 font-bold mb-1">
+                                {{ cp.spec or '일반' }}
+                                {% if cp.stock is not none %} · 잔여 {{ cp.stock }}개{% endif %}
+                            </p>
+                            <div class="mt-auto flex justify-between items-end gap-2">
+                                <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(cp.price) }}원</span>
+                                {% if not is_expired and cp.stock > 0 %}<button onclick="addToCart('{{ cp.id }}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
@@ -4799,37 +4829,35 @@ def category_view(cat_name):
 
             const grid = document.getElementById('product-grid');
             data.forEach(p => {
-                const soldOutClass = p.is_sold_out ? 'sold-out' : '';
-                
-                // ✅ 배송 일정 배지 색상 결정 로직 (JS)
-                let badgeColor = 'bg-gray-600';
-                if (p.description.includes('당일')) badgeColor = 'bg-red-600';
-                else if (p.description.includes('+1')) badgeColor = 'bg-blue-600';
-                else if (p.description.includes('+2')) badgeColor = 'bg-emerald-600';
-
-                // ✅ 배송 일정 HTML
-                const deliveryBadge = p.description ? `
-                    <div class="absolute top-4 left-0 z-20">
-                        <span class="px-3 py-1.5 text-[9px] md:text-[11px] font-black text-white shadow-md rounded-r-full ${badgeColor}">
-                            <i class="fas fa-truck-fast mr-1"></i> ${p.description}
-                        </span>
+                const soldOutClass = p.is_sold_out ? 'sold-out opacity-80' : '';
+                const soldOutBadge = p.is_sold_out ? '<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>' : '';
+                const imgUrl = (p.image_url && p.image_url.trim()) ? p.image_url : 'https://placehold.co/400x400/f1f5f9/64748b?text=상품';
+                let badgeColor = 'bg-slate-600';
+                if (p.description && p.description.includes('당일')) badgeColor = 'bg-red-600';
+                else if (p.description && p.description.includes('+1')) badgeColor = 'bg-blue-600';
+                else if (p.description && p.description.includes('+2')) badgeColor = 'bg-emerald-600';
+                const deliveryBadge = (p.description && p.description.trim()) ? `
+                    <div class="absolute top-2 left-0 z-20">
+                        <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full ${badgeColor}"><i class="fas fa-truck-fast mr-1"></i> ${p.description.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>
                     </div>` : '';
-
+                const deadlineAttr = p.deadline ? ' data-deadline="' + p.deadline + '+09:00"' : '';
+                const specText = (p.spec || '일반') + (p.stock != null ? ' · 잔여 ' + p.stock + '개' : '');
+                const badgeSpan = (p.badge && p.badge.trim()) ? ' <span class="text-[9px] text-orange-500 font-bold">| ' + (p.badge.replace(/</g,'&lt;').replace(/>/g,'&gt;')) + '</span>' : '';
+                const addBtn = !p.is_sold_out && p.stock > 0 ? '<button onclick="addToCart(\'' + p.id + '\')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>' : '';
                 const html = `
-                    <div class="product-card bg-white rounded-3xl md:rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-2xl ${soldOutClass}">
+                    <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all ${soldOutClass}">
+                        ${soldOutBadge}
                         ${deliveryBadge}
-                        <a href="/product/${p.id}" class="relative aspect-square block bg-white overflow-hidden">
-                            <img src="${p.image_url}" loading="lazy" class="w-full h-full object-cover p-4 md:p-10">
+                        <a href="/product/${p.id}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                            <img src="${imgUrl}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                         </a>
-                        <div class="p-5 md:p-10 flex flex-col flex-1 text-left">
-                            <a href="/product/${p.id}">
-                                <h3 class="font-black text-gray-800 text-sm md:text-lg truncate mb-2 text-left">${p.name}</h3>
-                            </a>
-                            <div class="mt-auto flex justify-between items-center text-left">
-                                <span class="text-base md:text-2xl font-black text-teal-600 text-left">${p.price.toLocaleString()}원</span>
-                                <button onclick="addToCart('${p.id}')" class="bg-teal-600 w-8 h-8 md:w-12 md:h-12 rounded-full text-white shadow-lg flex items-center justify-center transition active:scale-90">
-                                    <i class="fas fa-plus text-[10px] md:text-base"></i>
-                                </button>
+                        <div class="p-3 md:p-4 flex flex-col flex-1">
+                            <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5"${deadlineAttr}></p>
+                            <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">${p.name.replace(/</g,'&lt;').replace(/>/g,'&gt;')}${badgeSpan}</h3>
+                            <p class="text-[9px] text-slate-400 font-bold mb-1">${specText.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>
+                            <div class="mt-auto flex justify-between items-end gap-2">
+                                <span class="price text-[12px] md:text-lg font-black text-teal-700">${p.price.toLocaleString()}원</span>
+                                ${addBtn}
                             </div>
                         </div>
                     </div>`;
@@ -5050,7 +5078,7 @@ def product_detail(pid):
         detail_images = [p.image_url]
 
     _record_page_view('product')
-    is_expired = (p.deadline and p.deadline < datetime.now())
+    is_expired = (p.deadline and p.deadline < now_kst())
     cat_info = Category.query.filter_by(name=p.category).first()
     
     # 1. 연관 추천 상품: 키워드(상품명 첫 단어) 기반
@@ -6063,7 +6091,7 @@ def mypage_messages():
     if msg_id:
         open_msg = UserMessage.query.filter_by(id=msg_id, user_id=current_user.id).first()
         if open_msg and not open_msg.read_at:
-            open_msg.read_at = datetime.now()
+            open_msg.read_at = now_kst()
             db.session.commit()
     messages = UserMessage.query.filter_by(user_id=current_user.id).order_by(UserMessage.created_at.desc()).limit(200).all()
     unread_count = UserMessage.query.filter_by(user_id=current_user.id, read_at=None).count()
@@ -6182,7 +6210,7 @@ def mypage_message_read(msg_id):
     if not m:
         return jsonify({"success": False}), 404
     if not m.read_at:
-        m.read_at = datetime.now()
+        m.read_at = now_kst()
         db.session.commit()
     return jsonify({"success": True})
 
@@ -6191,7 +6219,7 @@ def mypage_message_read(msg_id):
 @login_required
 def mypage_messages_read_all():
     """전체 메시지 읽음 처리"""
-    now = datetime.now()
+    now = now_kst()
     unread = UserMessage.query.filter_by(user_id=current_user.id, read_at=None).all()
     for m in unread:
         m.read_at = now
@@ -6563,7 +6591,7 @@ def mypage():
     push_already_set = push_sub_count > 0  # True면 알림 허용됨 → 알림 켜기 숨김
     unread_message_count = UserMessage.query.filter_by(user_id=user_id, read_at=None).count()
     orders = Order.query.filter_by(user_id=user_id).order_by(Order.created_at.desc()).all()
-    cutoff_7d = datetime.now() - timedelta(days=7)
+    cutoff_7d = now_kst() - timedelta(days=7)
 
     # 품목별 금액 상세 + 품목별 취소용 OrderItem 목록 (취소 품목도 표기)
     enhanced_orders = []
@@ -7402,7 +7430,7 @@ def review_add():
 def add_cart(pid):
     """장바구니 추가 (판매중 체크 포함)"""
     p = Product.query.get_or_404(pid)
-    if (p.deadline and p.deadline < datetime.now()) or p.stock <= 0: 
+    if (p.deadline and p.deadline < now_kst()) or p.stock <= 0: 
         return jsonify({"success": False, "message": "판매가 마감된 상품입니다."})
     
     item = Cart.query.filter_by(user_id=current_user.id, product_id=pid).first()
@@ -8144,7 +8172,7 @@ def admin_settle_order(order_id):
     
     if not order.is_settled:
         order.is_settled = True
-        order.settled_at = datetime.now() # 정산 시점 기록
+        order.settled_at = now_kst() # 정산 시점 기록
         
         try:
             db.session.commit() # ✅ 실제 DB에 강제 기록
@@ -8203,7 +8231,7 @@ def _save_delivery_proof_image(file):
         ext = os.path.splitext(secure_filename(file.filename))[1].lower() or '.jpg'
         if ext not in ALLOWED_IMAGE_EXTENSIONS:
             ext = '.jpg'
-        new_name = f"proof_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        new_name = f"proof_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
         path = os.path.join(folder, new_name)
         file.save(path)
         return f"/static/uploads/delivery_proof/{new_name}"
@@ -8237,7 +8265,7 @@ def _save_delivery_proof_base64(data_url_or_base64):
             return upload_res.get("secure_url") or upload_res.get("url")
         folder = os.path.join(app.config['UPLOAD_FOLDER'], 'delivery_proof')
         os.makedirs(folder, exist_ok=True)
-        new_name = f"logi_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+        new_name = f"logi_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
         path = os.path.join(folder, new_name)
         with open(path, 'wb') as f:
             f.write(raw)
@@ -8264,7 +8292,7 @@ def api_logi_delivery_in_progress():
         old_status = getattr(oi, 'item_status', None) or '결제완료'
         oi.item_status = '배송중'
         oi.status_message = None
-        db.session.add(OrderItemLog(order_id=order.id, order_item_id=oi.id, log_type='item_status', old_value=old_status, new_value='배송중', created_at=datetime.now()))
+        db.session.add(OrderItemLog(order_id=order.id, order_item_id=oi.id, log_type='item_status', old_value=old_status, new_value='배송중', created_at=now_kst()))
     db.session.commit()
     title, body = get_template_content('delivery_in_progress', order_id=order.order_id)
     if order.user_id:
@@ -8296,13 +8324,17 @@ def api_logi_delivery_complete():
             oi.delivery_proof_image_url = proof_url
         if not oi.cancelled:
             apply_points_on_delivery_complete(oi)
-        db.session.add(OrderItemLog(order_id=order.id, order_item_id=oi.id, log_type='item_status', old_value=old_status, new_value='배송완료', created_at=datetime.now()))
+        db.session.add(OrderItemLog(order_id=order.id, order_item_id=oi.id, log_type='item_status', old_value=old_status, new_value='배송완료', created_at=now_kst()))
     db.session.commit()
-    # 고객 메시지/알림톡에 넣을 사진 URL: 이미 절대 URL(Cloudinary 등)이면 그대로, 상대 경로면 도메인 붙임
+    # ① 자체 배송완료 메시지: 앱 내 쪽지 + 푸시 (카카오 알림톡과 별도로 항상 발송)
     message_image_url = (proof_url if (proof_url and proof_url.startswith("http")) else (request.url_root.rstrip("/") + proof_url) if proof_url else None)
     title, body = get_template_content('delivery_complete', order_id=order.order_id)
     if order.user_id:
-        send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=message_image_url)
+        try:
+            send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=message_image_url)
+        except Exception:
+            pass
+    # ② 카카오 알림톡 (기존대로 유지)
     try:
         extra_vars = {}
         if proof_url:
@@ -8383,16 +8415,14 @@ def admin_order_item_status():
         if not oi.cancelled and item_status == '배송완료':
             apply_points_on_delivery_complete(oi)  # 정산번호(sales_amount) 기준 포인트 적립 (1회만)
 
-    db.session.add(OrderItemLog(order_id=order_id, order_item_id=item_id, log_type='item_status', old_value=old_item_status, new_value=item_status, created_at=datetime.now()))
+    db.session.add(OrderItemLog(order_id=order_id, order_item_id=item_id, log_type='item_status', old_value=old_item_status, new_value=item_status, created_at=now_kst()))
     db.session.commit()
     # 배송 상태 변경 시 회원에게 자동 메시지 (배송완료 시 기사 사진 있으면 첨부)
-    if item_status in ('배송요청', '배송중', '배송완료', '배송지연'):
+    # '배송중' 메시지는 관리자 변경 시에는 보내지 않음 → 기사 상차 완료 시에만 POST /api/logi/delivery-in-progress 로 전송
+    if item_status in ('배송요청', '배송완료', '배송지연'):
         if item_status == '배송요청':
             title, body = get_template_content('delivery_requested', order_id=order.order_id)
             send_message(order.user_id, title, body, 'delivery_requested', order.id)
-        elif item_status == '배송중':
-            title, body = get_template_content('delivery_in_progress', order_id=order.order_id)
-            send_message(order.user_id, title, body, 'delivery_in_progress', order.id)
         elif item_status == '배송완료':
             title, body = get_template_content('delivery_complete', order_id=order.order_id)
             proof_url = getattr(oi, 'delivery_proof_image_url', None) or None
@@ -8557,6 +8587,28 @@ def admin_order_items(order_id):
     return render_template_string(_order_item_status_tpl, order=order, order_items=order_items)
 
 
+def _ensure_main_display_config_columns():
+    """main_display_config 테이블에 최신상품·마감임박 컬럼이 없으면 추가 (기존 DB 호환)."""
+    try:
+        from sqlalchemy import inspect
+        insp = inspect(db.engine)
+        if 'main_display_config' not in insp.get_table_names():
+            return
+        cols = [c['name'] for c in insp.get_columns('main_display_config')]
+        for col, sql in [
+            ('main_latest_count', 'ALTER TABLE main_display_config ADD COLUMN main_latest_count INTEGER DEFAULT 30'),
+            ('main_closing_count', 'ALTER TABLE main_display_config ADD COLUMN main_closing_count INTEGER DEFAULT 50'),
+        ]:
+            if col not in cols:
+                db.session.execute(text(sql))
+                db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+
 def _ensure_delivery_zone_columns():
     """delivery_zone 테이블에 퀵지역·그 외 배송불가용 컬럼이 없으면 추가 (기존 DB 호환)."""
     try:
@@ -8712,9 +8764,41 @@ def admin_delivery_zone_api():
         z.quick_extra_message = (data['quick_extra_message'] or '').strip() or None
         updated = True
     if updated:
-        z.updated_at = datetime.utcnow()
+        z.updated_at = now_kst()
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@app.route('/admin/main_display_config', methods=['POST'])
+@login_required
+def admin_main_display_config():
+    """관리자: 메인 화면 노출 설정 저장 (카테고리 개수, 카테고리당 상품, 최신상품, 마감임박 개수)."""
+    if not current_user.is_admin:
+        return jsonify({"success": False, "message": "권한이 없습니다."}), 403
+    _ensure_main_display_config_columns()
+    data = request.get_json() or {}
+    try:
+        main_category_count = int(data.get('main_category_count', 8) or 8)
+        main_products_per_category = int(data.get('main_products_per_category', 20) or 20)
+        main_latest_count = int(data.get('main_latest_count', 30) or 30)
+        main_closing_count = int(data.get('main_closing_count', 50) or 50)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "숫자를 입력해 주세요."}), 400
+    main_category_count = max(1, min(50, main_category_count))
+    main_products_per_category = max(1, min(100, main_products_per_category))
+    main_latest_count = max(1, min(100, main_latest_count))
+    main_closing_count = max(1, min(100, main_closing_count))
+    row = MainDisplayConfig.query.get(1)
+    if not row:
+        row = MainDisplayConfig(id=1, main_category_count=main_category_count, main_products_per_category=main_products_per_category, main_latest_count=main_latest_count, main_closing_count=main_closing_count)
+        db.session.add(row)
+    else:
+        row.main_category_count = main_category_count
+        row.main_products_per_category = main_products_per_category
+        row.main_latest_count = main_latest_count
+        row.main_closing_count = main_closing_count
+    db.session.commit()
+    return jsonify({"success": True, "message": "저장되었습니다."})
 
 
 @login_required
@@ -8943,10 +9027,10 @@ def admin_revenue_report_download():
         except Exception:
             pass
     if not revenue_report_start:
-        revenue_report_end = datetime.now()
+        revenue_report_end = now_kst()
         revenue_report_start = revenue_report_end - timedelta(days=30)
     if not revenue_report_end:
-        revenue_report_end = datetime.now()
+        revenue_report_end = now_kst()
     if revenue_report_start and revenue_report_end and revenue_report_start > revenue_report_end:
         revenue_report_start, revenue_report_end = revenue_report_end, revenue_report_start
     orders_in_range = Order.query.filter(
@@ -9037,7 +9121,7 @@ def admin_dashboard():
         ]
     
     # 1. 날짜 변수 정의 (주문/매출·정산 탭은 기본 최근 7일로 조회되도록)
-    now = datetime.now()
+    now = now_kst()
     if tab in ('orders', 'settlement') and not request.args.get('start_date') and not request.args.get('end_date'):
         start_default = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00')
         end_default = now.strftime('%Y-%m-%d 23:59')
@@ -9325,6 +9409,12 @@ def admin_dashboard():
     delivery_zone_use_quick_only = False
     delivery_zone_quick_extra_fee = 10000
     delivery_zone_quick_extra_message = ''
+    main_display_main_category_count = 8
+    main_display_products_per_category = 20
+    main_display_latest_count = 30
+    main_display_closing_count = 50
+    if tab == 'main_display' and is_master:
+        main_display_main_category_count, main_display_products_per_category, main_display_latest_count, main_display_closing_count = get_main_display_config()
     kakao_map_app_key = KAKAO_MAP_APP_KEY
     if tab == 'delivery_zone' and is_master:
         _ensure_delivery_zone_columns()
@@ -9454,10 +9544,10 @@ def admin_dashboard():
             except Exception:
                 pass
         if not revenue_report_start:
-            revenue_report_end = datetime.now()
+            revenue_report_end = now_kst()
             revenue_report_start = revenue_report_end - timedelta(days=30)
         if not revenue_report_end:
-            revenue_report_end = datetime.now()
+            revenue_report_end = now_kst()
         if revenue_report_start and revenue_report_end and revenue_report_start > revenue_report_end:
             revenue_report_start, revenue_report_end = revenue_report_end, revenue_report_start
         # 수입: 주문원금(판매금), 포인트 사용, 실제수입(원금 - 포인트), 공급가, 카드 예상수수료(3.3%)
@@ -9782,7 +9872,7 @@ def admin_dashboard():
             try:
                 _dt = datetime.strptime(order_date_str, '%Y-%m-%d').date()
             except Exception:
-                _dt = datetime.now().date()
+                _dt = now_kst().date()
             for c in seller_request_categories:
                 lines = _get_email_order_lines(c.name, _dt)
                 email_order_lines_by_category[c.id] = lines
@@ -9852,7 +9942,7 @@ def admin_dashboard():
     stats_product_views_total = 0
     stats_daily_table = []
     if tab == 'stats':
-        now = datetime.now()
+        now = now_kst()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today_start - timedelta(days=7)
         from sqlalchemy import func
@@ -9959,6 +10049,7 @@ def admin_dashboard():
                 <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
                 {% if is_master %}<a href="/logi/driver-payout" target="_blank" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200 transition">기사정산(새창)</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=main_display" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'main_display' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메인화면설정</a>{% endif %}
                 <a href="/admin?tab=stats" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'stats' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">통계</a>
             </div>
             <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
@@ -10464,6 +10555,55 @@ def admin_dashboard():
                     </table>
                 </div>
             </div>
+
+        {% elif tab == 'main_display' %}
+            <div class="mb-10 p-6 md:p-8 bg-white rounded-[2rem] border border-gray-100 shadow-sm">
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">메인 화면 노출 설정</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-6">메인 페이지에 노출할 카테고리 개수와 카테고리당 상품 개수를 조정합니다. 카테고리 순서는 <a href="/admin?tab=categories" class="text-teal-600 font-black underline">카테고리관리</a> 탭에서 위/아래 화살표로 변경할 수 있습니다.</p>
+                <form id="main_display_form" class="flex flex-col gap-6 max-w-md">
+                    <div>
+                        <label class="block text-[10px] text-gray-500 font-black uppercase mb-2">메인에 노출할 카테고리 개수 (1~50)</label>
+                        <input type="number" name="main_category_count" id="main_category_count" min="1" max="50" value="{{ main_display_main_category_count }}" class="w-32 border border-gray-200 rounded-xl px-4 py-3 font-black text-gray-800">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-500 font-black uppercase mb-2">카테고리당 메인 노출 상품 개수 (1~100)</label>
+                        <input type="number" name="main_products_per_category" id="main_products_per_category" min="1" max="100" value="{{ main_display_products_per_category }}" class="w-32 border border-gray-200 rounded-xl px-4 py-3 font-black text-gray-800">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-500 font-black uppercase mb-2">최신상품 영역 노출 개수 (1~100)</label>
+                        <input type="number" name="main_latest_count" id="main_latest_count" min="1" max="100" value="{{ main_display_latest_count }}" class="w-32 border border-gray-200 rounded-xl px-4 py-3 font-black text-gray-800">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] text-gray-500 font-black uppercase mb-2">마감임박(오늘 마감) 영역 노출 개수 (1~100)</label>
+                        <input type="number" name="main_closing_count" id="main_closing_count" min="1" max="100" value="{{ main_display_closing_count }}" class="w-32 border border-gray-200 rounded-xl px-4 py-3 font-black text-gray-800">
+                    </div>
+                    <button type="submit" class="w-full max-w-xs bg-teal-600 text-white py-4 rounded-xl font-black text-sm hover:bg-teal-700 transition">저장</button>
+                </form>
+                <p class="text-[10px] text-gray-400 mt-4">현재 적용: 메인 카테고리 {{ main_display_main_category_count }}개, 카테고리당 상품 {{ main_display_products_per_category }}개, 최신상품 {{ main_display_latest_count }}개, 마감임박 {{ main_display_closing_count }}개</p>
+            </div>
+            <script>
+            (function(){
+                var form = document.getElementById('main_display_form');
+                if (form) form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    var btn = form.querySelector('button[type="submit"]');
+                    var orig = btn ? btn.textContent : '';
+                    if (btn) btn.disabled = true;
+                    fetch('/admin/main_display_config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({
+                            main_category_count: parseInt(document.getElementById('main_category_count').value, 10) || 8,
+                            main_products_per_category: parseInt(document.getElementById('main_products_per_category').value, 10) || 20,
+                            main_latest_count: parseInt(document.getElementById('main_latest_count').value, 10) || 30,
+                            main_closing_count: parseInt(document.getElementById('main_closing_count').value, 10) || 50
+                        })
+                    }).then(function(r) { return r.json(); }).then(function(d) {
+                        if (d.success) alert('저장되었습니다.'); else alert(d.message || '저장 실패');
+                    }).catch(function() { alert('저장 실패'); }).finally(function() { if (btn) { btn.disabled = false; btn.textContent = orig; } });
+                });
+            })();
+            </script>
 
         {% elif tab == 'delivery_zone' %}
             {% if kakao_map_app_key %}
@@ -13434,6 +13574,7 @@ def admin_dashboard():
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
                 <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
                 {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=main_display" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'main_display' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메인화면설정</a>{% endif %}
                 <a href="/admin?tab=stats" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'stats' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">통계</a>
             </div>
             <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
@@ -14081,7 +14222,7 @@ def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
         ext = (os.path.splitext(path)[1] or '.jpg').lower()
         if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
             ext = '.jpg'
-        new_name = f"bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+        new_name = f"bulk_{now_kst().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
         dest = os.path.join(os.path.abspath(upload_dir), new_name)
         shutil.copy2(path, dest)
         if os.path.isfile(dest):
@@ -14149,7 +14290,7 @@ def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
                     urls.append(url)
             else:
                 ext = os.path.splitext(candidate)[1].lower()
-                new_name = f"bulk_{num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+                new_name = f"bulk_{num}_{now_kst().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
                 dest = os.path.join(upload_abs, new_name)
                 shutil.copy2(candidate, dest)
                 if os.path.isfile(dest):
@@ -14260,7 +14401,7 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
 
     upload_dir_abs = os.path.abspath(upload_dir)
     os.makedirs(upload_dir_abs, exist_ok=True)
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    ts = now_kst().strftime('%Y%m%d_%H%M%S')
     for num in range(1, 11):
         src = by_num.get(num)
         if not src or not os.path.isfile(src):
@@ -14694,7 +14835,7 @@ def admin_email_order_create_view_link():
         except Exception:
             pass
     if not order_date:
-        order_date = datetime.now().date()
+        order_date = now_kst().date()
     status_filter = (data.get('status_filter') or '대기').strip() or '대기'
     category_filter = (data.get('category_filter') or '전체').strip() or '전체'
     product_q = (data.get('product_q') or '').strip()[:200]
@@ -14796,11 +14937,11 @@ def admin_seller_order_preview():
     if not current_user.is_admin:
         return jsonify({"success": False, "message": "권한이 없습니다."}), 403
     category_id = request.args.get("category_id", type=int)
-    order_date_str = (request.args.get("order_date") or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    order_date_str = (request.args.get("order_date") or "").strip() or now_kst().strftime("%Y-%m-%d")
     try:
         order_date = datetime.strptime(order_date_str, "%Y-%m-%d").date()
     except Exception:
-        order_date = datetime.now().date()
+        order_date = now_kst().date()
     cat = Category.query.get(category_id)
     if not cat:
         return jsonify({"success": False, "message": "카테고리를 찾을 수 없습니다."}), 400
@@ -14942,7 +15083,7 @@ def admin_purchase_order_send_image():
     po_start_str = (request.form.get('po_start') or '').strip()
     po_end_str = (request.form.get('po_end') or '').strip()
     po_category = (request.form.get('po_category') or '전체').strip() or '전체'
-    now = datetime.now()
+    now = now_kst()
     try:
         start_dt = datetime.strptime(po_start_str.replace('T', ' '), '%Y-%m-%d %H:%M') if po_start_str else now.replace(hour=0, minute=0, second=0, microsecond=0)
     except Exception:
@@ -14988,7 +15129,7 @@ def admin_purchase_order_preview_image():
     po_start_str = (request.args.get('po_start') or '').strip()
     po_end_str = (request.args.get('po_end') or '').strip()
     po_category = (request.args.get('po_category') or '전체').strip() or '전체'
-    now = datetime.now()
+    now = now_kst()
     try:
         start_dt = datetime.strptime(po_start_str.replace('T', ' ').replace('+', ' '), '%Y-%m-%d %H:%M') if po_start_str else now.replace(hour=0, minute=0, second=0, microsecond=0)
     except Exception:
@@ -15048,11 +15189,11 @@ def admin_seller_send_order_email():
         return jsonify({"success": False, "message": "권한이 없습니다."}), 403
     data = request.get_json() or request.form
     category_id = data.get("category_id", type=int)
-    order_date_str = (data.get("order_date") or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    order_date_str = (data.get("order_date") or "").strip() or now_kst().strftime("%Y-%m-%d")
     try:
         order_date = datetime.strptime(order_date_str, "%Y-%m-%d").date()
     except Exception:
-        order_date = datetime.now().date()
+        order_date = now_kst().date()
     cat = Category.query.get(category_id)
     if not cat:
         return jsonify({"success": False, "message": "카테고리를 찾을 수 없습니다."}), 400
@@ -15124,7 +15265,7 @@ def seller_confirm():
         if conf:
             just_confirmed = False
             if not conf.confirmed_at:
-                conf.confirmed_at = datetime.now()
+                conf.confirmed_at = now_kst()
                 # 해당 발주에 포함된 품목 발주상태 → 확인완료
                 for e in EmailOrderLineStatus.query.filter_by(confirmation_id=conf.id).all():
                     e.status = '확인완료'
@@ -15273,7 +15414,7 @@ def order_view_page(code):
     base_url = (os.getenv("SITE_URL") or request.url_root or "").rstrip("/")
     view_url = base_url + "/order_view/" + code
     order_date_str = link.order_date.strftime('%Y-%m-%d') if link.order_date else '-'
-    default_subject = (link.order_date.strftime('%Y-%m-%d') if link.order_date else datetime.now().strftime('%Y-%m-%d')) + ' 바구니삼촌 발주서'
+    default_subject = (link.order_date.strftime('%Y-%m-%d') if link.order_date else now_kst().strftime('%Y-%m-%d')) + ' 바구니삼촌 발주서'
     return render_template_string(HEADER_HTML + """
     <div class="max-w-4xl mx-auto px-4 py-8">
         <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -15552,7 +15693,7 @@ def admin_board_comment_delete(cid):
 # --------------------------------------------------------------------------------
 def _seed_test_categories_and_products():
     """테스트 카테고리 3개와 카테고리당 가상 상품 10개 생성. 등록 기능 전 필드 활용."""
-    now = datetime.now()
+    now = now_kst()
     today_evening = now.replace(hour=20, minute=0, second=0, microsecond=0)
     tomorrow = (now + timedelta(days=1)).replace(hour=18, minute=0, second=0, microsecond=0)
     categories_data = [
@@ -15763,7 +15904,7 @@ def _seed_virtual_orders(num_orders=20, days_back=10, min_items=2, max_items=3):
     products = Product.query.filter_by(is_active=True).limit(100).all()
     if len(products) < 2:
         return 0
-    now = datetime.now()
+    now = now_kst()
     created_count = 0
     try:
         for i in range(num_orders):
@@ -15880,7 +16021,7 @@ def admin_seed_virtual_payment_orders():
 
 def _seed_virtual_board_posts(count_per_board=20):
     """게시판별 가상 글 count_per_board개씩 생성. 랜덤 사용자명·문장 조합으로 실제 작성글처럼 생성."""
-    now = datetime.now()
+    now = now_kst()
     first_user = User.query.first()
     uid = first_user.id if first_user else None
     virtual_user_names = [
@@ -16540,7 +16681,7 @@ def admin_sellers_excel():
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
     out.seek(0)
-    filename = f"판매자정보_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"판매자정보_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
     resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -16555,7 +16696,7 @@ def admin_orders_sales_excel():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     query = Order.query.filter(Order.status != '결제취소')
@@ -16623,7 +16764,7 @@ def admin_orders_sales_excel():
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
     out.seek(0)
-    filename = f"조회결과상세_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"조회결과상세_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
     resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -16707,7 +16848,7 @@ def admin_orders_sales_detail_image():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     query = Order.query.filter(Order.status != '결제취소')
@@ -16803,7 +16944,7 @@ def admin_orders_sales_detail_image():
     out = BytesIO()
     img.save(out, format='PNG')
     out.seek(0)
-    filename = f"조회결과상세_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    filename = f"조회결과상세_{now_kst().strftime('%Y%m%d_%H%M%S')}.png"
     resp = send_file(out, mimetype='image/png', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -16818,7 +16959,7 @@ def admin_orders_sales_summary_excel():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     query = Order.query.filter(Order.status != '결제취소')
@@ -16891,7 +17032,7 @@ def admin_orders_sales_summary_excel():
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
     out.seek(0)
-    filename = f"판매상품명별판매수량총합계_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"판매상품명별판매수량총합계_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
     resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -16906,7 +17047,7 @@ def admin_orders_delivery_summary_image():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     order_ids_param = request.args.get('order_ids', '').strip()
@@ -16955,7 +17096,7 @@ def admin_orders_delivery_summary_image():
     out = BytesIO()
     img.save(out, format='PNG')
     out.seek(0)
-    filename = f"배송집계_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    filename = f"배송집계_{now_kst().strftime('%Y%m%d_%H%M%S')}.png"
     resp = send_file(out, mimetype='image/png', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -17019,7 +17160,7 @@ def admin_orders_delivery_summary_excel():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     order_ids_param = request.args.get('order_ids', '').strip()
@@ -17040,7 +17181,7 @@ def admin_orders_delivery_summary_excel():
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
     out.seek(0)
-    filename = f"배송집계_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"배송집계_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
     resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -17055,7 +17196,7 @@ def admin_orders_sales_summary_image():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     query = Order.query.filter(Order.status != '결제취소')
@@ -17145,7 +17286,7 @@ def admin_orders_sales_summary_image():
     out = BytesIO()
     img.save(out, format='PNG')
     out.seek(0)
-    filename = f"판매상품명별판매수량총합계_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    filename = f"판매상품명별판매수량총합계_{now_kst().strftime('%Y%m%d_%H%M%S')}.png"
     resp = send_file(out, mimetype='image/png', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -17160,7 +17301,7 @@ def admin_orders_settlement_detail_excel():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     sel_order_cat = request.args.get('order_cat', '전체')
@@ -17222,7 +17363,7 @@ def admin_orders_settlement_detail_excel():
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
     out.seek(0)
-    filename = f"정산상세_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"정산상세_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
     resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -17237,7 +17378,7 @@ def admin_settlement_category_excel():
         flash("권한이 없습니다.")
         return redirect('/admin')
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     sel_cat = request.args.get('category', '전체')
@@ -17277,7 +17418,7 @@ def admin_settlement_category_excel():
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
     out.seek(0)
-    filename = f"카테고리별판매품목_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"카테고리별판매품목_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
     resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
     resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
     return resp
@@ -17296,7 +17437,7 @@ def admin_orders_excel():
 
 
     is_master = current_user.is_admin
-    now = datetime.now()
+    now = now_kst()
     
     # [기존 로직 유지] 날짜 변수 정의
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
@@ -17396,7 +17537,7 @@ def admin_orders_excel():
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False, sheet_name='주문리스트')
     out.seek(0)
-    filename = f"주문정산_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"주문정산_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
     response = send_file(
         out,
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

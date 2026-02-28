@@ -1,11 +1,19 @@
 # --------------------------------------------------------------------------------
 # 데이터베이스 모델 (DB 구조 변경 금지 규칙 준수)
 # --------------------------------------------------------------------------------
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask_login import UserMixin
 from delivery_system import db_delivery
 
 db = db_delivery
+
+# 한국 시간(KST) 기준 현재 시각 — DB 저장·고객 노출용
+def _now_kst():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
+    except Exception:
+        return datetime.utcnow() + timedelta(hours=9)
 
 
 class CategorySettlement(db.Model):
@@ -18,7 +26,7 @@ class CategorySettlement(db.Model):
     delivery_fee_sum = db.Column(db.Integer, default=0)
     settlement_amount = db.Column(db.Integer, default=0)
     status = db.Column(db.String(20), default='입금대기')
-    requested_at = db.Column(db.DateTime, default=datetime.now)
+    requested_at = db.Column(db.DateTime, default=_now_kst)
     completed_at = db.Column(db.DateTime, nullable=True)
 
 
@@ -136,7 +144,7 @@ class Order(db.Model):
     delivery_lat = db.Column(db.Float, nullable=True)
     delivery_lng = db.Column(db.Float, nullable=True)
     request_memo = db.Column(db.String(500))
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     points_used = db.Column(db.Integer, default=0)
     quick_extra_fee = db.Column(db.Integer, default=0)
     utm_source = db.Column(db.String(100), nullable=True)
@@ -171,7 +179,7 @@ class OrderItemLog(db.Model):
     log_type = db.Column(db.String(30), nullable=False)
     old_value = db.Column(db.String(50), nullable=True)
     new_value = db.Column(db.String(50), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
 
 
 class UserMessage(db.Model):
@@ -183,7 +191,7 @@ class UserMessage(db.Model):
     image_url = db.Column(db.String(500), nullable=True)
     msg_type = db.Column(db.String(30), default='custom')
     related_order_id = db.Column(db.Integer, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     read_at = db.Column(db.DateTime, nullable=True)
 
 
@@ -193,7 +201,7 @@ class MessageTemplate(db.Model):
     msg_type = db.Column(db.String(50), unique=True, nullable=False)
     title = db.Column(db.String(200), nullable=False)
     body = db.Column(db.Text, nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at = db.Column(db.DateTime, default=_now_kst, onupdate=_now_kst)
 
 
 class PushSubscription(db.Model):
@@ -203,7 +211,7 @@ class PushSubscription(db.Model):
     endpoint = db.Column(db.String(512), nullable=False)
     p256dh = db.Column(db.String(255), nullable=False)
     auth = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     __table_args__ = (db.UniqueConstraint('user_id', 'endpoint', name='uq_push_user_endpoint'),)
 
 
@@ -217,7 +225,7 @@ class RestaurantRequest(db.Model):
     menu = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(500), nullable=True)
     admin_notes = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     is_hidden = db.Column(db.Boolean, default=False)
     is_notice = db.Column(db.Boolean, default=False)
 
@@ -227,7 +235,7 @@ class RestaurantRecommend(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     restaurant_request_id = db.Column(db.Integer, db.ForeignKey('restaurant_request.id', ondelete='CASCADE'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     __table_args__ = (db.UniqueConstraint('user_id', 'restaurant_request_id', name='uq_restaurant_recommend_user_post'),)
 
 
@@ -237,7 +245,7 @@ class RestaurantVote(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     restaurant_request_id = db.Column(db.Integer, db.ForeignKey('restaurant_request.id', ondelete='CASCADE'), nullable=False)
     vote_type = db.Column(db.String(10), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     __table_args__ = (db.UniqueConstraint('user_id', 'restaurant_request_id', name='uq_restaurant_vote_user_post'),)
 
 
@@ -249,7 +257,7 @@ class PartnershipInquiry(db.Model):
     partnership_type = db.Column(db.String(100), nullable=True)
     content = db.Column(db.Text, nullable=True)
     is_secret = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     admin_notes = db.Column(db.Text, nullable=True)
     is_hidden = db.Column(db.Boolean, default=False)
     is_notice = db.Column(db.Boolean, default=False)
@@ -262,7 +270,7 @@ class FreeBoard(db.Model):
     user_name = db.Column(db.String(50), nullable=True)
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     is_hidden = db.Column(db.Boolean, default=False)
     is_notice = db.Column(db.Boolean, default=False)
 
@@ -275,7 +283,7 @@ class DeliveryRequest(db.Model):
     region_name = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=True)
     admin_notes = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     is_hidden = db.Column(db.Boolean, default=False)
     is_notice = db.Column(db.Boolean, default=False)
 
@@ -286,7 +294,7 @@ class DeliveryRequestVote(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     delivery_request_id = db.Column(db.Integer, db.ForeignKey('delivery_request.id', ondelete='CASCADE'), nullable=False)
     vote_type = db.Column(db.String(10), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     __table_args__ = (db.UniqueConstraint('user_id', 'delivery_request_id', name='uq_delivery_request_vote_user_post'),)
 
 
@@ -299,7 +307,7 @@ class BoardComment(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     user_name = db.Column(db.String(50), nullable=True)
     body = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
 
 
 class DailyStat(db.Model):
@@ -319,7 +327,7 @@ class SellerOrderConfirmation(db.Model):
     category_name = db.Column(db.String(50), nullable=False)
     confirmation_code = db.Column(db.String(10), unique=True, nullable=False)
     order_date = db.Column(db.Date, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     confirmed_at = db.Column(db.DateTime, nullable=True)
     recipient_email = db.Column(db.String(120), nullable=True)
 
@@ -342,7 +350,7 @@ class OrderViewLink(db.Model):
     category_filter = db.Column(db.String(50), default='전체')
     product_q = db.Column(db.String(200), nullable=True)
     selected_items = db.Column(db.Text, nullable=True)  # JSON: [{product_name, total_quantity, supply_price, tax_type, line_amount}]
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
 
 
 class SitePopup(db.Model):
@@ -357,8 +365,8 @@ class SitePopup(db.Model):
     end_at = db.Column(db.DateTime, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     sort_order = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.now)
-    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
+    updated_at = db.Column(db.DateTime, default=_now_kst, onupdate=_now_kst)
 
 
 class DeliveryZone(db.Model):
@@ -371,8 +379,19 @@ class DeliveryZone(db.Model):
     use_quick_region_only = db.Column(db.Boolean, default=False)
     quick_extra_fee = db.Column(db.Integer, default=10000)
     quick_extra_message = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
-    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
+    updated_at = db.Column(db.DateTime, default=_now_kst, onupdate=_now_kst)
+
+
+class MainDisplayConfig(db.Model):
+    """메인 화면 노출 설정 (관리자에서 조정). 단일 행(id=1) 사용."""
+    __tablename__ = "main_display_config"
+    id = db.Column(db.Integer, primary_key=True)
+    main_category_count = db.Column(db.Integer, default=8)  # 메인에 노출할 카테고리 개수
+    main_products_per_category = db.Column(db.Integer, default=20)  # 카테고리당 메인 노출 상품 개수
+    main_latest_count = db.Column(db.Integer, default=30)  # 최신상품 영역 노출 개수
+    main_closing_count = db.Column(db.Integer, default=50)  # 마감임박(오늘 마감) 영역 노출 개수
+    updated_at = db.Column(db.DateTime, default=_now_kst, onupdate=_now_kst)
 
 
 class MemberGradeConfig(db.Model):
@@ -404,7 +423,7 @@ class PointLog(db.Model):
     order_id = db.Column(db.Integer, nullable=True)
     order_item_id = db.Column(db.Integer, nullable=True)
     memo = db.Column(db.String(200), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     adjusted_by = db.Column(db.Integer, nullable=True)
 
 
@@ -415,7 +434,7 @@ class MarketingCost(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     amount = db.Column(db.Integer, nullable=False)
     memo = db.Column(db.String(200), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
 
 
 class Review(db.Model):
@@ -429,7 +448,7 @@ class Review(db.Model):
     category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
     content = db.Column(db.Text)
     image_url = db.Column(db.String(500))
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
 
 
 class ReviewVote(db.Model):
@@ -439,7 +458,7 @@ class ReviewVote(db.Model):
     review_id = db.Column(db.Integer, db.ForeignKey('review.id', ondelete='CASCADE'), nullable=False)
     user_id = db.Column(db.Integer, nullable=False)
     vote = db.Column(db.Integer, nullable=False)  # 1=추천, -1=비추천
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
     __table_args__ = (db.UniqueConstraint('review_id', 'user_id', name='uq_review_vote_review_user'),)
 
 
@@ -453,7 +472,7 @@ class UserConsent(db.Model):
     consent_purchase_agency = db.Column(db.Boolean, default=True)
     consent_terms = db.Column(db.Boolean, default=True)
     consent_marketing = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
 
 
 class Settlement(db.Model):
@@ -474,7 +493,7 @@ class Settlement(db.Model):
     settlement_total = db.Column(db.Integer, default=0)
     settlement_status = db.Column(db.String(20), default='입금대기')
     settled_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=_now_kst)
 
 
 class MarketingAlimtalkLog(db.Model):
@@ -487,4 +506,4 @@ class MarketingAlimtalkLog(db.Model):
     coupon_code = db.Column(db.String(50), nullable=True)
     success = db.Column(db.Boolean, default=False)
     memo = db.Column(db.String(500), nullable=True)
-    sent_at = db.Column(db.DateTime, default=datetime.now)
+    sent_at = db.Column(db.DateTime, default=_now_kst)
