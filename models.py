@@ -300,6 +300,7 @@ class EventBoardPost(db.Model):
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=_now_kst)
+    is_notice = db.Column(db.Boolean, default=False)
 
 
 class ShareLink(db.Model):

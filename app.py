@@ -398,17 +398,24 @@ def _get_zone():
 
 
 def get_main_display_config():
-    """메인 화면 노출 설정. (메인 카테고리 개수, 카테고리당 상품 개수, 최신상품 개수, 마감임박 개수). 없으면 기본값 반환."""
+    """메인 화면 노출 설정. (메인 카테고리 개수, 카테고리당 상품 개수, 최신상품 개수, 마감임박 개수). 없으면 기본값 반환. 60초 캐시로 DB/메타데이터 부하 감소."""
+    import time
+    cache = getattr(get_main_display_config, '_cache', None)
+    if cache is not None and (time.time() - cache[1]) < 60:
+        return cache[0]
     _ensure_main_display_config_columns()
     row = MainDisplayConfig.query.get(1)
     if row:
-        return (
+        result = (
             max(1, min(50, getattr(row, 'main_category_count', 8) or 8)),
             max(1, min(100, getattr(row, 'main_products_per_category', 20) or 20)),
             max(1, min(100, getattr(row, 'main_latest_count', 30) or 30)),
             max(1, min(100, getattr(row, 'main_closing_count', 50) or 50)),
         )
-    return (8, 20, 30, 50)
+    else:
+        result = (8, 20, 30, 50)
+    get_main_display_config._cache = (result, time.time())
+    return result
 
 
 def _normalize_address_for_zone(address_str):
@@ -1217,7 +1224,7 @@ HEADER_HTML = """
     <!-- Danggeun Market Code -->
     <script src="https://karrot-pixel.business.daangn.com/karrot-pixel.js"></script>
     <script>
-      window.karrotPixel.init('1771898651792765001');
+      window.karrotPixel.init('1772283073260770001');
       window.karrotPixel.track('ViewPage');
     </script>
     <!-- End Danggeun Market Code -->
@@ -2509,12 +2516,17 @@ def admin_order_print():
         clean_words = [w for w in raw_memo.split() if not (any(c.isdigit() for c in w) or any(k in w for k in ['비번', '번호', '현관', '#', '*']))]
         clean_memo = " ".join(clean_words) if clean_words else "요청사항 없음"
 
+        # 송장 출력 시 배송지에서 현관비밀번호 제거 (표시 X)
+        delivery_addr_display = (o.delivery_address or "")
+        delivery_addr_display = re.sub(r'\s*\(현관\s*:\s*[^)]*\)\s*$', '', delivery_addr_display)
+        delivery_addr_display = re.sub(r'\s*\(현관\s*[^)]*\)\s*$', '', delivery_addr_display).strip()
+
         processed_orders.append({
             'order_id': o.order_id,
             'masked_name': masked_name,
             'masked_phone': masked_phone,
             'all_items': all_items,
-            'delivery_address': o.delivery_address,
+            'delivery_address': delivery_addr_display,
             'clean_memo': clean_memo,
             'created_at': o.created_at
         })
@@ -2559,15 +2571,20 @@ def admin_order_print():
             body.layout-a4-4 .invoice-card .text-xl { font-size: 0.7rem !important; }
             body.layout-a4-4 .invoice-card .invoice-order-id { font-size: 0.75rem !important; }
             body.layout-a4-4 .item-list { max-height: 4.5cm; }
-            /* 휴대용: 가로폭 mm + 스케일로 조절 */
+            /* 휴대용: 가로(폭)는 변경 가능, 세로(높이)는 일정하게 고정 */
+            body.layout-portable { --inv-width-mm: 80; --inv-scale: 1; }
             body.layout-portable .invoice-card {
                 width: calc(var(--inv-width-mm) * 0.2645833rem);
-                min-height: 8cm;
+                height: 12cm;
+                min-height: 12cm;
+                max-height: 12cm;
                 padding: 0.4rem;
-                transform: scale(var(--inv-scale));
+                transform: none;
                 margin: 0.5rem;
+                box-sizing: border-box;
+                overflow: hidden;
             }
-            body.layout-portable .item-list { max-height: 3.5cm; }
+            body.layout-portable .item-list { max-height: 5.5cm; }
 
             @media print {
                 @page { size: A4; margin: 8mm; }
@@ -2589,7 +2606,10 @@ def admin_order_print():
                 body.layout-a4-4 .invoice-card:last-child { page-break-after: always; }
                 body.layout-portable .invoice-card {
                     width: calc(var(--inv-width-mm) * 0.2645833rem) !important;
-                    transform: scale(var(--inv-scale)) !important;
+                    height: 12cm !important;
+                    min-height: 12cm !important;
+                    max-height: 12cm !important;
+                    transform: none !important;
                     margin: 0 auto 2mm !important;
                     page-break-after: always;
                 }
@@ -2609,19 +2629,13 @@ def admin_order_print():
                 <button type="button" onclick="setLayout('layout-portable')" class="layout-btn px-4 py-2 rounded-xl text-xs font-black border-2 border-gray-300 hover:border-teal-500 hover:bg-teal-50" data-layout="layout-portable">휴대용</button>
             </div>
             <div id="portable-options" class="hidden flex-wrap items-center gap-4 mt-3 p-3 bg-gray-50 rounded-xl">
-                <label class="flex items-center gap-2">
-                    <span class="text-xs font-black text-gray-600">폭(mm):</span>
-                    <select id="portable-width" onchange="applyPortableSize()" class="border rounded-lg px-2 py-1 text-xs font-black">
-                        <option value="58">58mm</option>
-                        <option value="80" selected>80mm</option>
-                        <option value="100">100mm</option>
-                    </select>
-                </label>
-                <label class="flex items-center gap-2">
-                    <span class="text-xs font-black text-gray-600">크기:</span>
-                    <input type="range" id="portable-scale" min="0.5" max="1.5" step="0.05" value="1" oninput="applyPortableSize()" class="w-24">
-                    <span id="portable-scale-val" class="text-xs font-black text-gray-700">100%</span>
-                </label>
+                <span class="text-xs font-black text-gray-600">가로(폭):</span>
+                <select id="portable-width" onchange="applyPortableSize()" class="border rounded-lg px-2 py-1 text-xs font-black">
+                    <option value="58">58mm</option>
+                    <option value="80" selected>80mm</option>
+                    <option value="100">100mm</option>
+                </select>
+                <span class="text-xs text-gray-500 font-bold">세로(높이) 12cm 고정</span>
             </div>
             <div class="mt-3">
                 <button onclick="window.print()" class="bg-blue-600 text-white px-8 py-2.5 rounded-xl font-black text-sm shadow-lg hover:bg-blue-700">🖨️ 인쇄</button>
@@ -2685,16 +2699,11 @@ def admin_order_print():
             });
             var po = document.getElementById('portable-options');
             if (po) po.classList.toggle('hidden', cls !== 'layout-portable');
+            if (cls === 'layout-portable') applyPortableSize();
         }
         function applyPortableSize() {
             var w = document.getElementById('portable-width');
-            var s = document.getElementById('portable-scale');
-            var v = document.getElementById('portable-scale-val');
             if (w) document.body.style.setProperty('--inv-width-mm', w.value);
-            if (s) {
-                document.body.style.setProperty('--inv-scale', s.value);
-                if (v) v.textContent = Math.round(parseFloat(s.value) * 100) + '%';
-            }
         }
         </script>
     </body>
@@ -2910,8 +2919,25 @@ def index():
         main_delivery_posts.sort(key=lambda p: d_ids.index(p.id))
     main_partnership_posts = PartnershipInquiry.query.filter_by(is_hidden=False, is_notice=False).order_by(PartnershipInquiry.id.desc()).limit(4).all()
     main_free_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=False).order_by(FreeBoard.id.desc()).limit(4).all()
-    main_restaurant_votes = {p.id: _restaurant_vote_counts(p.id) for p in main_restaurant_posts}
-    main_delivery_votes = {p.id: _delivery_request_vote_counts(p.id) for p in main_delivery_posts}
+    # 게시판 추천/비추천 수 일괄 조회 (N+1 제거)
+    main_restaurant_votes = {}
+    if r_ids:
+        up_r = dict(db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id)).filter(RestaurantVote.restaurant_request_id.in_(r_ids), RestaurantVote.vote_type == 'up').group_by(RestaurantVote.restaurant_request_id).all())
+        down_r = dict(db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id)).filter(RestaurantVote.restaurant_request_id.in_(r_ids), RestaurantVote.vote_type == 'down').group_by(RestaurantVote.restaurant_request_id).all())
+        leg_r = dict(db.session.query(RestaurantRecommend.restaurant_request_id, func.count(RestaurantRecommend.id)).filter(RestaurantRecommend.restaurant_request_id.in_(r_ids)).group_by(RestaurantRecommend.restaurant_request_id).all())
+        for rid in r_ids:
+            u, d = up_r.get(rid, 0), down_r.get(rid, 0)
+            if u == 0 and d == 0:
+                u = leg_r.get(rid, 0)
+            main_restaurant_votes[rid] = (u, d)
+    main_delivery_votes = {}
+    if d_ids:
+        up_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'up').group_by(DeliveryRequestVote.delivery_request_id).all())
+        down_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'down').group_by(DeliveryRequestVote.delivery_request_id).all())
+        main_delivery_votes = {did: (up_d.get(did, 0), down_d.get(did, 0)) for did in d_ids}
+
+    has_more_categories = len(all_categories) > main_cat_count
+    total_categories_count = len(all_categories)
 
     content = """
 <style>
@@ -3312,6 +3338,8 @@ def index():
                                   latest_reviews=latest_reviews,
                                   review_counts=review_counts,
                                   now=now,
+                                  has_more_categories=has_more_categories,
+                                  total_categories_count=total_categories_count,
                                   main_restaurant_posts=main_restaurant_posts,
                                   main_delivery_posts=main_delivery_posts,
                                   main_partnership_posts=main_partnership_posts,
@@ -4750,6 +4778,7 @@ def board_event_post_add():
 @app.route('/board/event', methods=['GET', 'POST'])
 def board_event():
     """이벤트 게시판 — 게시판 글, 공유 URL, 포인트 지급 요청, 신청 내역"""
+    _ensure_event_board_post_notice_column()
     if request.method == 'POST':
         shared_url = (request.form.get('shared_url') or '').strip()
         applicant_email = (request.form.get('applicant_email') or '').strip().lower()
@@ -4770,7 +4799,8 @@ def board_event():
         db.session.commit()
         flash('포인트 지급 요청이 접수되었습니다. 검토 후 해당 이메일로 포인트가 지급됩니다.')
         return redirect(url_for('board_event'))
-    event_posts = EventBoardPost.query.order_by(EventBoardPost.id.desc()).limit(50).all()
+    event_notices = EventBoardPost.query.filter_by(is_notice=True).order_by(EventBoardPost.id.desc()).all()
+    event_posts = EventBoardPost.query.filter_by(is_notice=False).order_by(EventBoardPost.id.desc()).limit(50).all()
     requests_query = EventPointRequest.query.order_by(EventPointRequest.id.desc()).limit(100)
     filter_email = (request.args.get('my_email') or '').strip().lower()
     if filter_email and '@' in filter_email:
@@ -4794,6 +4824,27 @@ def board_event():
             <div class="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-8">
                 <p class="font-black text-amber-800 text-xs mb-3">게시판</p>
                 <p class="text-[10px] text-amber-700 mb-3">이벤트에 대한 이야기를 나눠 보세요.</p>
+                {% if current_user.is_authenticated and current_user.is_admin %}
+                <div class="mb-6 p-4 bg-amber-100/80 border border-amber-300 rounded-xl">
+                    <p class="font-black text-amber-800 text-[11px] mb-3">📌 공지글 등록/수정</p>
+                    <form method="POST" action="/admin/board/event/notice/write" class="space-y-3 mb-4">
+                        <div><label class="block text-[10px] text-gray-600 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="공지 제목" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></div>
+                        <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용</label><textarea name="content" rows="3" placeholder="공지 내용" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></textarea></div>
+                        <button type="submit" class="px-5 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-black hover:bg-amber-700 transition">공지 등록</button>
+                    </form>
+                    {% if event_notices %}
+                    <div class="space-y-2 mt-4">
+                        {% for ep in event_notices %}
+                        <div class="flex items-center justify-between gap-2 py-2 border-b border-amber-200/50 last:border-0">
+                            <span class="font-bold text-gray-800 text-sm truncate flex-1">{{ ep.title }}</span>
+                            <a href="/admin/board/event/notice/{{ ep.id }}/edit" class="px-2 py-1 bg-teal-600 text-white rounded text-[10px] font-black shrink-0">수정</a>
+                            <form action="/admin/board/event/{{ ep.id }}/notice" method="POST" class="inline shrink-0" onsubmit="return confirm('공지를 해제하시겠습니까?');"><button type="submit" class="px-2 py-1 bg-gray-500 text-white rounded text-[10px] font-black">공지 해제</button></form>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
                 <form method="POST" action="/board/event/post" class="space-y-3 mb-6">
                     <div><label class="block text-[10px] text-gray-600 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="제목을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></div>
                     <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용</label><textarea name="content" rows="3" placeholder="내용을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></textarea></div>
@@ -4801,15 +4852,23 @@ def board_event():
                     <button type="submit" class="px-5 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-black hover:bg-amber-700 transition">글쓰기</button>
                 </form>
                 <div class="space-y-2">
+                    {% for ep in event_notices %}
+                    <div class="bg-amber-100/70 rounded-xl border border-amber-200 p-3 text-left">
+                        <p class="font-black text-gray-800 text-sm"><span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{{ ep.title }}</p>
+                        <p class="text-[10px] text-gray-500">{{ ep.created_at.strftime('%Y.%m.%d %H:%M') if ep.created_at else '' }} · {{ ep.user_name or '관리자' }}</p>
+                        {% if ep.content %}<p class="text-gray-600 text-xs mt-1">{{ ep.content[:120] }}{% if ep.content|length > 120 %}...{% endif %}</p>{% endif %}
+                    </div>
+                    {% endfor %}
                     {% for ep in event_posts %}
                     <div class="bg-white rounded-xl border border-amber-100 p-3 text-left">
                         <p class="font-black text-gray-800 text-sm">{{ ep.title }}</p>
                         <p class="text-[10px] text-gray-400">{{ ep.created_at.strftime('%Y.%m.%d %H:%M') if ep.created_at else '' }} · {{ ep.user_name or '익명' }}</p>
                         {% if ep.content %}<p class="text-gray-600 text-xs mt-1">{{ ep.content[:120] }}{% if ep.content|length > 120 %}...{% endif %}</p>{% endif %}
                     </div>
-                    {% else %}
-                    <p class="text-gray-400 text-xs py-4 text-center">아직 글이 없습니다.</p>
                     {% endfor %}
+                    {% if not event_notices and not event_posts %}
+                    <p class="text-gray-400 text-xs py-4 text-center">아직 글이 없습니다.</p>
+                    {% endif %}
                 </div>
             </div>
             <div class="bg-violet-50 border border-violet-200 rounded-2xl p-6 mb-8">
@@ -4878,6 +4937,7 @@ def board_event():
             </script>
         </div>
         """ + FOOTER_HTML,
+        event_notices=event_notices,
         event_posts=event_posts,
         requests_list=requests_list,
         filter_email=filter_email
@@ -6290,12 +6350,18 @@ def register():
 
         if not request.form.get('consent_e_commerce'):
             flash("전자상거래 이용 약관 및 유의사항에 동의해야 합니다."); return redirect('/register')
+        if not request.form.get('consent_terms'):
+            flash("이용약관에 동의해야 합니다."); return redirect('/register')
+        if not request.form.get('consent_privacy'):
+            flash("개인정보처리방침에 동의해야 합니다."); return redirect('/register')
 
         if User.query.filter_by(email=email).first(): flash("이미 가입된 이메일입니다."); return redirect('/register')
+        consent_marketing = request.form.get('consent_marketing') in ('1', 'on', 'true', 'yes')
         new_user = User(
             email=email, password=generate_password_hash(pw), name=name, phone=phone,
             address=addr, address_apt_name=apt_name or None, address_detail=addr_d, entrance_pw=ent_pw, request_memo=memo,
-            utm_source=session.get('utm_source'), utm_medium=session.get('utm_medium'), utm_campaign=session.get('utm_campaign')
+            utm_source=session.get('utm_source'), utm_medium=session.get('utm_medium'), utm_campaign=session.get('utm_campaign'),
+            consent_marketing=consent_marketing
         )
         db.session.add(new_user)
         db.session.commit()
@@ -6335,18 +6401,78 @@ def register():
                 <textarea name="request_memo" placeholder="배송 시 요청사항을 남겨주세요" class="w-full p-5 bg-white border border-gray-100 rounded-2xl font-black h-28 text-sm text-left"></textarea>
             </div>
             
-            <div class="p-5 bg-gray-50 rounded-2xl border border-gray-100 text-[10px] space-y-3 mt-6 text-left">
-                <label class="flex items-start gap-3 cursor-pointer group text-left" for="consent_e_commerce">
-                    <input type="checkbox" name="consent_e_commerce" value="1" id="consent_e_commerce" class="mt-1 rounded border-gray-300 text-teal-600 focus:ring-teal-500" required>
-                    <span class="group-hover:text-gray-800 transition leading-normal md:leading-relaxed break-keep text-[11px] md:text-sm">
-    [필수] 본 서비스는 <b>구매대행형 통합 물류 서비스</b>이며, 이용자의 주문 요청에 따라 당사가 상품을 구매 및 배송함을 확인하고 이에 동의합니다.
-</span>
-                </label>
+            <div class="p-5 bg-gray-50 rounded-2xl border border-gray-100 text-[10px] space-y-4 mt-6 text-left">
+                <p class="text-xs font-black text-slate-700 mb-2">아래 약관 및 동의 내용을 확인한 후 체크해 주세요.</p>
+                <div class="flex items-start gap-2 flex-wrap">
+                    <label class="flex items-start gap-2 flex-1 cursor-pointer min-w-0">
+                        <input type="checkbox" name="consent_terms" value="1" id="consent_terms" class="consent-cb mt-1 rounded border-gray-300 text-teal-600 focus:ring-teal-500 shrink-0" required>
+                        <span class="text-[11px] md:text-sm break-keep">[필수] <strong>이용약관</strong>에 동의합니다.</span>
+                    </label>
+                    <button type="button" onclick="openConsentModal('terms')" class="shrink-0 text-teal-600 font-bold text-[10px] underline hover:no-underline py-1">내용보기</button>
+                </div>
+                <div class="flex items-start gap-2 flex-wrap">
+                    <label class="flex items-start gap-2 flex-1 cursor-pointer min-w-0">
+                        <input type="checkbox" name="consent_e_commerce" value="1" id="consent_e_commerce" class="consent-cb mt-1 rounded border-gray-300 text-teal-600 focus:ring-teal-500 shrink-0" required>
+                        <span class="text-[11px] md:text-sm break-keep">[필수] <strong>전자상거래 이용 약관 및 유의사항</strong>에 동의합니다.</span>
+                    </label>
+                    <button type="button" onclick="openConsentModal('ecommerce')" class="shrink-0 text-teal-600 font-bold text-[10px] underline hover:no-underline py-1">내용보기</button>
+                </div>
+                <div class="flex items-start gap-2 flex-wrap">
+                    <label class="flex items-start gap-2 flex-1 cursor-pointer min-w-0">
+                        <input type="checkbox" name="consent_privacy" value="1" id="consent_privacy" class="consent-cb mt-1 rounded border-gray-300 text-teal-600 focus:ring-teal-500 shrink-0" required>
+                        <span class="text-[11px] md:text-sm break-keep">[필수] <strong>개인정보처리방침</strong>에 동의합니다.</span>
+                    </label>
+                    <button type="button" onclick="openConsentModal('privacy')" class="shrink-0 text-teal-600 font-bold text-[10px] underline hover:no-underline py-1">내용보기</button>
+                </div>
+                <div class="flex items-start gap-2 flex-wrap">
+                    <label class="flex items-start gap-2 flex-1 cursor-pointer min-w-0">
+                        <input type="checkbox" name="consent_marketing" value="1" id="consent_marketing" class="consent-cb mt-1 rounded border-gray-300 text-teal-600 focus:ring-teal-500 shrink-0">
+                        <span class="text-[11px] md:text-sm break-keep">[선택] <strong>마케팅 수신</strong>에 동의합니다. (이벤트·할인 정보 등)</span>
+                    </label>
+                    <button type="button" onclick="openConsentModal('marketing')" class="shrink-0 text-teal-600 font-bold text-[10px] underline hover:no-underline py-1">내용보기</button>
+                </div>
+                <button type="button" id="consent_check_all_btn" onclick="document.querySelectorAll('.consent-cb').forEach(function(cb){ cb.checked = true; });" class="w-full py-3 bg-slate-200 text-slate-700 rounded-2xl font-black text-sm hover:bg-slate-300 transition active:scale-[0.98]">전체 동의 (필수+선택 일괄 체크)</button>
             </div>
 
             <button type="submit" class="w-full bg-teal-600 text-white py-6 rounded-3xl font-black text-lg shadow-xl mt-6 hover:bg-teal-700 transition active:scale-95 text-center">가입 완료</button>
         </form>
+
+        <div id="consent_modal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/50 p-4">
+            <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col">
+                <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+                    <h3 id="consent_modal_title" class="font-black text-gray-800"></h3>
+                    <button type="button" onclick="closeConsentModal()" class="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-black">×</button>
+                </div>
+                <div id="consent_modal_body" class="p-4 overflow-y-auto text-xs text-gray-700 leading-relaxed whitespace-pre-line flex-1"></div>
+                <div class="p-4 border-t border-gray-100"><button type="button" onclick="closeConsentModal()" class="w-full py-3 bg-teal-600 text-white rounded-xl font-black text-sm">닫기</button></div>
+            </div>
+        </div>
+
         <script>
+        var consentContents = {
+            terms: { title: '이용약관', body: '제1조 (목적)\n이 약관은 바구니삼촌(이하 "당사")이 제공하는 구매대행·물류 서비스(이하 "서비스")의 이용 조건 및 절차, 당사와 이용자의 권리·의무를 정합니다.\n\n제2조 (정의)\n① "서비스"란 이용자의 주문 요청에 따라 당사가 상품을 구매·배송 대행하는 통합 물류 서비스를 말합니다.\n② "이용자"란 당사에 회원가입하여 서비스를 이용하는 자를 말합니다.\n\n제3조 (약관의 효력)\n① 약관은 서비스 화면에 게시하거나 기타의 방법으로 공지함으로써 효력이 발생합니다.\n② 당사는 필요한 경우 관련 법령을 위배하지 않는 범위에서 약관을 개정할 수 있으며, 변경된 약관은 적용일자 및 변경 내용을 명시하여 공지합니다.\n\n제4조 (서비스 이용)\n이용자는 회원가입 시 입력한 정보가 사실과 일치하도록 유지해야 하며, 부정 이용 시 서비스 이용이 제한될 수 있습니다.\n\n(이하 생략 — 실제 서비스 운영 시 법인·변호사 검토 후 보완하세요.)' },
+            ecommerce: { title: '전자상거래 이용 약관 및 유의사항', body: '[필수 동의 사항]\n\n본 서비스는 전자상거래법상 통신판매중개가 아닌 구매대행·물류 서비스입니다.\n\n① 이용자의 주문·결제는 당사에 대한 "구매 및 배송 대행 요청"으로 간주됩니다.\n② 당사는 이용자의 요청에 따라 상품을 대신 구매·수령 후 배송하며, 상품의 하자·분쟁 등은 공급자(판매자)와 이용자 간에 해결됩니다.\n③ 배송 불가 지역·품목은 주문 단계에서 안내되며, 회원가입은 배송 가능 여부와 무관하게 가능합니다.\n④ 전자상거래법 등 관련 법령이 정한 청약 철회·환불 등은 당사 정책 및 공급자 약관에 따릅니다.\n\n위 내용을 확인하였으며 이에 동의합니다.' },
+            privacy: { title: '개인정보처리방침', body: '1. 수집하는 개인정보 항목\n회원가입·주문 시 이름, 이메일, 휴대폰 번호, 주소, 공동현관 비밀번호 등 서비스 이용에 필요한 최소한의 정보를 수집합니다.\n\n2. 수집 목적\n서비스 제공, 주문·배송 처리, 고객 상담, 부정 이용 방지, 법령에 따른 의무 이행입니다.\n\n3. 보유 및 이용 기간\n회원 탈퇴 또는 동의 철회 시까지 보유하며, 전자상거래법 등 법령에 따라 보존할 필요가 있는 경우 해당 기간 동안 보관합니다.\n\n4. 제3자 제공\n이용자의 동의 없이 개인정보를 제3자에게 제공하지 않습니다. 단, 배송·결제 등 서비스 수행을 위해 필요한 제휴사에는 최소 정보가 제공될 수 있습니다.\n\n5. 이용자 권리\n이용자는 개인정보 열람·정정·삭제·처리 정지를 요청할 수 있으며, 요청 시 지체 없이 조치합니다.\n\n(실제 운영 시 전문가 검토 후 보완하세요.)' },
+            marketing: { title: '마케팅 수신 동의', body: '[선택] 마케팅 정보 수신 동의\n\n동의 시 당사 및 제휴사가 제공하는 다음 내용의 정보를 이메일·문자·알림 등으로 수신할 수 있습니다.\n\n· 이벤트·프로모션·할인 정보\n· 신규 서비스·상품 안내\n· 맞춤 추천 및 이용 유도 메시지\n\n수신 동의는 회원가입 후 마이페이지 등에서 언제든지 거부·철회할 수 있으며, 거부해도 서비스 이용에는 제한이 없습니다.' }
+        };
+        function openConsentModal(type) {
+            var d = consentContents[type];
+            if (!d) return;
+            document.getElementById('consent_modal_title').textContent = d.title;
+            document.getElementById('consent_modal_body').textContent = d.body;
+            document.getElementById('consent_modal').classList.remove('hidden');
+            document.getElementById('consent_modal').classList.add('flex');
+            document.body.style.overflow = 'hidden';
+        }
+        function closeConsentModal() {
+            document.getElementById('consent_modal').classList.add('hidden');
+            document.getElementById('consent_modal').classList.remove('flex');
+            document.body.style.overflow = '';
+        }
+        var btn = document.getElementById('consent_check_all_btn');
+        if (btn) btn.addEventListener('click', function() { document.querySelectorAll('.consent-cb').forEach(function(cb) { cb.checked = true; }); });
+        var modal = document.getElementById('consent_modal');
+        if (modal) modal.addEventListener('click', function(e) { if (e.target === this) closeConsentModal(); });
         window.updateDeliveryZoneBadge = function(addr) {
             if (!addr || !addr.trim()) { var el = document.getElementById('register-delivery-zone-badge'); if (el) el.textContent = ''; return; }
             fetch('/api/check_delivery_zone?address=' + encodeURIComponent(addr)).then(function(r){ return r.json(); }).then(function(d){
@@ -8978,6 +9104,24 @@ def _ensure_main_display_config_columns():
             pass
 
 
+def _ensure_event_board_post_notice_column():
+    """event_board_post 테이블에 is_notice 컬럼이 없으면 추가 (기존 DB 호환)."""
+    try:
+        from sqlalchemy import inspect
+        insp = inspect(db.engine)
+        if 'event_board_post' not in insp.get_table_names():
+            return
+        cols = [c['name'] for c in insp.get_columns('event_board_post')]
+        if 'is_notice' not in cols:
+            db.session.execute(text("ALTER TABLE event_board_post ADD COLUMN is_notice INTEGER DEFAULT 0"))
+            db.session.commit()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+
 def _ensure_delivery_zone_columns():
     """delivery_zone 테이블에 퀵지역·그 외 배송불가용 컬럼이 없으면 추가 (기존 DB 호환)."""
     try:
@@ -10291,6 +10435,10 @@ def admin_dashboard():
             q = q.limit(board_manage_p_limit)
         admin_partnership_inquiries = q.all()
 
+    admin_event_notices = []
+    if (tab == 'board_manage') and is_master:
+        admin_event_notices = EventBoardPost.query.filter_by(is_notice=True).order_by(EventBoardPost.id.desc()).all()
+
     admin_board_comments = []
     board_comment_board_type = ''
     if (tab == 'board_comments' or tab == 'board_manage') and is_master:
@@ -10592,7 +10740,18 @@ def admin_dashboard():
     # 3. HTML 템플릿 코드
     # 3. HTML 템플릿 코드 (카테고리 설정 탭 완벽 복구본)
     admin_html = """
-    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-6 md:py-10 xl:py-12 px-3 md:px-6 xl:px-8 font-black text-xs md:text-sm text-left min-h-screen bg-gray-50/30">
+    <style id="admin-mobile-optimize">
+    /* Admin 모바일 최적화: safe-area, 터치 영역, 테이블 가로 스크롤 */
+    @media (max-width: 768px) {
+        .admin-page { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+        .admin-page .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+        .admin-page input[type="text"], .admin-page input[type="email"], .admin-page input[type="number"], .admin-page input[type="datetime-local"],
+        .admin-page select, .admin-page textarea { min-height: 44px !important; }
+        .admin-page input[type="text"], .admin-page input[type="email"], .admin-page input[type="number"] { font-size: 16px !important; }
+        .admin-page button[type="submit"], .admin-page a[href].min-h-\[44px\] { min-height: 44px; touch-action: manipulation; }
+    }
+    </style>
+    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-6 md:py-10 xl:py-12 px-3 md:px-6 xl:px-8 font-black text-xs md:text-sm text-left min-h-screen bg-gray-50/30 admin-page">
         <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 md:mb-8">
             <h2 class="text-xl md:text-3xl font-black text-orange-700 italic">Admin Panel</h2>
             <div class="flex gap-2 flex-shrink-0">
@@ -11466,6 +11625,33 @@ def admin_dashboard():
                                         </tr>
                                         {% else %}
                                         <tr><td colspan="8" class="p-8 text-center text-gray-400">등록된 글이 없습니다.</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div>
+                            <h5 class="text-sm font-black text-gray-700 mb-3">이벤트 게시판</h5>
+                            <p class="text-[11px] text-gray-500 font-bold mb-2">이벤트 게시판 상단 공지. 공지 등록/수정은 이벤트 게시판 페이지에서도 가능합니다.</p>
+                            <div class="mb-4"><a href="/admin/board/event/notice/write" class="inline-block px-4 py-2 bg-amber-500 text-white rounded-xl text-[11px] font-black hover:bg-amber-600">📌 공지글 등록</a></div>
+                            <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-x-auto -mx-3 md:mx-0">
+                                <table class="w-full text-left text-[11px] min-w-[600px]">
+                                    <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-4">ID</th><th class="p-4">제목</th><th class="p-4">공지</th><th class="p-4">작성자</th><th class="p-4">작성일</th><th class="p-4">관리</th></tr></thead>
+                                    <tbody>
+                                        {% for p in admin_event_notices %}
+                                        <tr class="border-b border-gray-50 hover:bg-gray-50/50">
+                                            <td class="p-4">{{ p.id }}</td>
+                                            <td class="p-4 font-bold">{{ p.title or '-' }}</td>
+                                            <td class="p-4"><span class="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-black rounded">공지</span></td>
+                                            <td class="p-4">{{ p.user_name or '-' }}</td>
+                                            <td class="p-4">{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '-' }}</td>
+                                            <td class="p-4">
+                                                <a href="/admin/board/event/notice/{{ p.id }}/edit" class="text-teal-600 font-black mr-2">수정</a>
+                                                <form action="/admin/board/event/{{ p.id }}/notice" method="POST" class="inline" onsubmit="return confirm('공지를 해제하시겠습니까?');"><button type="submit" class="text-amber-600 font-black">공지 해제</button></form>
+                                            </td>
+                                        </tr>
+                                        {% else %}
+                                        <tr><td colspan="6" class="p-8 text-center text-gray-400">등록된 공지가 없습니다.</td></tr>
                                         {% endfor %}
                                     </tbody>
                                 </table>
@@ -15471,6 +15657,92 @@ def admin_partnership_notice_write():
 
 
 @login_required
+def admin_event_notice_write():
+    """관리자: 이벤트 게시판 공지글 등록."""
+    if not current_user.is_admin:
+        return redirect('/')
+    if request.method == 'POST':
+        title = (request.form.get('title') or '').strip()
+        if not title:
+            flash("제목을 입력해 주세요.")
+            return redirect(url_for('board_event'))
+        content = (request.form.get('content') or '').strip()
+        p = EventBoardPost(
+            user_id=current_user.id,
+            user_name=current_user.name or current_user.email or '관리자',
+            title=title[:200],
+            content=content or None,
+            is_notice=True
+        )
+        db.session.add(p)
+        db.session.commit()
+        flash("공지글이 등록되었습니다.")
+        return redirect(url_for('board_event'))
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-2xl mx-auto py-8 px-4 font-black text-left">
+            <a href="/board/event" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 이벤트 게시판</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">이벤트 게시판 공지글 등록</h1>
+            <p class="text-gray-500 text-sm mb-4">공지는 이벤트 게시판 상단에 노출됩니다.</p>
+            <form method="POST" action="/admin/board/event/notice/write" class="space-y-4">
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="공지 제목"></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="5" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="공지 내용"></textarea></div>
+                <button type="submit" class="w-full py-4 bg-amber-600 text-white rounded-xl font-black hover:bg-amber-700 transition">공지 등록</button>
+            </form>
+        </div>
+        """ + FOOTER_HTML
+    )
+
+
+@login_required
+def admin_event_notice_edit(eid):
+    """관리자: 이벤트 게시판 공지글 수정."""
+    if not current_user.is_admin:
+        return redirect('/')
+    p = EventBoardPost.query.get_or_404(eid)
+    if not p.is_notice:
+        flash("공지글만 수정할 수 있습니다.")
+        return redirect(url_for('board_event'))
+    if request.method == 'POST':
+        title = (request.form.get('title') or '').strip()
+        if not title:
+            flash("제목을 입력해 주세요.")
+            return redirect(url_for('admin_event_notice_edit', eid=eid))
+        p.title = title[:200]
+        p.content = (request.form.get('content') or '').strip() or None
+        db.session.commit()
+        flash("공지글이 수정되었습니다.")
+        return redirect(url_for('board_event'))
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-2xl mx-auto py-8 px-4 font-black text-left">
+            <a href="/board/event" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 이벤트 게시판</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">이벤트 게시판 공지글 수정</h1>
+            <form method="POST" action="/admin/board/event/notice/{{ eid }}/edit" class="space-y-4">
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" value="{{ post.title }}"></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="5" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ post.content or '' }}</textarea></div>
+                <button type="submit" class="w-full py-4 bg-amber-600 text-white rounded-xl font-black hover:bg-amber-700 transition">저장</button>
+            </form>
+        </div>
+        """ + FOOTER_HTML,
+        post=p,
+        eid=eid
+    )
+
+
+@login_required
+def admin_event_notice_toggle(eid):
+    """관리자: 이벤트 게시판 글 공지 설정/해제."""
+    if not current_user.is_admin:
+        return redirect('/')
+    p = EventBoardPost.query.get_or_404(eid)
+    p.is_notice = not p.is_notice
+    db.session.commit()
+    flash("공지로 설정되었습니다." if p.is_notice else "공지가 해제되었습니다.")
+    return redirect(url_for('board_event'))
+
+
+@login_required
 def admin_email_setup():
     """이메일 키(비밀번호) 받는 방법 안내. 관리자 전용."""
     if not current_user.is_admin:
@@ -17551,6 +17823,7 @@ def admin_orders_sales_excel():
         return redirect('/admin?tab=orders')
     df = pd.DataFrame(sales_table_rows, columns=['order_date', 'order_id', 'product_name', 'category', 'quantity', 'status'])
     df.columns = ['주문일시', '오더아이디', '판매상품명', '카테고리', '판매수량', '결제상태']
+    df = _dataframe_utf8_safe(df)
     out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
@@ -17562,23 +17835,24 @@ def admin_orders_sales_excel():
 
 
 def _pil_font_for_table(size=12):
-    """PIL 한글 지원 폰트 반환 (테이블 이미지용). 서버 환경별 경로 시도 후 (font_body, font_header) 반환."""
+    """PIL 한글 지원 폰트 반환 (테이블 이미지용). 한글 표시용으로만 사용 (Liberation/DejaVu 제외)."""
     from PIL import ImageFont
     root = os.path.dirname(os.path.abspath(__file__))
+    # 한글(CJK) 지원 폰트만 사용 (LiberationSans, DejaVuSans는 한글 미지원 → 글자 깨짐 방지)
     font_paths = [
         # Windows
         os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'malgun.ttf'),
         os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'gulim.ttc'),
         os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'batang.ttc'),
         os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'dotum.ttf'),
-        # 프로젝트 내 폰트 (배포 시 static/fonts/ 에 한글 ttf 추가 권장)
+        # 프로젝트 내 폰트 (배포 시 static/fonts/ 에 NanumGothic.ttf 추가 권장)
         os.path.join(root, 'static', 'fonts', 'NanumGothic.ttf'),
         os.path.join(root, 'static', 'fonts', 'malgun.ttf'),
         os.path.join(root, 'NanumGothic.ttf'),
         os.path.join(root, 'malgun.ttf'),
         'malgun.ttf',
         'NanumGothic.ttf',
-        # Linux (나눔/노토 등)
+        # Linux (나눔/노토 등 한글 지원)
         '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
         '/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf',
         '/usr/share/fonts/truetype/fonts-nanum/NanumGothic.ttf',
@@ -17586,8 +17860,7 @@ def _pil_font_for_table(size=12):
         '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
         '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
         '/usr/share/fonts/opentype/noto-cjk/NotoSansCJK-Regular.ttc',
-        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
         # macOS
         '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
         '/Library/Fonts/AppleGothic.ttf',
@@ -17596,12 +17869,38 @@ def _pil_font_for_table(size=12):
     for path in font_paths:
         if path and os.path.isfile(path):
             try:
-                f = ImageFont.truetype(path, size)
+                # .ttc(TrueType Collection)는 index=0으로 첫 번째 폰트 사용
+                if path.lower().endswith('.ttc'):
+                    f = ImageFont.truetype(path, size, index=0)
+                else:
+                    f = ImageFont.truetype(path, size)
                 return (f, f)
             except Exception:
                 continue
     f = ImageFont.load_default()
     return (f, f)
+
+
+def _safe_utf8_str(val):
+    """이미지/엑셀 출력용. bytes면 UTF-8 디코딩, None이면 빈 문자열. 글자 깨짐 방지."""
+    if val is None:
+        return ''
+    if isinstance(val, bytes):
+        try:
+            return val.decode('utf-8', errors='replace')
+        except Exception:
+            return ''
+    return str(val)
+
+
+def _dataframe_utf8_safe(df):
+    """엑셀 다운로드 전 DataFrame 문자열 컬럼 정규화 (한글 깨짐 방지)."""
+    if df is None or df.empty:
+        return df
+    for col in df.columns:
+        if df[col].dtype == object or str(df[col].dtype) == 'object':
+            df[col] = df[col].map(lambda x: _safe_utf8_str(x) if isinstance(x, (str, bytes)) else x)
+    return df
 
 
 def _pil_table_col_widths(headers, row_cells_list, font_header, font, padding=24, min_w=50, max_w=900):
@@ -17707,12 +18006,12 @@ def admin_orders_sales_detail_image():
     row_cells_list = []
     for row in sales_table_rows:
         row_cells_list.append([
-            str(row.get('order_date', '')),
-            (str(row.get('order_id', '')) or ''),
-            str(row.get('product_name', '')),
-            str(row.get('category', '')),
-            str(row.get('quantity', '')),
-            str(row.get('status', '')),
+            _safe_utf8_str(row.get('order_date', '')),
+            _safe_utf8_str(row.get('order_id', '')),
+            _safe_utf8_str(row.get('product_name', '')),
+            _safe_utf8_str(row.get('category', '')),
+            _safe_utf8_str(row.get('quantity', '')),
+            _safe_utf8_str(row.get('status', '')),
         ])
     col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font)
     cell_h = 32
@@ -17819,6 +18118,7 @@ def admin_orders_sales_summary_excel():
         return redirect('/admin?tab=orders')
     df = pd.DataFrame(product_summary_rows, columns=['category', 'product_name', 'total_quantity'])
     df.columns = ['품목(카테고리)', '판매상품명', '판매수량 총합계']
+    df = _dataframe_utf8_safe(df)
     out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
@@ -17859,12 +18159,12 @@ def admin_orders_delivery_summary_image():
     row_cells_list = []
     for row in delivery_rows:
         row_cells_list.append([
-            str(row.get('order_id', '')),
-            str(row.get('order_date', '')),
-            str(row.get('status', '')),
-            str(row.get('customer', '')),
-            str(row.get('address', '')),
-            str(row.get('items', '')),
+            _safe_utf8_str(row.get('order_id', '')),
+            _safe_utf8_str(row.get('order_date', '')),
+            _safe_utf8_str(row.get('status', '')),
+            _safe_utf8_str(row.get('customer', '')),
+            _safe_utf8_str(row.get('address', '')),
+            _safe_utf8_str(row.get('items', '')),
         ])
     col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font)
     cell_h = 32
@@ -17968,6 +18268,7 @@ def admin_orders_delivery_summary_excel():
         return redirect('/admin?tab=orders')
     df = pd.DataFrame(delivery_rows)
     df.columns = ['오더넘버', '주문일시', '상태', '고객정보', '배송지', '품목']
+    df = _dataframe_utf8_safe(df)
     out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w:
         df.to_excel(w, index=False)
@@ -18055,7 +18356,7 @@ def admin_orders_sales_summary_image():
     from PIL import ImageDraw, ImageFont
     font, font_header = _pil_font_for_table(14)
     headers = ['품목(카테고리)', '판매상품명', '판매수량 총합계']
-    row_cells_list = [[str(row.get('category', '')), str(row.get('product_name', '')), str(row.get('total_quantity', ''))] for row in product_summary_rows]
+    row_cells_list = [[_safe_utf8_str(row.get('category', '')), _safe_utf8_str(row.get('product_name', '')), _safe_utf8_str(row.get('total_quantity', ''))] for row in product_summary_rows]
     col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font)
     cell_h = 38
     img_w = sum(col_w)
@@ -18598,7 +18899,7 @@ with app.app_context():
     except Exception:
         db.session.rollback()
     # 게시판 공지 컬럼 (전체보기 시 상단 노출용)
-    for tbl, col in [('restaurant_request', 'is_notice'), ('delivery_request', 'is_notice'), ('partnership_inquiry', 'is_notice'), ('free_board', 'is_notice')]:
+    for tbl, col in [('restaurant_request', 'is_notice'), ('delivery_request', 'is_notice'), ('partnership_inquiry', 'is_notice'), ('free_board', 'is_notice'), ('event_board_post', 'is_notice')]:
         try:
             db.session.execute(text(f'ALTER TABLE {tbl} ADD COLUMN {col} INTEGER DEFAULT 0'))
             db.session.commit()

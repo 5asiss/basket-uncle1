@@ -246,21 +246,29 @@ def logi_admin_login():
             return redirect(url_for('logi.logi_admin_dashboard'))
         flash("로그인 정보가 일치하지 않습니다.")
     return render_template_string("""
-    <script src="https://cdn.tailwindcss.com"></script>
-    <body class="bg-slate-900 flex items-center justify-center min-h-screen p-6 text-white">
-        <div class="w-full max-w-sm bg-slate-800 p-10 rounded-[2.5rem] shadow-2xl text-center border border-slate-700">
-            <h1 class="text-3xl font-black text-green-500 mb-10 italic">B.UNCLE CONTROL</h1>
-            <p class="text-slate-400 mb-8 font-bold">배송 관제 시스템 보안 접속</p>
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>B.UNCLE LOGI - 로그인</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-slate-900 flex items-center justify-center min-h-screen min-h-[100dvh] p-4 sm:p-6 text-white safe-area-pb">
+        <div class="w-full max-w-sm bg-slate-800 p-6 sm:p-10 rounded-[2.5rem] shadow-2xl text-center border border-slate-700">
+            <h1 class="text-2xl sm:text-3xl font-black text-green-500 mb-8 sm:mb-10 italic">B.UNCLE CONTROL</h1>
+            <p class="text-slate-400 mb-6 sm:mb-8 font-bold text-sm">배송 관제 시스템 보안 접속</p>
             <form method="POST" class="space-y-4">
-                <input name="username" placeholder="Admin ID" class="w-full p-5 rounded-2xl bg-slate-700 text-white font-black border-none text-center" required>
-                <input type="password" name="password" placeholder="Password" class="w-full p-5 rounded-2xl bg-slate-700 text-white font-black border-none text-center" required>
-                <button class="w-full bg-green-600 text-white py-5 rounded-2xl font-black text-lg shadow-lg hover:bg-green-700 transition active:scale-95">시스템 접속하기</button>
+                <input name="username" placeholder="Admin ID" class="w-full p-4 sm:p-5 min-h-[48px] rounded-2xl bg-slate-700 text-white font-black border-none text-center text-base touch-manipulation" required>
+                <input type="password" name="password" placeholder="Password" class="w-full p-4 sm:p-5 min-h-[48px] rounded-2xl bg-slate-700 text-white font-black border-none text-center text-base touch-manipulation" required>
+                <button type="submit" class="w-full bg-green-600 text-white py-4 sm:py-5 min-h-[48px] rounded-2xl font-black text-base sm:text-lg shadow-lg hover:bg-green-700 transition active:scale-95 touch-manipulation">시스템 접속하기</button>
             </form>
             <div class="mt-8 pt-8 border-t border-slate-700">
-                <a href="/" class="text-slate-500 font-bold hover:text-white transition">쇼핑몰 메인으로 돌아가기</a>
+                <a href="/" class="text-slate-500 font-bold hover:text-white transition min-h-[44px] inline-flex items-center justify-center touch-manipulation">쇼핑몰 메인으로 돌아가기</a>
             </div>
         </div>
     </body>
+    </html>
     """)
 
 @logi_bp.route('/logout')
@@ -323,15 +331,19 @@ def logi_admin_dashboard():
     <!DOCTYPE html>
     <html lang="ko">
     <head>
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>바구니삼촌 LOGI - 관제</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
         <style>@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
-        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f8fafc; transition: font-size 0.2s; }
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f8fafc; transition: font-size 0.2s; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); padding-bottom: env(safe-area-inset-bottom); }
         .tab-active { border-bottom: 3px solid #16a34a; color: #16a34a; font-weight: 900; }
-        .btn-control { background: #1e293b; color: white; width: 45px; height: 45px; border-radius: 50%; display: flex; items-center; justify-center; font-bold; opacity: 0.8; position: fixed; bottom: 25px; right: 25px; z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        .btn-control { background: #1e293b; color: white; min-width: 44px; min-height: 44px; width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-bold; opacity: 0.9; position: fixed; bottom: max(25px, env(safe-area-inset-bottom)); right: max(25px, env(safe-area-inset-right)); z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.3); touch-action: manipulation; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        @media (max-width: 640px) {
+            .logi-nav-links { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; padding-bottom: 4px; }
+            .logi-nav-links a { flex-shrink: 0; }
+        }
         </style>
     </head>
     <body class="text-[12px]" id="app-body">
@@ -339,10 +351,10 @@ def logi_admin_dashboard():
             <button onclick="changeFontSize(-1)" class="w-full h-full text-xs text-center">A-</button>
             <button onclick="changeFontSize(1)" class="w-full h-full text-xs text-center">A+</button>
         </div>
-        <nav class="bg-white border-b min-h-14 flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3 sticky top-0 z-50 shadow-sm">
-            <div class="flex items-center gap-4 sm:gap-8 flex-wrap">
-                <h1 class="text-lg sm:text-xl font-black text-green-600 italic">B.UNCLE</h1>
-                <div class="flex flex-wrap gap-3 sm:gap-6 font-bold text-slate-400 text-[11px]">
+        <nav class="bg-white border-b min-h-14 flex flex-wrap items-center justify-between gap-2 sm:gap-3 px-3 sm:px-6 py-2 sm:py-3 sticky top-0 z-50 shadow-sm">
+            <div class="flex items-center gap-2 sm:gap-8 flex-wrap min-w-0 flex-1">
+                <h1 class="text-base sm:text-xl font-black text-green-600 italic shrink-0">B.UNCLE</h1>
+                <div class="flex flex-wrap gap-2 sm:gap-6 font-bold text-slate-400 text-[11px] logi-nav-links">
                     <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="min-h-[44px] flex items-center text-green-600 border-b-2 border-green-600 pb-1 touch-manipulation">배송관제</a>
                     <a href="{{ url_for('logi.logi_driver_mgmt') }}" class="min-h-[44px] flex items-center hover:text-green-600 transition touch-manipulation">기사관리</a>
                     <a href="{{ url_for('logi.logi_driver_path_map') }}" class="min-h-[44px] flex items-center hover:text-blue-500 transition touch-manipulation">배송지도</a>
@@ -356,7 +368,7 @@ def logi_admin_dashboard():
             </div>
         </nav>
 
-        <main class="p-4 max-w-[1400px] mx-auto">
+        <main class="p-3 sm:p-4 max-w-[1400px] mx-auto pb-8" style="padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));">
             <div class="grid grid-cols-3 md:grid-cols-5 gap-2 mb-4">
                 <div class="bg-white p-3 rounded-2xl shadow-sm border border-red-100 text-center">
                     <p class="text-[9px] font-black text-red-400 mb-0.5 uppercase">신규 주문</p>
@@ -425,8 +437,8 @@ def logi_admin_dashboard():
                 </div>
             </div>
 
-            <div class="bg-white p-3 rounded-xl border border-slate-100 shadow-sm mb-4 flex flex-wrap justify-between items-center gap-4">
-                <div class="flex gap-4 border-b w-full md:w-auto overflow-x-auto no-scrollbar whitespace-nowrap text-[11px] font-black tracking-tighter">
+            <div class="bg-white p-3 rounded-xl border border-slate-100 shadow-sm mb-4 flex flex-col sm:flex-row flex-wrap justify-between items-stretch sm:items-center gap-3 sm:gap-4">
+                <div class="flex gap-2 sm:gap-4 border-b w-full sm:w-auto overflow-x-auto no-scrollbar whitespace-nowrap text-[11px] font-black tracking-tighter min-h-[44px] items-center">
                     <a href="{{ url_for('logi.logi_admin_dashboard', status='all') }}" class="{% if current_status=='all' %}tab-active{% endif %} pb-1.5 px-1">전체</a>
                     <a href="{{ url_for('logi.logi_admin_dashboard', status='미배정') }}" class="{% if current_status=='미배정' %}tab-active{% endif %} pb-1.5 px-1 text-slate-300">미배정</a>
                     <a href="{{ url_for('logi.logi_admin_dashboard', status='배정완료') }}" class="{% if current_status=='배정완료' %}tab-active{% endif %} pb-1.5 px-1 text-blue-500">배정됨</a>
@@ -434,25 +446,28 @@ def logi_admin_dashboard():
                     <a href="{{ url_for('logi.logi_admin_dashboard', status='완료') }}" class="{% if current_status=='완료' %}tab-active{% endif %} pb-1.5 px-1 text-green-600">완료</a>
                     <a href="{{ url_for('logi.logi_admin_dashboard', status='보류') }}" class="{% if current_status=='보류' %}tab-active{% endif %} pb-1.5 px-1 text-yellow-600">보류</a>
                 </div>
-                <div class="flex items-center gap-3 flex-wrap">
-                    <input type="text" id="logi-chosung-search" placeholder="초성 검색 (주소·이름·품명·기사)" class="border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 bg-white text-[12px] outline-none focus:ring-2 focus:ring-green-400 w-48" maxlength="80">
-                    <select onchange="location.href='{{ url_for('logi.logi_admin_dashboard') }}?status={{current_status}}&category='+encodeURIComponent(this.value)" class="border border-slate-100 rounded-xl px-3 py-2 font-black text-slate-400 bg-slate-50 text-[11px] outline-none">
+                <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+                    <input type="text" id="logi-chosung-search" placeholder="초성 검색" class="border border-slate-200 rounded-xl px-3 sm:px-4 py-2 font-bold text-slate-700 bg-white text-[11px] sm:text-[12px] outline-none focus:ring-2 focus:ring-green-400 w-full min-w-0 sm:w-48 min-h-[44px] touch-manipulation" maxlength="80">
+                    <select onchange="location.href='{{ url_for('logi.logi_admin_dashboard') }}?status={{current_status}}&category='+encodeURIComponent(this.value)" class="border border-slate-100 rounded-xl px-3 py-2 font-black text-slate-400 bg-slate-50 text-[11px] outline-none min-h-[44px] touch-manipulation">
                         <option value="전체">카테고리 전체</option>
                         {% for sc in saved_cats %}<option value="{{sc}}" {% if current_cat == sc %}selected{% endif %}>{{sc}}</option>{% endfor %}
                     </select>
-                    <div class="bg-blue-50 p-2 rounded-2xl flex items-center gap-2 border border-blue-100">
-                        <select id="bulk-driver-select" class="border rounded-xl px-3 py-1.5 font-black text-blue-600 text-[11px] bg-white outline-none">
+                    <div class="bg-blue-50 p-2 rounded-2xl flex flex-wrap items-center gap-2 border border-blue-100">
+                        <select id="bulk-driver-select" class="border rounded-xl px-3 py-2 font-black text-blue-600 text-[11px] bg-white outline-none min-h-[44px] touch-manipulation">
                             <option value="">기사 일괄 배정</option>
                             {% for d in drivers %}<option value="{{d.id}}">{{d.name}}</option>{% endfor %}
                         </select>
-                        <button onclick="executeBulk('assign')" class="bg-blue-600 text-white px-4 py-1.5 rounded-xl font-black text-[11px] shadow-sm active:scale-95 transition hover:bg-blue-700">배정</button>
-                        <button onclick="executeBulk('hold')" class="bg-yellow-500 text-white px-4 py-1.5 rounded-xl font-black text-[11px] shadow-sm active:scale-95 transition">보류</button>
-                        <button onclick="executeBulk('delete')" class="bg-slate-800 text-white px-4 py-1.5 rounded-xl font-black text-[11px] shadow-sm active:scale-95 transition">삭제</button>
+                        <button type="button" onclick="executeBulk('assign')" class="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-xl font-black text-[11px] shadow-sm active:scale-95 transition hover:bg-blue-700 min-h-[44px] touch-manipulation">배정</button>
+                        <button type="button" onclick="executeBulk('hold')" class="bg-yellow-500 text-white px-3 sm:px-4 py-2 rounded-xl font-black text-[11px] shadow-sm active:scale-95 min-h-[44px] touch-manipulation">보류</button>
+                        <button type="button" onclick="executeBulk('delete')" class="bg-slate-800 text-white px-3 sm:px-4 py-2 rounded-xl font-black text-[11px] shadow-sm active:scale-95 min-h-[44px] touch-manipulation">삭제</button>
+                    </div>
+                    <div class="bg-teal-50 p-2 rounded-2xl flex flex-wrap items-center gap-2 border border-teal-200">
+                        <button type="button" onclick="printSelectedInvoices()" class="bg-teal-600 text-white px-3 sm:px-4 py-2 rounded-xl font-black text-[11px] shadow-sm hover:bg-teal-700 active:scale-95 min-h-[44px] touch-manipulation flex items-center gap-1"><i class="fas fa-print"></i> 선택 송장 일괄출력</button>
                     </div>
                 </div>
             </div>
 
-            <div class="bg-white rounded-[2rem] shadow-xl border border-slate-50 overflow-hidden mb-12 overflow-x-auto">
+            <div class="bg-white rounded-[2rem] shadow-xl border border-slate-50 overflow-hidden mb-12 overflow-x-auto -mx-3 sm:mx-0" style="-webkit-overflow-scrolling: touch;">
                 <table class="w-full text-left min-w-[640px]">
                     <thead class="bg-slate-800 border-b text-slate-400 font-black text-[10px] uppercase tracking-widest">
                         <tr>
@@ -464,7 +479,7 @@ def logi_admin_dashboard():
                     </thead>
                     <tbody class="divide-y divide-slate-100 bg-white" id="logi-task-tbody">
                         {% for t in tasks %}
-                        <tr class="logi-task-row {% if t.status == '결제취소' %}bg-red-50{% endif %} hover:bg-slate-50 transition" data-search="{{ ((t.address or '') + ' ' + (t.product_details or '') + ' ' + (t.customer_name or '') + ' ' + (t.driver_name or '') + ' ' + (t.category or ''))|e }}">
+                        <tr class="logi-task-row {% if t.status == '결제취소' %}bg-red-50{% endif %} hover:bg-slate-50 transition" data-search="{{ ((t.address or '') + ' ' + (t.product_details or '') + ' ' + (t.customer_name or '') + ' ' + (t.driver_name or '') + ' ' + (t.category or ''))|e }}" data-order-id="{{ t.order_id or '' }}">
                             <td class="py-3 px-2 text-center w-8">
                                 <input type="checkbox" class="task-check w-4 h-4 rounded border-slate-300 accent-green-600" value="{{t.id}}" data-category="{{ t.category }}">
                             </td>
@@ -500,7 +515,10 @@ def logi_admin_dashboard():
                                 <div id="log-view-{{t.id}}" class="hidden mt-2 p-3 bg-slate-50 rounded-xl text-[9px] text-slate-500 border border-dashed border-slate-200 leading-normal"></div>
                             </td>
                             <td class="py-3 px-2 text-right">
-                                <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" class="inline-block text-[10px] bg-slate-800 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap" onclick="return confirm('배정을 해제할까요?')">재배정</a>
+                                <div class="flex flex-col sm:flex-row gap-1.5 items-end sm:items-center justify-end">
+                                    {% if t.order_id %}<a href="/admin/order/print?ids={{ t.order_id }}" target="_blank" rel="noopener" class="inline-block text-[10px] bg-teal-600 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm hover:bg-teal-700 transition whitespace-nowrap min-h-[32px] flex items-center justify-center touch-manipulation"><i class="fas fa-print mr-1"></i>송장출력</a>{% endif %}
+                                    <a href="{{ url_for('logi.logi_cancel_assignment', tid=t.id) }}" class="inline-block text-[10px] bg-slate-800 text-white px-2.5 py-1.5 rounded-lg font-black shadow-sm active:scale-90 transition-transform whitespace-nowrap min-h-[32px] flex items-center justify-center touch-manipulation" onclick="return confirm('배정을 해제할까요?')">재배정</a>
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -610,6 +628,22 @@ def logi_admin_dashboard():
                 const result = await res.json();
                 if(result.success) { alert("처리가 완료되었습니다."); location.reload(); }
                 else { alert("오류 발생: " + result.error); }
+            }
+
+            function printSelectedInvoices() {
+                const checked = document.querySelectorAll('.task-check:checked');
+                const orderIds = new Set();
+                checked.forEach(function(cb) {
+                    const row = cb.closest('tr');
+                    const oid = row && row.getAttribute('data-order-id');
+                    if (oid && oid.trim()) orderIds.add(oid.trim());
+                });
+                const ids = Array.from(orderIds);
+                if (ids.length === 0) {
+                    alert('송장 출력할 주문을 선택해 주세요. (선택한 행 중 오더가 있는 건만 출력됩니다.)');
+                    return;
+                }
+                window.open('/admin/order/print?ids=' + ids.join(','), '_blank', 'width=800,height=900');
             }
         </script>
         <div id="photo-modal" class="fixed inset-0 bg-black/90 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
@@ -814,11 +848,14 @@ def logi_driver_work():
         }
         /* 기사님 가독성을 위한 큼직한 카드 스타일 */
         .task-card {
-            background: #1e293b; border-radius: 1.5rem;
-            padding: 1.5rem; border: 1px solid #334155;
-            margin-bottom: 1.25rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+            background: #1e293b; border-radius: 1.25rem;
+            padding: 1rem 1.25rem; border: 1px solid #334155;
+            margin-bottom: 1rem; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
         }
-        .address-highlight { color: #ffffff; font-weight: 900; line-height: 1.2; font-size: 24px; }
+        @media (min-width: 640px) {
+            .task-card { padding: 1.5rem; border-radius: 1.5rem; margin-bottom: 1.25rem; }
+        }
+        .address-highlight { color: #ffffff; font-weight: 900; line-height: 1.2; font-size: clamp(16px, 5vw, 24px); }
         .product-badge { 
     background: #064e3b; 
     color: #34d399; 
@@ -1416,12 +1453,12 @@ def logi_driver_mgmt():
     <html lang="ko">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>기사관리 - B.UNCLE Logi</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
-    <body class="bg-slate-50 p-4 sm:p-10 min-h-screen">
+    <body class="bg-slate-50 p-4 sm:p-10 min-h-screen min-h-[100dvh]" style="padding-left: calc(1rem + env(safe-area-inset-left)); padding-right: calc(1rem + env(safe-area-inset-right)); padding-bottom: calc(2rem + env(safe-area-inset-bottom));">
     <div class="max-w-md mx-auto">
         <nav class="mb-6 sm:mb-8">
             <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="inline-flex items-center min-h-[44px] text-green-600 font-black text-sm touch-manipulation">
@@ -1547,18 +1584,14 @@ def logi_driver_payout_page():
     <html lang="ko">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>기사 배송료 지급 - B.UNCLE Logi</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
-    <body class="bg-slate-50 p-4 sm:p-8 min-h-screen">
+    <body class="bg-slate-50 p-4 sm:p-8 min-h-screen min-h-[100dvh]" style="padding-bottom: calc(2rem + env(safe-area-inset-bottom));">
         <div class="max-w-3xl mx-auto">
-            <nav class="mb-6">
-                <a href="{{ url_for('logi.logi_admin_dashboard') }}" class="inline-flex items-center text-green-600 font-black text-sm">
-                    <i class="fas fa-arrow-left mr-2"></i>배송관제로 돌아가기
-                </a>
-            </nav>
+            <nav class="mb-6"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="inline-flex items-center min-h-[44px] text-green-600 font-black text-sm touch-manipulation"><i class="fas fa-arrow-left mr-2"></i>배송관제로 돌아가기</a></nav>
 
             <h1 class="text-2xl sm:text-3xl font-black text-slate-800 mb-4">기사 배송료 지급 현황</h1>
             <p class="text-[11px] text-slate-500 font-bold mb-4">
@@ -1567,17 +1600,17 @@ def logi_driver_payout_page():
             </p>
 
             <form method="GET" class="flex flex-wrap items-end gap-3 mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                <div class="flex flex-col">
+                <div class="flex flex-col flex-1 min-w-[120px]">
                     <label class="text-[10px] text-slate-500 font-black uppercase mb-1">시작일</label>
-                    <input type="date" name="start" value="{{ start_str }}" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold">
+                    <input type="date" name="start" value="{{ start_str }}" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-h-[44px] touch-manipulation">
                 </div>
-                <div class="flex flex-col">
+                <div class="flex flex-col flex-1 min-w-[120px]">
                     <label class="text-[10px] text-slate-500 font-black uppercase mb-1">종료일</label>
-                    <input type="date" name="end" value="{{ end_str }}" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold">
+                    <input type="date" name="end" value="{{ end_str }}" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-h-[44px] touch-manipulation">
                 </div>
-                <div class="flex flex-col">
+                <div class="flex flex-col flex-1 min-w-[120px]">
                     <label class="text-[10px] text-slate-500 font-black uppercase mb-1">기사</label>
-                    <select name="driver_id" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-w-[120px]">
+                    <select name="driver_id" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-w-0 min-h-[44px] touch-manipulation">
                         <option value="">전체</option>
                         {% for d in drivers %}
                         <option value="{{ d.id }}" {% if driver_id == d.id %}selected{% endif %}>{{ d.name }}</option>
@@ -1586,17 +1619,17 @@ def logi_driver_payout_page():
                 </div>
                 <div class="flex flex-col">
                     <label class="text-[10px] text-slate-500 font-black uppercase mb-1">지급상태</label>
-                    <select name="pay_status" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold">
+                    <select name="pay_status" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-h-[44px] touch-manipulation">
                         <option value="">전체</option>
                         <option value="미지급" {% if pay_status == '미지급' %}selected{% endif %}>미지급</option>
                         <option value="지급완료" {% if pay_status == '지급완료' %}selected{% endif %}>지급완료</option>
                     </select>
                 </div>
-                <div class="flex flex-col">
+                <div class="flex flex-col flex-1 min-w-[100px]">
                     <label class="text-[10px] text-slate-500 font-black uppercase mb-1">품목 검색</label>
-                    <input type="text" name="q" value="{{ item_keyword }}" placeholder="품목/메모 검색" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-w-[160px]">
+                    <input type="text" name="q" value="{{ item_keyword }}" placeholder="품목 검색" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold min-w-0 min-h-[44px] touch-manipulation">
                 </div>
-                <button type="submit" class="px-4 py-2 rounded-xl bg-green-600 text-white text-xs font-black">
+                <button type="submit" class="px-4 py-2 min-h-[44px] rounded-xl bg-green-600 text-white text-xs font-black touch-manipulation">
                     조회
                 </button>
             </form>
@@ -1733,26 +1766,34 @@ def logi_admin_users_mgmt():
 
     users = AdminUser.query.all()
     html = """
-    <script src="https://cdn.tailwindcss.com"></script>
-    <body class="bg-slate-50 p-6 font-bold text-slate-800">
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>ADMIN 설정 - B.UNCLE Logi</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-50 p-4 sm:p-6 font-bold text-slate-800 min-h-[100dvh]" style="padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));">
         <div class="max-w-md mx-auto">
-            <nav class="mb-8"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600"><i class="fas fa-arrow-left mr-2"></i>돌아가기</a></nav>
-            <h2 class="text-2xl font-black mb-8 italic">ADMIN SETTINGS</h2>
+            <nav class="mb-6 sm:mb-8"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="inline-flex items-center min-h-[44px] text-green-600 font-black touch-manipulation"><i class="fas fa-arrow-left mr-2"></i>돌아가기</a></nav>
+            <h2 class="text-xl sm:text-2xl font-black mb-6 sm:mb-8 italic">ADMIN SETTINGS</h2>
             
-            <form method="POST" class="bg-white p-6 rounded-[2rem] shadow-xl border mb-10 space-y-4">
+            <form method="POST" class="bg-white p-5 sm:p-6 rounded-[2rem] shadow-xl border mb-8 sm:mb-10 space-y-4">
                 <p class="text-xs text-slate-400 uppercase tracking-widest mb-2">신규 관리자 추가</p>
-                <input name="new_username" placeholder="아이디" class="w-full p-4 rounded-2xl bg-slate-50 border-none text-sm" required>
-                <input name="new_password" placeholder="비밀번호" class="w-full p-4 rounded-2xl bg-slate-50 border-none text-sm" required>
-                <button class="w-full bg-slate-800 text-white py-4 rounded-2xl font-black shadow-lg">관리자 등록</button>
+                <input name="new_username" placeholder="아이디" class="w-full p-4 min-h-[48px] rounded-2xl bg-slate-50 border-none text-sm touch-manipulation" required>
+                <input name="new_password" type="password" placeholder="비밀번호" class="w-full p-4 min-h-[48px] rounded-2xl bg-slate-50 border-none text-sm touch-manipulation" required>
+                <button type="submit" class="w-full bg-slate-800 text-white py-4 min-h-[48px] rounded-2xl font-black shadow-lg touch-manipulation">관리자 등록</button>
             </form>
 
             <div class="space-y-3">
                 <p class="text-xs text-slate-400 uppercase tracking-widest px-2">현재 관리자 목록</p>
                 {% for u in users %}
-                <div class="bg-white p-5 rounded-2xl border flex justify-between items-center shadow-sm">
-                    <span>{{ u.username }}</span>
+                <div class="bg-white p-4 sm:p-5 rounded-2xl border flex justify-between items-center shadow-sm min-h-[52px]">
+                    <span class="font-black text-slate-800">{{ u.username }}</span>
                     {% if u.username != 'admin' %}
-                    <a href="{{ url_for('logi.logi_delete_admin', uid=u.id) }}" class="text-red-300 hover:text-red-500 text-xs">삭제</a>
+                    <a href="{{ url_for('logi.logi_delete_admin', uid=u.id) }}" class="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-red-300 hover:text-red-500 text-xs touch-manipulation" onclick="return confirm('삭제할까요?');">삭제</a>
                     {% else %}
                     <span class="text-slate-300 text-[10px]">MASTER</span>
                     {% endif %}
@@ -1760,34 +1801,8 @@ def logi_admin_users_mgmt():
                 {% endfor %}
             </div>
         </div>
-        <div id="photo-modal" class="fixed inset-0 bg-black/80 z-[6000] hidden flex flex-col items-center justify-center p-4" onclick="closePhoto()">
-    <div class="relative max-w-2xl w-full">
-        <img id="modal-img" src="" class="w-full rounded-[2rem] shadow-2xl border-4 border-white/20">
-        <button class="absolute -top-12 right-0 text-white text-3xl font-black">&times; 닫기</button>
-    </div>
-</div>
-
-<script>
-    // 사진 보기 함수
-    async function viewPhoto(tid) {
-        const res = await fetch('{{ url_for("logi.logi_get_photo", tid=0) }}'.replace('0', tid));
-        const data = await res.json();
-        if(data.photo) {
-            document.getElementById('modal-img').src = data.photo;
-            document.getElementById('photo-modal').classList.remove('hidden');
-        } else {
-            alert("저장된 사진이 없습니다.");
-        }
-    }
-
-    function closePhoto() {
-        document.getElementById('photo-modal').classList.add('hidden');
-        document.getElementById('modal-img').src = "";
-    }
-    
-    // (이하 기존 스크립트...)
-</script>
     </body>
+    </html>
     """
     return render_template_string(html, users=users)
 
@@ -1804,15 +1819,24 @@ def logi_driver_path_map():
     if not session.get('admin_logged_in'): return redirect(url_for('logi.logi_admin_login'))
     tasks = DeliveryTask.query.filter(DeliveryTask.status == '완료', DeliveryTask.completed_at >= get_kst().replace(hour=0,minute=0,second=0)).all()
     return render_template_string("""
-    <script src="https://cdn.tailwindcss.com"></script>
-    <body class="bg-slate-50 p-6">
-        <nav class="mb-6"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="text-green-600 font-black"><i class="fas fa-arrow-left mr-2"></i>돌아가기</a></nav>
-        <h2 class="text-2xl font-black mb-6 italic uppercase tracking-tighter">Delivery Path Map</h2>
-        <div id="map" style="width:100%;height:500px;" class="rounded-[3rem] border shadow-2xl bg-white flex items-center justify-center text-slate-300 font-black">
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+        <title>배송지도 - B.UNCLE Logi</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-slate-50 p-4 sm:p-6 min-h-[100dvh]" style="padding-bottom: env(safe-area-inset-bottom);">
+        <nav class="mb-4 sm:mb-6"><a href="{{ url_for('logi.logi_admin_dashboard') }}" class="inline-flex items-center min-h-[44px] text-green-600 font-black touch-manipulation"><i class="fas fa-arrow-left mr-2"></i>돌아가기</a></nav>
+        <h2 class="text-xl sm:text-2xl font-black mb-4 sm:mb-6 italic uppercase tracking-tighter">Delivery Path Map</h2>
+        <div id="map" style="width:100%;height:min(400px,60vh);min-height:300px;" class="rounded-2xl sm:rounded-[3rem] border shadow-2xl bg-white flex items-center justify-center text-slate-300 font-black text-sm sm:text-base">
             📍 Kakao Maps API 연동 준비 완료. <br> 등록된 주소 좌표 분석 중...
         </div>
-        <div class="mt-8 space-y-3">
-            {% for t in tasks %}<div class="text-[11px] bg-white p-4 rounded-[1.5rem] border font-black shadow-sm flex items-center gap-3">📍 {{t.address}} <span class="text-slate-300">({{t.driver_name}})</span></div>{% endfor %}
+        <div class="mt-6 sm:mt-8 space-y-3">
+            {% for t in tasks %}<div class="text-[11px] bg-white p-3 sm:p-4 rounded-xl sm:rounded-[1.5rem] border font-black shadow-sm flex items-center gap-3 min-h-[44px]">📍 {{t.address}} <span class="text-slate-300">({{t.driver_name}})</span></div>{% endfor %}
         </div>
     </body>
+    </html>
     """, tasks=tasks)

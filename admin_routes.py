@@ -58,6 +58,9 @@ def register_admin_routes(app):
         admin_partnership_hide,
         admin_partnership_notice_toggle,
         admin_partnership_notice_write,
+        admin_event_notice_write,
+        admin_event_notice_edit,
+        admin_event_notice_toggle,
         admin_email_setup,
         admin_seller_order_preview,
         admin_seller_send_manual_email,
@@ -172,6 +175,9 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/board/partnership/<int:pid>/hide', view_func=login_required(admin_partnership_hide), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/partnership/<int:pid>/notice', view_func=login_required(admin_partnership_notice_toggle), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/partnership/notice/write', view_func=login_required(admin_partnership_notice_write), methods=['GET', 'POST'])
+    admin_bp.add_url_rule('/admin/board/event/notice/write', view_func=login_required(admin_event_notice_write), methods=['GET', 'POST'])
+    admin_bp.add_url_rule('/admin/board/event/notice/<int:eid>/edit', view_func=login_required(admin_event_notice_edit), methods=['GET', 'POST'])
+    admin_bp.add_url_rule('/admin/board/event/<int:eid>/notice', view_func=login_required(admin_event_notice_toggle), methods=['POST'])
     # email / seller
     admin_bp.add_url_rule('/admin/email_setup', view_func=login_required(admin_email_setup))
     admin_bp.add_url_rule('/admin/seller/order_preview', view_func=login_required(admin_seller_order_preview))

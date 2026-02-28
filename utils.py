@@ -764,9 +764,18 @@ def get_daangn_today_message(template=None, extra_line=""):
     return msg
 
 
+# 메인 페이지 로딩 시 매 요청마다 실행되지 않도록 재고 리셋 호출 억제 (최소 2분 간격)
+_last_stock_reset_run = None
+
+
 def run_product_stock_reset():
     """마감일 없고 재고 초기화 시간이 설정된 상품: 해당 시각이 지나면 당일 1회 재고를 reset_to_quantity로 복원."""
+    global _last_stock_reset_run
     now = datetime.now()
+    if _last_stock_reset_run is not None and (now - _last_stock_reset_run).total_seconds() < 120:
+        return
+    _last_stock_reset_run = now
+
     today = now.date()
     try:
         products = Product.query.filter(
