@@ -7886,7 +7886,7 @@ def order_payment():
         </p>
     </div>
 
-    <script src="https://js.tosspayments.com/v1/payment"></script>
+   <script src="https://js.tosspayments.com/v1/payment"></script>
     <script>
     // 1. 토스페이먼츠 초기화
     const tossPayments = TossPayments("{TOSS_CLIENT_KEY}");
@@ -7910,43 +7910,36 @@ def order_payment():
 
                 const paymentAmount = Number({ total });
                 const taxFreeAmount = Math.min(paymentAmount, Number({ tax_free }));
-               
-               
+                
                 // ★ 고유한 주문번호 생성을 위해 현재 시간(타임스탬프)을 뒤에 붙여줍니다.
-                    var uniqueOrderId = '{ order_id }_' + new Date().getTime();
+                var uniqueOrderId = '{ order_id }_' + new Date().getTime();
 
-                    tossPayments
-                        .requestPayment('CARD', {{
-                            amount: paymentAmount,
-                            taxFreeAmount: taxFreeAmount,
-                            orderId: uniqueOrderId,  // ← 기존 '{ order_id }' 대신 변수로 교체!
-                            orderName: '{ order_name }',
-                            customerEmail: '{ current_user.email }',
-                            customerName: '{ current_user.name }',
-                            successUrl: window.location.origin + '/payment/success',
-                            failUrl: window.location.origin + '/payment/fail'
-                        }}).catch(function (error) {{
-                            if (error.code === 'USER_CANCEL') {{
-                                // 사용자가 결제창을 닫거나 취소한 경우 알림 생략
-                            }} else {{
-                                alert("결제 오류: " + error.message);
-                            }}
-                            isProcessing = false;
-                            window.location.reload(); // ★ 필수: 취소/에러 시 화면을 강제 새로고침하여 모듈 초기화
-                        }});
-                    .catch(function (error) {{
-                        if (error.code === 'USER_CANCEL') {{
-                            alert('사용자가 결제를 취소했습니다.');
-                        }} else {{
-                            alert('결제 오류: ' + error.message);
-                        }}
-                    }})
-                    .finally(function () {{
-                        isProcessing = false;
-                        paymentButton.disabled = false;
-                        paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
-                        paymentButton.innerHTML = defaultLabel;
-                    }});
+                tossPayments.requestPayment('CARD', {{
+                    amount: paymentAmount,
+                    taxFreeAmount: taxFreeAmount,
+                    orderId: uniqueOrderId,  // ← 기존 '{ order_id }' 대신 변수로 교체!
+                    orderName: '{ order_name }',
+                    customerEmail: '{ current_user.email }',
+                    customerName: '{ current_user.name }',
+                    successUrl: window.location.origin + '/payment/success',
+                    failUrl: window.location.origin + '/payment/fail'
+                }}).catch(function (error) {{
+                    if (error.code === 'USER_CANCEL') {{
+                        // 사용자가 결제창을 닫거나 취소한 경우
+                        console.log('사용자가 결제를 취소했습니다.');
+                    }} else {{
+                        alert("결제 오류: " + error.message);
+                    }}
+                    // ★ 필수: 취소/에러 시 화면을 강제 새로고침하여 토스 모듈 완전 초기화
+                    window.location.reload(); 
+                }}).finally(function () {{
+                    // 버튼 UI 원래 상태로 복구 (새로고침 되기 전 찰나의 순간)
+                    isProcessing = false;
+                    paymentButton.disabled = false;
+                    paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
+                    paymentButton.innerHTML = defaultLabel;
+                }});
+
             }} catch (err) {{
                 alert('시스템 오류가 발생했습니다: ' + err.message);
                 isProcessing = false;
