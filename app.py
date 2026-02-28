@@ -55,7 +55,8 @@ app.register_blueprint(logi_bp)
 
 @app.before_request
 def store_utm_in_session():
-    """광고 유입 추적: URL에 UTM 파라미터가 있으면 세션에 저장 (회원가입·주문 시 DB에 반영)"""
+    """광고 유입 추적: URL에 UTM 파라미터가 있으면 세션에 저장 (회원가입·주문 시 DB에 반영).
+    현재: 방문할 때마다 있으면 덮어씀(last-touch). 첫 유입만 쓰려면 아래에서 session에 키가 없을 때만 저장하도록 변경."""
     for key in ('utm_source', 'utm_medium', 'utm_campaign'):
         val = request.args.get(key)
         if val is not None and str(val).strip():
@@ -158,6 +159,9 @@ from models import (
     MainDisplayConfig,
     MemberGradeConfig, PointConfig, PointLog, MarketingCost, Review, ReviewVote, UserConsent, Settlement,
     POINT_TYPE_ACCUMULATED, POINT_TYPE_EVENT, POINT_TYPE_CASH,
+    EventPointRequest,
+    ShareLink,
+    EventBoardPost,
 )
 
 # (모델 클래스는 models.py에 정의됨)
@@ -762,6 +766,20 @@ def _sync_user_points(user_obj):
     user_obj.points = total
 
 
+def apply_welcome_event_points(user_obj):
+    """첫 가입 시 이벤트 포인트 자동 지급. PointConfig의 welcome_event_points(원) 설정값만큼 지급. 0이면 미지급."""
+    if not user_obj:
+        return
+    amount = _get_point_config_val('welcome_event_points', 0)
+    if amount <= 0:
+        return
+    _ensure_user_point_columns(user_obj)
+    cur = getattr(user_obj, 'points_event', 0) or 0
+    setattr(user_obj, 'points_event', cur + amount)
+    db.session.add(PointLog(user_id=user_obj.id, amount=amount, point_type=POINT_TYPE_EVENT, memo='가입 축하 이벤트'))
+    _sync_user_points(user_obj)
+
+
 def _ensure_user_point_columns(user_obj):
     """기존에 points만 있고 3종 컬럼이 0인 경우, points를 적립포인트로 간주해 동기화."""
     if not user_obj:
@@ -1250,6 +1268,7 @@ HEADER_HTML = """
             <a href="/board/delivery-request" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">배송요청</a>
             <a href="/board/partnership" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">제휴문의</a>
             <a href="/board/free" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">자유게시판</a>
+            <a href="/board/event" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">이벤트 게시판</a>
         </nav>
     </div>
     <nav class="bg-white/98 backdrop-blur-xl border-b border-stone-100 sticky top-0 z-50 shadow-[0_1px_0_0_rgba(0,0,0,0.03)] mobile-px">
@@ -2897,16 +2916,19 @@ def index():
     content = """
 <style>
 /* ========== 메인 페이지 전용 프리미엄 스타일 ========== */
-.page-main { --hero-bg: linear-gradient(165deg, #0c1222 0%, #1a2744 35%, #0f172a 70%, #020617 100%); }
+.page-main { --hero-bg: linear-gradient(165deg, #0c1222 0%, #1a2744 35%, #0f172a 70%, #020617 100%); overflow-x: hidden; }
 .page-main .hero-wrap {
     background: var(--hero-bg);
     color: #f8fafc;
-    padding: clamp(4rem, 12vw, 8rem) 1.5rem;
+    padding: clamp(2rem, 8vw, 8rem) 1rem clamp(2.5rem, 10vw, 6rem);
     position: relative;
     overflow: hidden;
-    min-height: 70vh;
+    min-height: 50vh;
     display: flex;
     align-items: center;
+}
+@media (min-width: 768px) {
+    .page-main .hero-wrap { min-height: 70vh; padding: clamp(4rem, 12vw, 8rem) 1.5rem; }
 }
 .page-main .hero-wrap::before {
     content: '';
@@ -2926,22 +2948,24 @@ def index():
 }
 .page-main .hero-inner { position: relative; z-index: 1; max-width: 56rem; margin: 0 auto; text-align: center; }
 .page-main .hero-label {
-    font-size: clamp(0.65rem, 1.5vw, 0.8rem);
+    font-size: clamp(0.6rem, 1.5vw, 0.8rem);
     font-weight: 800;
-    letter-spacing: 0.35em;
+    letter-spacing: 0.2em;
     text-transform: uppercase;
     color: rgba(134, 239, 172, 0.9);
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
     display: inline-block;
 }
+@media (min-width: 768px) { .page-main .hero-label { letter-spacing: 0.35em; margin-bottom: 1.5rem; } }
 .page-main .hero-title {
-    font-size: clamp(1.75rem, 5vw, 3.75rem);
+    font-size: clamp(1.35rem, 5vw, 3.75rem);
     font-weight: 900;
-    line-height: 1.1;
+    line-height: 1.2;
     letter-spacing: -0.03em;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
     color: #f1f5f9;
 }
+@media (min-width: 768px) { .page-main .hero-title { margin-bottom: 1.5rem; } }
 .page-main .hero-title .accent { color: #4ade80; font-weight: 900; letter-spacing: -0.02em; }
 .page-main .hero-divider {
     width: 4rem;
@@ -2951,28 +2975,34 @@ def index():
     border-radius: 2px;
 }
 .page-main .hero-desc {
-    font-size: clamp(0.9rem, 1.8vw, 1.15rem);
+    font-size: clamp(0.8rem, 1.8vw, 1.15rem);
     color: rgba(226, 232, 240, 0.85);
-    line-height: 1.7;
+    line-height: 1.6;
     max-width: 36rem;
-    margin: 0 auto 2.5rem;
+    margin: 0 auto 1.5rem;
     font-weight: 600;
 }
+@media (min-width: 768px) { .page-main .hero-desc { margin-bottom: 2.5rem; } }
 .page-main .hero-desc .highlight { color: #e2e8f0; text-decoration: underline; text-underline-offset: 6px; text-decoration-color: rgba(45, 212, 191, 0.8); }
 .page-main .hero-cta {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 1rem 2.25rem;
+    min-height: 48px;
+    min-width: 180px;
+    padding: 0.875rem 1.5rem;
     font-weight: 800;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     color: #fff;
     background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
     border-radius: 9999px;
     box-shadow: 0 4px 20px rgba(13, 148, 136, 0.35), 0 1px 0 rgba(255,255,255,0.1) inset;
     transition: transform 0.2s ease, box-shadow 0.25s ease;
+    -webkit-tap-highlight-color: transparent;
 }
+@media (min-width: 768px) { .page-main .hero-cta { padding: 1rem 2.25rem; font-size: 0.95rem; min-height: auto; min-width: auto; } }
 .page-main .hero-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(13, 148, 136, 0.45); }
+.page-main .hero-cta:active { transform: scale(0.98); }
 .page-main .hero-link {
     color: rgba(248, 250, 252, 0.7);
     font-weight: 700;
@@ -2983,14 +3013,20 @@ def index():
 }
 .page-main .hero-link:hover { color: #fff; border-color: rgba(255,255,255,0.5); }
 .page-main #products {
-    max-width: 100rem;
+    max-width: 100%;
     margin: 0 auto;
-    padding: clamp(3rem, 8vw, 5rem) 1.5rem;
+    padding: 1rem 0.75rem clamp(3rem, 8vw, 5rem);
+    box-sizing: border-box;
 }
+@media (min-width: 640px) { .page-main #products { padding-left: 1rem; padding-right: 1rem; } }
 @media (min-width: 1280px) {
-    .page-main #products { padding-left: 3rem; padding-right: 3rem; }
+    .page-main #products { padding: clamp(3rem, 8vw, 5rem) 1.5rem; padding-left: 3rem; padding-right: 3rem; }
 }
 .page-main .product-card .p-3 { }
+@media (max-width: 767px) {
+    .page-main .section-title { font-size: 1rem; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+    .page-main .section-title .bar { height: 1.25rem; }
+}
 @media (min-width: 1024px) {
     .page-main .product-card h3 { font-size: 0.9375rem; }
     .page-main .product-card .price { font-size: 1.15rem; }
@@ -3035,8 +3071,10 @@ def index():
 .page-main .product-card:hover { transform: translateY(-6px); box-shadow: 0 20px 50px rgba(0,0,0,0.08); border-color: #d6d3d1; }
 .page-main .product-card .price { font-weight: 900; color: #0f766e; letter-spacing: -0.02em; }
 .page-main .product-card .add-btn {
-    width: 2.5rem;
-    height: 2.5rem;
+    min-width: 44px;
+    min-height: 44px;
+    width: 2.75rem;
+    height: 2.75rem;
     border-radius: 0.75rem;
     background: linear-gradient(135deg, #0d9488, #0f766e);
     color: #fff;
@@ -3045,8 +3083,10 @@ def index():
     justify-content: center;
     box-shadow: 0 4px 12px rgba(13, 148, 136, 0.3);
     transition: transform 0.2s, box-shadow 0.2s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
 }
-@media (min-width: 768px) { .page-main .product-card .add-btn { width: 3.5rem; height: 3.5rem; border-radius: 1.25rem; } }
+@media (min-width: 768px) { .page-main .product-card .add-btn { width: 3.5rem; height: 3.5rem; min-width: 3.5rem; min-height: 3.5rem; border-radius: 1.25rem; } }
 .page-main .product-card .add-btn:hover { transform: scale(1.05); box-shadow: 0 6px 18px rgba(13, 148, 136, 0.4); }
 .page-main .product-card .add-btn:active { transform: scale(0.96); }
 </style>
@@ -3064,9 +3104,9 @@ def index():
             바구니삼촌은 재고를 쌓아두는 판매처가 아닌, <br class="hidden md:block">
             이용자의 요청에 따라 <span class="highlight">구매와 배송을 책임 대행</span>하는 물류 인프라입니다.
         </p>
-        <div class="flex flex-col md:flex-row justify-center items-center gap-6">
+        <div class="flex flex-col md:flex-row justify-center items-center gap-4 md:gap-6">
             <a href="#products" class="hero-cta">대행 서비스 이용하기</a>
-            <a href="/about" class="hero-link">6PL 구매대행이란? <i class="fas fa-arrow-right ml-2"></i></a>
+            <a href="/about" class="hero-link py-2 min-h-[44px] inline-flex items-center justify-center md:min-h-0 md:py-0">6PL 구매대행이란? <i class="fas fa-arrow-right ml-2"></i></a>
         </div>
     </div>
 </div>
@@ -3079,22 +3119,22 @@ def index():
         </div>
         <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2 md:gap-3">
             {% for cat, prods in grouped_products.items() %}
-            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-md transition-all text-center">
+            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-md active:scale-[0.98] transition-all text-center touch-manipulation">
                 <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-teal-50 flex items-center justify-center text-teal-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-large"></i></span>
-                <span class="text-[10px] md:text-xs font-black text-slate-700 leading-tight">{{ cat.name }}</span>
+                <span class="text-[10px] md:text-xs font-black text-slate-700 leading-tight line-clamp-2">{{ cat.name }}</span>
                 <span class="text-[9px] text-slate-400 font-bold mt-0.5">{{ prods|length }}종</span>
             </a>
             {% endfor %}
-            <a href="/category/오늘마감" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border border-red-100 bg-red-50/50 hover:shadow-md transition-all text-center">
+            <a href="/category/오늘마감" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-red-100 bg-red-50/50 hover:shadow-md active:scale-[0.98] transition-all text-center touch-manipulation">
                 <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-600 text-base md:text-lg mb-1.5"><i class="fas fa-clock"></i></span>
                 <span class="text-[10px] md:text-xs font-black text-red-800">오늘 마감</span>
             </a>
-            <a href="/category/최신상품" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border border-blue-100 bg-blue-50/50 hover:shadow-md transition-all text-center">
+            <a href="/category/최신상품" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-blue-100 bg-blue-50/50 hover:shadow-md active:scale-[0.98] transition-all text-center touch-manipulation">
                 <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 text-base md:text-lg mb-1.5"><i class="fas fa-star"></i></span>
                 <span class="text-[10px] md:text-xs font-black text-blue-800">최신 상품</span>
             </a>
             {% if has_more_categories %}
-            <a href="/categories" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 hover:border-teal-300 hover:bg-teal-50/50 transition-all text-center col-span-2 sm:col-span-2 md:col-span-2">
+            <a href="/categories" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 hover:border-teal-300 hover:bg-teal-50/50 active:scale-[0.98] transition-all text-center col-span-2 sm:col-span-2 md:col-span-2 touch-manipulation">
                 <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-teal-100 flex items-center justify-center text-teal-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-list"></i></span>
                 <span class="text-[10px] md:text-xs font-black text-slate-700">카테고리 전체보기</span>
                 <span class="text-[9px] text-slate-400 font-bold mt-0.5">총 {{ total_categories_count }}개</span>
@@ -3105,11 +3145,11 @@ def index():
 
     {% if closing_today %}
     <section class="mb-10">
-        <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
+        <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4 gap-2 flex-wrap">
             <h2 class="section-title bar-orange"><span class="bar"></span> 🔥 오늘 마감 임박</h2>
-            <a href="/category/오늘마감" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
+            <a href="/category/오늘마감" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition min-h-[44px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
             {% for p in closing_today %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-red-50 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -3138,11 +3178,11 @@ def index():
 
     {% if random_latest %}
     <section class="mb-10">
-        <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
+        <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4 gap-2 flex-wrap">
             <h2 class="section-title bar-green"><span class="bar"></span> ✨ 최신 상품</h2>
-            <a href="/category/최신상품" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
+            <a href="/category/최신상품" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition min-h-[44px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
             {% for p in random_latest %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -3176,11 +3216,11 @@ def index():
 
     {% for cat, products in grouped_products.items() %}
     <section class="mb-10">
-        <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
-            <div><h2 class="section-title bar-green"><span class="bar"></span> {{ cat.name }}</h2>{% if cat.description %}<p class="text-[10px] text-slate-400 font-bold mt-1">{{ cat.description }}</p>{% endif %}</div>
-            <a href="/category/{{ cat.name }}" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
+        <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4 gap-2 flex-wrap">
+            <div class="min-w-0 flex-1"><h2 class="section-title bar-green"><span class="bar"></span> {{ cat.name }}</h2>{% if cat.description %}<p class="text-[10px] text-slate-400 font-bold mt-1">{{ cat.description }}</p>{% endif %}</div>
+            <a href="/category/{{ cat.name }}" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition min-h-[44px] items-center justify-end py-1 touch-manipulation shrink-0">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
             {% for p in products %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -3217,13 +3257,13 @@ def index():
         <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
             <h2 class="section-title bar-green"><span class="bar"></span> 📋 게시판 인기글</h2>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
             <div class="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
                 <h3 class="text-sm font-black text-slate-700 mb-3 flex items-center gap-2"><span class="w-1 h-4 bg-amber-500 rounded"></span> 전국맛집요청</h3>
                 <ul class="space-y-2">
                     {% for p in main_restaurant_posts %}
                     {% set v = main_restaurant_votes.get(p.id, (0, 0)) %}
-                    <li><a href="/board/restaurant-request/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate" title="{{ p.store_name }}">{{ p.store_name }}</a><span class="text-[10px] text-amber-600 font-black ml-1">👍 {{ v[0] }}</span></li>
+                    <li><a href="/board/restaurant-request/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate py-1 min-h-[32px] flex items-center touch-manipulation" title="{{ p.store_name }}">{{ p.store_name }}</a><span class="text-[10px] text-amber-600 font-black ml-1">👍 {{ v[0] }}</span></li>
                     {% endfor %}
                     {% if not main_restaurant_posts %}<li class="text-[11px] text-slate-400">등록된 글이 없습니다.</li>{% endif %}
                 </ul>
@@ -3234,7 +3274,7 @@ def index():
                 <ul class="space-y-2">
                     {% for p in main_delivery_posts %}
                     {% set v = main_delivery_votes.get(p.id, (0, 0)) %}
-                    <li><a href="/board/delivery-request/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate" title="{{ p.region_name }}">{{ p.region_name }}</a><span class="text-[10px] text-teal-600 font-black ml-1">👍 {{ v[0] }}</span></li>
+                    <li><a href="/board/delivery-request/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate py-1 min-h-[32px] flex items-center touch-manipulation" title="{{ p.region_name }}">{{ p.region_name }}</a><span class="text-[10px] text-teal-600 font-black ml-1">👍 {{ v[0] }}</span></li>
                     {% endfor %}
                     {% if not main_delivery_posts %}<li class="text-[11px] text-slate-400">등록된 글이 없습니다.</li>{% endif %}
                 </ul>
@@ -3244,7 +3284,7 @@ def index():
                 <h3 class="text-sm font-black text-slate-700 mb-3 flex items-center gap-2"><span class="w-1 h-4 bg-blue-500 rounded"></span> 제휴문의</h3>
                 <ul class="space-y-2">
                     {% for p in main_partnership_posts %}
-                    <li><a href="/board/partnership/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate" title="{{ p.partnership_type or '제휴문의' }}">{% if p.is_secret %}🔒 비밀글{% else %}{{ (p.partnership_type or '제휴문의')[:20] }}{% endif %}</a></li>
+                    <li><a href="/board/partnership/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate py-1 min-h-[32px] flex items-center touch-manipulation" title="{{ p.partnership_type or '제휴문의' }}">{% if p.is_secret %}🔒 비밀글{% else %}{{ (p.partnership_type or '제휴문의')[:20] }}{% endif %}</a></li>
                     {% endfor %}
                     {% if not main_partnership_posts %}<li class="text-[11px] text-slate-400">등록된 글이 없습니다.</li>{% endif %}
                 </ul>
@@ -3254,7 +3294,7 @@ def index():
                 <h3 class="text-sm font-black text-slate-700 mb-3 flex items-center gap-2"><span class="w-1 h-4 bg-violet-500 rounded"></span> 자유게시판</h3>
                 <ul class="space-y-2">
                     {% for p in main_free_posts %}
-                    <li><a href="/board/free/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate" title="{{ p.title }}">{{ p.title[:24] }}{% if p.title|length > 24 %}...{% endif %}</a></li>
+                    <li><a href="/board/free/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate py-1 min-h-[32px] flex items-center touch-manipulation" title="{{ p.title }}">{{ p.title[:24] }}{% if p.title|length > 24 %}...{% endif %}</a></li>
                     {% endfor %}
                     {% if not main_free_posts %}<li class="text-[11px] text-slate-400">등록된 글이 없습니다.</li>{% endif %}
                 </ul>
@@ -4685,6 +4725,199 @@ def board_free_detail(fid):
     )
 
 
+# ---------- 이벤트 게시판 (SNS 공유·포인트 지급 요청) ----------
+@app.route('/board/event/post', methods=['POST'])
+def board_event_post_add():
+    """이벤트 게시판 일반 글 작성 (게시판 형식)."""
+    title = (request.form.get('title') or '').strip()
+    content = (request.form.get('content') or '').strip()
+    if not title:
+        flash('제목을 입력해 주세요.')
+        return redirect(url_for('board_event'))
+    user_id = current_user.id if current_user.is_authenticated else None
+    user_name = (current_user.name or current_user.email or '회원').strip() if current_user.is_authenticated else (request.form.get('user_name') or '').strip() or '익명'
+    db.session.add(EventBoardPost(
+        user_id=user_id,
+        user_name=user_name[:50],
+        title=title[:200],
+        content=content or None
+    ))
+    db.session.commit()
+    flash('글이 등록되었습니다.')
+    return redirect(url_for('board_event'))
+
+
+@app.route('/board/event', methods=['GET', 'POST'])
+def board_event():
+    """이벤트 게시판 — 게시판 글, 공유 URL, 포인트 지급 요청, 신청 내역"""
+    if request.method == 'POST':
+        shared_url = (request.form.get('shared_url') or '').strip()
+        applicant_email = (request.form.get('applicant_email') or '').strip().lower()
+        content = (request.form.get('content') or '').strip()
+        if not shared_url:
+            flash('공유 URL을 입력해 주세요.')
+            return redirect(url_for('board_event'))
+        if not applicant_email or '@' not in applicant_email:
+            flash('신청용 이메일을 올바르게 입력해 주세요.')
+            return redirect(url_for('board_event'))
+        db.session.add(EventPointRequest(
+            user_id=current_user.id if current_user.is_authenticated else None,
+            applicant_email=applicant_email[:120],
+            shared_url=shared_url[:500],
+            content=content or None,
+            status='requested'
+        ))
+        db.session.commit()
+        flash('포인트 지급 요청이 접수되었습니다. 검토 후 해당 이메일로 포인트가 지급됩니다.')
+        return redirect(url_for('board_event'))
+    event_posts = EventBoardPost.query.order_by(EventBoardPost.id.desc()).limit(50).all()
+    requests_query = EventPointRequest.query.order_by(EventPointRequest.id.desc()).limit(100)
+    filter_email = (request.args.get('my_email') or '').strip().lower()
+    if filter_email and '@' in filter_email:
+        requests_query = requests_query.filter(EventPointRequest.applicant_email == filter_email)
+    requests_list = requests_query.all()
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-3xl mx-auto px-4 py-12">
+            <a href="/" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 메인</a>
+            <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">이벤트 게시판</h1>
+            <p class="text-gray-500 text-sm mb-6">SNS에 공유한 링크와 신청 이메일을 입력하고 포인트 지급을 요청해 주세요. 검토 후 포인트가 지급됩니다.</p>
+            <div class="bg-teal-50 border border-teal-200 rounded-2xl p-6 mb-8">
+                <p class="font-black text-teal-800 text-xs mb-3">바구니삼촌 공유할 URL</p>
+                <p class="text-[10px] text-teal-700 mb-3">아래 버튼을 누르면 추적 가능한 공유 링크가 발행되고 클립보드에 복사됩니다. SNS에 붙여 넣어 공유하세요. (복사할 때마다 새 링크가 발행됩니다)</p>
+                <div class="flex flex-wrap items-center gap-3">
+                    <button type="button" id="event_share_link_btn" class="px-5 py-3 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">공유 링크 생성 및 복사</button>
+                    <span id="event_share_link_msg" class="text-xs font-bold text-teal-600 hidden"></span>
+                </div>
+                <p id="event_share_link_url" class="mt-3 text-[11px] text-gray-600 break-all font-mono hidden"></p>
+            </div>
+            <div class="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-8">
+                <p class="font-black text-amber-800 text-xs mb-3">게시판</p>
+                <p class="text-[10px] text-amber-700 mb-3">이벤트에 대한 이야기를 나눠 보세요.</p>
+                <form method="POST" action="/board/event/post" class="space-y-3 mb-6">
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="제목을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></div>
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용</label><textarea name="content" rows="3" placeholder="내용을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></textarea></div>
+                    {% if not current_user.is_authenticated %}<div><label class="block text-[10px] text-gray-600 uppercase mb-1">이름 (선택)</label><input type="text" name="user_name" maxlength="50" placeholder="익명" class="w-full px-4 py-2 rounded-xl border border-amber-200 text-sm"></div>{% endif %}
+                    <button type="submit" class="px-5 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-black hover:bg-amber-700 transition">글쓰기</button>
+                </form>
+                <div class="space-y-2">
+                    {% for ep in event_posts %}
+                    <div class="bg-white rounded-xl border border-amber-100 p-3 text-left">
+                        <p class="font-black text-gray-800 text-sm">{{ ep.title }}</p>
+                        <p class="text-[10px] text-gray-400">{{ ep.created_at.strftime('%Y.%m.%d %H:%M') if ep.created_at else '' }} · {{ ep.user_name or '익명' }}</p>
+                        {% if ep.content %}<p class="text-gray-600 text-xs mt-1">{{ ep.content[:120] }}{% if ep.content|length > 120 %}...{% endif %}</p>{% endif %}
+                    </div>
+                    {% else %}
+                    <p class="text-gray-400 text-xs py-4 text-center">아직 글이 없습니다.</p>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="bg-violet-50 border border-violet-200 rounded-2xl p-6 mb-8">
+                <p class="font-black text-violet-800 text-xs mb-3">포인트 지급 요청</p>
+                <form method="POST" action="/board/event" class="space-y-4">
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">공유 URL *</label><input type="url" name="shared_url" required maxlength="500" placeholder="https://..." class="w-full px-4 py-3 rounded-xl border border-violet-200 text-sm font-bold"></div>
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">신청 이메일 *</label><input type="email" name="applicant_email" required maxlength="120" placeholder="포인트 수령할 이메일" class="w-full px-4 py-3 rounded-xl border border-violet-200 text-sm font-bold"></div>
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용 (선택)</label><textarea name="content" rows="4" placeholder="하고 싶은 말, 공유한 SNS 설명 등" class="w-full px-4 py-3 rounded-xl border border-violet-200 text-sm font-bold"></textarea></div>
+                    <button type="submit" class="w-full py-3 bg-violet-600 text-white rounded-xl text-sm font-black hover:bg-violet-700 transition">포인트 지급 요청</button>
+                </form>
+            </div>
+            <div class="mb-4">
+                <p class="font-black text-gray-800 text-sm mb-2">신청 내역</p>
+                <p class="text-[10px] text-gray-500 mb-2">포인트 지급 요청 목록입니다. 내 신청만 보려면 이메일을 입력한 뒤 조회하세요.</p>
+                <form method="GET" action="/board/event" class="flex flex-wrap items-center gap-2 mb-3">
+                    <input type="email" name="my_email" value="{{ filter_email }}" placeholder="이메일 입력 시 해당 이메일 신청만 표시" class="px-3 py-2 rounded-xl border border-gray-200 text-xs w-64">
+                    <button type="submit" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl text-xs font-black hover:bg-gray-300">조회</button>
+                    {% if filter_email %}<a href="/board/event" class="px-4 py-2 text-gray-500 text-xs font-bold hover:text-teal-600">전체 보기</a>{% endif %}
+                </form>
+            </div>
+            <div class="space-y-3">
+                {% for p in requests_list %}
+                <div class="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-left">
+                    <p class="text-[10px] text-gray-400">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.applicant_email }}</p>
+                    <p class="font-bold text-gray-800 mt-1 break-all">{{ p.shared_url[:80] }}{% if p.shared_url|length > 80 %}...{% endif %}</p>
+                    {% if p.content %}<p class="text-gray-500 text-sm mt-2">{{ p.content[:150] }}{% if p.content|length > 150 %}...{% endif %}</p>{% endif %}
+                    <p class="text-[10px] mt-2 text-right font-bold {% if p.status == 'approved' %}text-teal-600{% elif p.status == 'rejected' %}text-red-600{% else %}text-amber-600{% endif %}">{{ '지급완료' if p.status == 'approved' else ('반려' if p.status == 'rejected' else '검토중') }}</p>
+                </div>
+                {% else %}
+                <p class="text-gray-400 text-sm py-8 text-center">{% if filter_email %}해당 이메일로 신청한 내역이 없습니다.{% else %}아직 요청이 없습니다.{% endif %}</p>
+                {% endfor %}
+            </div>
+            <script>
+            (function(){
+                var btn = document.getElementById('event_share_link_btn');
+                var msg = document.getElementById('event_share_link_msg');
+                var urlEl = document.getElementById('event_share_link_url');
+                if (btn) {
+                    btn.addEventListener('click', function(){
+                        var emailInput = document.querySelector('input[name="applicant_email"]');
+                        var email = emailInput ? (emailInput.value || '').trim() : '';
+                        btn.disabled = true;
+                        fetch('/api/share-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ applicant_email: email }), credentials: 'same-origin' })
+                            .then(function(r){ return r.json(); })
+                            .then(function(d){
+                                if (d && d.ok && d.url) {
+                                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                                        navigator.clipboard.writeText(d.url).then(function(){
+                                            if (msg) { msg.textContent = '복사되었습니다.'; msg.classList.remove('hidden'); }
+                                            if (urlEl) { urlEl.textContent = d.url; urlEl.classList.remove('hidden'); }
+                                        }).catch(function(){
+                                            if (urlEl) { urlEl.textContent = d.url; urlEl.classList.remove('hidden'); }
+                                            if (msg) { msg.textContent = '링크가 생성되었습니다. 아래 링크를 복사하세요.'; msg.classList.remove('hidden'); }
+                                        });
+                                    } else {
+                                        if (urlEl) { urlEl.textContent = d.url; urlEl.classList.remove('hidden'); }
+                                        if (msg) { msg.textContent = '링크가 생성되었습니다. 아래 링크를 복사하세요.'; msg.classList.remove('hidden'); }
+                                    }
+                                } else { if (msg) { msg.textContent = (d && d.error) || '링크 생성 실패'; msg.classList.remove('hidden'); msg.className = 'text-xs font-bold text-red-600'; } }
+                            })
+                            .catch(function(){ if (msg) { msg.textContent = '통신 오류'; msg.classList.remove('hidden'); msg.className = 'text-xs font-bold text-red-600'; } })
+                            .finally(function(){ btn.disabled = false; });
+                    });
+                }
+            })();
+            </script>
+        </div>
+        """ + FOOTER_HTML,
+        event_posts=event_posts,
+        requests_list=requests_list,
+        filter_email=filter_email
+    )
+
+
+@app.route('/r/<code>')
+def share_link_redirect(code):
+    """공유 추적 링크: /r/<code> 방문 시 메인으로 리다이렉트하며 utm 파라미터 부여, 방문 수 집계."""
+    code = (code or '').strip()
+    base = request.host_url.rstrip('/')
+    redirect_url = base + '/?utm_source=event_share&utm_medium=share&utm_content=' + (code[:50] if code else '')
+    if code:
+        sl = ShareLink.query.filter_by(code=code).first()
+        if sl:
+            try:
+                sl.visit_count = (sl.visit_count or 0) + 1
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+    return redirect(redirect_url)
+
+
+@app.route('/api/share-link', methods=['POST', 'GET'])
+def api_share_link_create():
+    """이벤트 게시판용 공유 링크 1건 발행. 복사할 때마다 호출. POST/GET 모두 허용. applicant_email 선택."""
+    import secrets
+    email = (request.args.get('applicant_email') or request.form.get('applicant_email') or (request.get_json(silent=True) or {}).get('applicant_email') or '').strip()[:120] if request else ''
+    for _ in range(10):
+        code = secrets.token_urlsafe(8).replace('-', 'X').replace('_', 'Y')[:12]
+        if not ShareLink.query.filter_by(code=code).first():
+            sl = ShareLink(code=code, user_id=current_user.id if current_user.is_authenticated else None, applicant_email=email or None, source='event_share')
+            db.session.add(sl)
+            db.session.commit()
+            base = request.host_url.rstrip('/') if request else ''
+            url = base + '/r/' + code
+            return jsonify({'ok': True, 'url': url, 'code': code})
+    return jsonify({'ok': False, 'error': '링크 발행 실패. 다시 시도해 주세요.'}), 500
+
+
 @app.route('/board/comment', methods=['POST'])
 @login_required
 def board_comment_add():
@@ -5640,9 +5873,14 @@ def _find_or_create_social_user(provider, provider_id, email, name):
         password=None,
         name=name or '',
         auth_provider=provider,
-        auth_provider_id=str(provider_id)
+        auth_provider_id=str(provider_id),
+        utm_source=session.get('utm_source'),
+        utm_medium=session.get('utm_medium'),
+        utm_campaign=session.get('utm_campaign')
     )
     db.session.add(new_user)
+    db.session.commit()
+    apply_welcome_event_points(new_user)
     db.session.commit()
     return new_user
 
@@ -6067,6 +6305,7 @@ def register():
             send_alimtalk_welcome(new_user.phone, new_user.name)
         except Exception:
             pass
+        apply_welcome_event_points(new_user)
         db.session.commit()
         flash("가입이 완료되었습니다. 로그인해 주세요.")
         return redirect('/login')
@@ -7977,7 +8216,7 @@ def order_payment():
         if points_used < 0:
             points_used = 0
         if points_used > max_allowed:
-            points_used = 0
+            points_used = max_allowed  # 결제 적용: 사용 가능 한도로 제한 (0으로 초기화하지 않음)
         session['points_used'] = points_used
         session['quick_extra_fee'] = quick_extra_fee_val
         return redirect(url_for('order_payment'))
@@ -8131,6 +8370,9 @@ def payment_success():
         points_used = session.get('points_used', 0) or 0
         quick_extra = session.get('quick_extra_fee', 0) or 0
         original_total = int(amt) + points_used  # 결제창에 넘긴 금액(amt) + 사용 포인트 = 주문 원금액
+        # 결제 적용: 현재 보유 포인트/정책 기준 사용 가능 한도로 한 번 더 제한 (다른 탭에서 사용한 경우 등)
+        max_allowed_now = _effective_max_point_use(current_user, original_total)
+        points_used = min(points_used, max_allowed_now)
 
         # 주문 시 변경한 배송지가 있으면 session 값 사용, 없으면 회원 기본 주소 사용
         delivery_addr = session.get('order_address') or current_user.address or ""
@@ -8147,8 +8389,11 @@ def payment_success():
             if coords:
                 delivery_lat, delivery_lng = float(coords[0]), float(coords[1])
 
-        # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록. UTM 유입 경로 저장.
+        # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록. UTM: 세션 우선, 없으면 회원 가입 시 유입 경로 사용(재주문도 같은 유입으로 집계).
         try:
+            _utm_src = session.get('utm_source') or getattr(current_user, 'utm_source', None)
+            _utm_med = session.get('utm_medium') or getattr(current_user, 'utm_medium', None)
+            _utm_camp = session.get('utm_campaign') or getattr(current_user, 'utm_campaign', None)
             order = Order(
                 user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email,
                 product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'),
@@ -8156,7 +8401,7 @@ def payment_success():
                 delivery_lat=delivery_lat, delivery_lng=delivery_lng,
                 request_memo=current_user.request_memo,
                 status='결제완료', points_used=points_used, quick_extra_fee=quick_extra,
-                utm_source=session.get('utm_source'), utm_medium=session.get('utm_medium'), utm_campaign=session.get('utm_campaign')
+                utm_source=_utm_src, utm_medium=_utm_med, utm_campaign=_utm_camp
             )
             db.session.add(order)
             db.session.flush()  # order.id 확보
@@ -8949,6 +9194,68 @@ def admin_member_grade_set():
 
 
 @login_required
+def admin_member_grade_bulk_set():
+    """회원 등급 일괄 변경 (마스터 전용). identifiers: 이메일 또는 회원ID 목록(줄/쉼표 구분), grade(1~5), overridden(true|false)"""
+    if not current_user.is_admin:
+        return jsonify({'error': '권한 없음'}), 403
+    data = request.get_json(silent=True) or request.form
+    raw = data.get('identifiers') or ''
+    if request.files and request.files.get('identifiers_file'):
+        f = request.files['identifiers_file']
+        if f.filename:
+            try:
+                b = f.read()
+                raw = b.decode('utf-8', errors='replace') if isinstance(b, bytes) else str(b)
+            except Exception:
+                raw = ''
+    lines = []
+    for part in raw.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
+        for cell in part.split(','):
+            cell = cell.strip()
+            if cell:
+                lines.append(cell)
+    if not lines:
+        return jsonify({'error': '이메일 또는 회원ID를 한 줄에 하나씩 입력하거나 파일을 업로드해 주세요.'}), 400
+    try:
+        grade = int(data.get('grade', 1))
+    except (TypeError, ValueError):
+        return jsonify({'error': '등급(1~5)을 선택해 주세요.'}), 400
+    if grade not in (1, 2, 3, 4, 5):
+        return jsonify({'error': '등급은 1~5만 가능합니다.'}), 400
+    overridden = (data.get('overridden') or 'true').lower() in ('1', 'true', 'yes')
+    seen_ids = set()
+    updated = []
+    not_found = []
+    for ident in lines:
+        ident = ident.strip()
+        if not ident:
+            continue
+        u = None
+        try:
+            uid = int(ident)
+            u = User.query.get(uid)
+        except (TypeError, ValueError):
+            u = User.query.filter_by(email=ident).first()
+        if not u:
+            not_found.append(ident)
+            continue
+        if u.id in seen_ids:
+            continue
+        seen_ids.add(u.id)
+        u.member_grade = grade
+        u.member_grade_overridden = overridden
+        updated.append({'id': u.id, 'email': u.email or '', 'name': u.name or ''})
+    db.session.commit()
+    return jsonify({
+        'ok': True,
+        'updated_count': len(updated),
+        'updated': updated,
+        'not_found': not_found[:100],
+        'not_found_total': len(not_found)
+    })
+
+
+@login_required
 def admin_member_grade_config():
     """자동 등급 기준 저장 (마스터 전용). min_amount_grade2~5 (원)"""
     if not current_user.is_admin:
@@ -8995,36 +9302,41 @@ def admin_point_config():
     """포인트 정책 저장 (마스터 전용). 전역 + 유형별(레벨·금액·기간·횟수·주문당최대)"""
     if not current_user.is_admin:
         return jsonify({'error': '권한 없음'}), 403
-    data = request.get_json() or request.form
-    def set_val(k, v):
-        try:
-            val = str(int(v)) if v not in (None, '') else '0'
-        except (TypeError, ValueError):
-            val = '0'
-        row = PointConfig.query.filter_by(key=k).first()
-        if not row:
-            row = PointConfig(key=k, value=val)
-            db.session.add(row)
-        else:
-            row.value = val
-    set_val('accumulation_rate', data.get('accumulation_rate'))
-    set_val('min_order_to_use', data.get('min_order_to_use'))
-    set_val('max_points_per_order', data.get('max_points_per_order'))
-    for g in range(1, 6):
-        set_val(f'grade_{g}_min_order_to_use', data.get(f'grade_{g}_min_order_to_use'))
-        set_val(f'grade_{g}_max_points_per_order', data.get(f'grade_{g}_max_points_per_order'))
-    for ptype in (POINT_TYPE_ACCUMULATED, POINT_TYPE_EVENT, POINT_TYPE_CASH):
-        set_val(f'{ptype}_min_order_amount', data.get(f'{ptype}_min_order_amount'))
-        set_val(f'{ptype}_valid_days', data.get(f'{ptype}_valid_days'))
-        set_val(f'{ptype}_max_use_count', data.get(f'{ptype}_max_use_count'))
-        set_val(f'{ptype}_max_use_per_order', data.get(f'{ptype}_max_use_per_order'))
+    try:
+        data = request.get_json(silent=True) or request.form
+        def set_val(k, v):
+            try:
+                val = str(int(v)) if v not in (None, '') else '0'
+            except (TypeError, ValueError):
+                val = '0'
+            row = PointConfig.query.filter_by(key=k).first()
+            if not row:
+                row = PointConfig(key=k, value=val)
+                db.session.add(row)
+            else:
+                row.value = val
+        set_val('accumulation_rate', data.get('accumulation_rate'))
+        set_val('min_order_to_use', data.get('min_order_to_use'))
+        set_val('max_points_per_order', data.get('max_points_per_order'))
+        set_val('welcome_event_points', data.get('welcome_event_points'))
         for g in range(1, 6):
-            set_val(f'{ptype}_grade_{g}_min_order', data.get(f'{ptype}_grade_{g}_min_order'))
-            set_val(f'{ptype}_grade_{g}_valid_days', data.get(f'{ptype}_grade_{g}_valid_days'))
-            set_val(f'{ptype}_grade_{g}_max_use_count', data.get(f'{ptype}_grade_{g}_max_use_count'))
-            set_val(f'{ptype}_grade_{g}_max_use_per_order', data.get(f'{ptype}_grade_{g}_max_use_per_order'))
-    db.session.commit()
-    return jsonify({'ok': True})
+            set_val(f'grade_{g}_min_order_to_use', data.get(f'grade_{g}_min_order_to_use'))
+            set_val(f'grade_{g}_max_points_per_order', data.get(f'grade_{g}_max_points_per_order'))
+        for ptype in (POINT_TYPE_ACCUMULATED, POINT_TYPE_EVENT, POINT_TYPE_CASH):
+            set_val(f'{ptype}_min_order_amount', data.get(f'{ptype}_min_order_amount'))
+            set_val(f'{ptype}_valid_days', data.get(f'{ptype}_valid_days'))
+            set_val(f'{ptype}_max_use_count', data.get(f'{ptype}_max_use_count'))
+            set_val(f'{ptype}_max_use_per_order', data.get(f'{ptype}_max_use_per_order'))
+            for g in range(1, 6):
+                set_val(f'{ptype}_grade_{g}_min_order', data.get(f'{ptype}_grade_{g}_min_order'))
+                set_val(f'{ptype}_grade_{g}_valid_days', data.get(f'{ptype}_grade_{g}_valid_days'))
+                set_val(f'{ptype}_grade_{g}_max_use_count', data.get(f'{ptype}_grade_{g}_max_use_count'))
+                set_val(f'{ptype}_grade_{g}_max_use_per_order', data.get(f'{ptype}_grade_{g}_max_use_per_order'))
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': '저장 중 오류가 발생했습니다. 다시 시도해 주세요.'}), 500
 
 
 @login_required
@@ -9082,6 +9394,109 @@ def admin_point_log():
             'modifier': modifier
         })
     return jsonify({'logs': out})
+
+
+@login_required
+def admin_point_bulk_grant():
+    """이벤트 등 대량 일괄 포인트 지급 (마스터 전용). identifiers: 이메일 또는 회원ID 목록(줄/쉼표 구분), amount(원), point_type, memo"""
+    if not current_user.is_admin:
+        return jsonify({'error': '권한 없음'}), 403
+    data = request.get_json(silent=True) or request.form
+    raw = data.get('identifiers') or ''
+    if request.files and request.files.get('identifiers_file'):
+        f = request.files['identifiers_file']
+        if f.filename:
+            try:
+                b = f.read()
+                raw = b.decode('utf-8', errors='replace') if isinstance(b, bytes) else str(b)
+            except Exception:
+                raw = ''
+    lines = []
+    for part in raw.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
+        for cell in part.split(','):
+            cell = cell.strip()
+            if cell:
+                lines.append(cell)
+    if not lines:
+        return jsonify({'error': '이메일 또는 회원ID를 한 줄에 하나씩 입력하거나 파일을 업로드해 주세요.'}), 400
+    try:
+        amount = int(data.get('amount', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': '지급 포인트(원)를 입력해 주세요.'}), 400
+    if amount <= 0:
+        return jsonify({'error': '지급 포인트는 1 이상이어야 합니다.'}), 400
+    point_type = (data.get('point_type') or 'event').strip().lower()
+    if point_type not in (POINT_TYPE_ACCUMULATED, POINT_TYPE_EVENT, POINT_TYPE_CASH):
+        point_type = POINT_TYPE_EVENT
+    memo = (data.get('memo') or '')[:200] or '이벤트 일괄 지급'
+    col = {'accumulated': 'points_accumulated', 'event': 'points_event', 'cash': 'points_cash'}[point_type]
+    seen_ids = set()
+    granted = []
+    not_found = []
+    for ident in lines:
+        ident = ident.strip()
+        if not ident:
+            continue
+        u = None
+        try:
+            uid = int(ident)
+            u = User.query.get(uid)
+        except (TypeError, ValueError):
+            u = User.query.filter_by(email=ident).first()
+        if not u:
+            not_found.append(ident)
+            continue
+        if u.id in seen_ids:
+            continue
+        seen_ids.add(u.id)
+        _ensure_user_point_columns(u)
+        current_col = getattr(u, col, 0) or 0
+        setattr(u, col, current_col + amount)
+        _sync_user_points(u)
+        db.session.add(PointLog(user_id=u.id, amount=amount, point_type=point_type, memo=memo, adjusted_by=current_user.id))
+        granted.append({'id': u.id, 'email': u.email or '', 'name': u.name or ''})
+    db.session.commit()
+    return jsonify({
+        'ok': True,
+        'granted_count': len(granted),
+        'granted': granted,
+        'not_found': not_found[:100],
+        'not_found_total': len(not_found)
+    })
+
+
+@login_required
+def admin_event_point_request_grant(request_id):
+    """이벤트 포인트 지급 요청 건에 대해 해당 이메일 회원에게 포인트 지급 (마스터 전용)."""
+    if not current_user.is_admin:
+        return jsonify({'error': '권한 없음'}), 403
+    req = EventPointRequest.query.get(request_id)
+    if not req:
+        return jsonify({'error': '요청을 찾을 수 없습니다.'}), 404
+    if (req.status or '') == 'approved':
+        return jsonify({'error': '이미 지급 완료된 요청입니다.'}), 400
+    data = request.get_json(silent=True) or request.form
+    try:
+        amount = int(data.get('amount', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': '지급 포인트(원)를 입력해 주세요.'}), 400
+    if amount <= 0:
+        return jsonify({'error': '지급 포인트는 1 이상이어야 합니다.'}), 400
+    u = User.query.filter_by(email=req.applicant_email).first()
+    if not u:
+        return jsonify({'error': '해당 이메일로 가입한 회원이 없습니다. (' + (req.applicant_email or '') + ')'}), 404
+    _ensure_user_point_columns(u)
+    col = 'points_event'
+    current_col = getattr(u, col, 0) or 0
+    setattr(u, col, current_col + amount)
+    _sync_user_points(u)
+    db.session.add(PointLog(user_id=u.id, amount=amount, point_type=POINT_TYPE_EVENT, memo='이벤트 게시판 지급', adjusted_by=current_user.id))
+    req.status = 'approved'
+    req.point_amount = amount
+    req.granted_at = now_kst()
+    req.granted_by = current_user.id
+    db.session.commit()
+    return jsonify({'ok': True})
 
 
 @login_required
@@ -9582,12 +9997,14 @@ def admin_dashboard():
             })
 
     point_accumulation_rate = point_min_order = point_max_use = 0
+    welcome_event_points = 0
     point_users = []
     point_policy_accumulated = point_policy_event = point_policy_cash = {}
     point_policy_by_grade = []
     if tab == 'point_manage' and is_master:
         rate, min_ord, max_pts = _get_point_config()
         point_accumulation_rate, point_min_order, point_max_use = rate, min_ord, max_pts
+        welcome_event_points = _get_point_config_val('welcome_event_points', 0)
         for g in range(1, 6):
             point_policy_by_grade.append({
                 'grade': g,
@@ -9634,6 +10051,17 @@ def admin_dashboard():
                 'id': u.id, 'email': u.email or '', 'name': u.name or '',
                 'points': total,
                 'points_accumulated': pa, 'points_event': pe, 'points_cash': pc,
+            })
+
+    event_point_requests = []
+    if tab == 'event_point_requests' and is_master:
+        for r in EventPointRequest.query.order_by(EventPointRequest.id.desc()).limit(200).all():
+            event_point_requests.append({
+                'id': r.id, 'applicant_email': r.applicant_email or '', 'shared_url': r.shared_url or '',
+                'content': (r.content or '')[:200], 'status': r.status or 'requested',
+                'point_amount': getattr(r, 'point_amount', 0) or 0,
+                'created_at': r.created_at, 'admin_notes': r.admin_notes or '',
+                'granted_at': getattr(r, 'granted_at', None)
             })
 
     marketing_cost_list = []
@@ -9873,6 +10301,9 @@ def admin_dashboard():
         admin_board_comments = q.limit(500).all()
 
     utm_aggregates = []
+    share_links = []
+    share_link_total_issued = 0
+    share_link_total_clicks = 0
     if tab == 'utm' and is_master:
         # 주문 기준: utm_source별 주문 수, 매출, 구매자 수(결제 완료 주문의 distinct user_id)
         from sqlalchemy import distinct
@@ -9906,6 +10337,15 @@ def admin_dashboard():
             if not any(a['source'] == usrc for a in utm_aggregates):
                 utm_aggregates.append({'source': usrc, 'order_count': 0, 'revenue': 0, 'buyer_count': 0, 'signup_count': cnt})
         utm_aggregates.sort(key=lambda x: (-x['revenue'], -x['order_count']))
+        share_links = []
+        share_link_total_issued = 0
+        share_link_total_clicks = 0
+        try:
+            share_links = ShareLink.query.filter_by(source='event_share').order_by(ShareLink.created_at.desc()).limit(300).all()
+            share_link_total_issued = ShareLink.query.filter_by(source='event_share').count()
+            share_link_total_clicks = db.session.query(db.func.coalesce(db.func.sum(ShareLink.visit_count), 0)).filter_by(source='event_share').scalar() or 0
+        except Exception:
+            pass
 
     solapi_status = {}
     if tab == 'solapi_check' and is_master:
@@ -10193,6 +10633,7 @@ def admin_dashboard():
                 {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=board_manage" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'board_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">게시판 관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=event_point_requests" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'event_point_requests' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이벤트 포인트 요청</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=member_grade" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'member_grade' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원 등급</a>{% endif %}
             </div>
@@ -11737,6 +12178,27 @@ def admin_dashboard():
                     </form>
                     <p class="text-[10px] text-amber-700 mt-2">저장 후 아래 「구매이력으로 자동 반영」 시 위 기준으로 적용됩니다. 직접 설정한 회원은 자동 반영에서 제외됩니다.</p>
                 </div>
+                <div class="bg-violet-50 border border-violet-200 rounded-2xl p-6 mb-6">
+                    <p class="font-black text-violet-800 text-xs mb-3">회원 일괄 등급 변경</p>
+                    <p class="text-[10px] text-violet-700 mb-3">변경할 회원의 이메일 또는 회원ID를 한 줄에 하나씩 입력하거나, 텍스트/CSV 파일을 업로드하세요.</p>
+                    <form id="mg_bulk_set_form" class="space-y-4">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-[10px] text-gray-600 font-bold">대상 목록 (이메일 또는 회원ID)</label>
+                            <textarea name="identifiers" id="mg_bulk_identifiers" rows="5" class="border border-violet-200 rounded-xl px-3 py-2 text-xs w-full font-mono" placeholder="user1@example.com&#10;user2@example.com&#10;3&#10;5"></textarea>
+                            <div class="flex items-center gap-2">
+                                <input type="file" id="mg_bulk_file" name="identifiers_file" accept=".txt,.csv" class="text-[10px] border border-violet-200 rounded-lg px-2 py-1">
+                                <span class="text-[10px] text-gray-500">파일 선택 시 내용이 위 입력란에 채워지거나 그대로 제출됩니다.</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-end gap-4">
+                            <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">변경할 등급</span><select name="grade" class="border border-violet-200 rounded-xl px-3 py-2 text-xs w-28"><option value="1">1단계</option><option value="2">2단계</option><option value="3">3단계</option><option value="4">4단계</option><option value="5">5단계</option></select></label>
+                            <input type="hidden" name="overridden" id="mg_bulk_overridden_h" value="true">
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="mg_bulk_overridden_cb" checked class="rounded border-violet-300"><span class="text-[10px] text-gray-600 font-bold">직접설정으로 고정 (자동 반영 제외)</span></label>
+                            <button type="submit" class="px-5 py-2.5 bg-violet-600 text-white rounded-xl font-black text-xs hover:bg-violet-700">일괄 등급 변경</button>
+                        </div>
+                        <p id="mg_bulk_result" class="text-[11px] font-bold hidden"></p>
+                    </form>
+                </div>
                 <div class="flex gap-3 mb-4">
                     <button type="button" id="mg_auto_apply_btn" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs">구매이력으로 자동 반영</button>
                     <span id="mg_api_message" class="text-xs font-bold hidden"></span>
@@ -11792,6 +12254,46 @@ def admin_dashboard():
                         if (!d.error) setTimeout(function() { location.reload(); }, 600);
                     }).catch(function() { showMsg('통신 오류', false); });
                 });
+                var mgBulkForm = document.getElementById('mg_bulk_set_form');
+                if (mgBulkForm) {
+                    var overriddenCb = document.getElementById('mg_bulk_overridden_cb');
+                    var overriddenH = document.getElementById('mg_bulk_overridden_h');
+                    if (overriddenCb && overriddenH) {
+                        overriddenCb.addEventListener('change', function() { overriddenH.value = this.checked ? 'true' : 'false'; });
+                    }
+                    var mgBulkFile = document.getElementById('mg_bulk_file');
+                    if (mgBulkFile) {
+                        mgBulkFile.addEventListener('change', function() {
+                            var f = this.files && this.files[0];
+                            if (!f) return;
+                            var r = new FileReader();
+                            r.onload = function() { document.getElementById('mg_bulk_identifiers').value = r.result || ''; };
+                            r.readAsText(f, 'UTF-8');
+                        });
+                    }
+                    mgBulkForm.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        var resultEl = document.getElementById('mg_bulk_result');
+                        if (overriddenH) overriddenH.value = overriddenCb && overriddenCb.checked ? 'true' : 'false';
+                        var fd = new FormData(this);
+                        resultEl.classList.add('hidden');
+                        fetch('/admin/member_grade/bulk_set', { method: 'POST', body: fd, credentials: 'same-origin' })
+                            .then(function(r) { return r.json().then(function(d) { return r.ok ? d : Promise.reject(d); }); })
+                            .then(function(d) {
+                                var msg = d.updated_count + '명 등급 변경 완료.';
+                                if (d.not_found_total > 0) msg += ' (조회 불가: ' + d.not_found_total + '건)';
+                                resultEl.textContent = msg;
+                                resultEl.classList.remove('hidden');
+                                resultEl.className = 'text-[11px] font-bold text-teal-600';
+                                setTimeout(function() { location.reload(); }, d.not_found_total > 0 ? 1500 : 1200);
+                            })
+                            .catch(function(d) {
+                                resultEl.textContent = (d && d.error) ? d.error : '일괄 등급 변경 중 오류가 발생했습니다.';
+                                resultEl.classList.remove('hidden');
+                                resultEl.className = 'text-[11px] font-bold text-red-600';
+                            });
+                    });
+                }
                 document.getElementById('mg_auto_apply_btn').addEventListener('click', function() {
                     var btn = this;
                     btn.disabled = true;
@@ -12102,10 +12604,91 @@ def admin_dashboard():
             })();
             </script>
 
+        {% elif tab == 'event_point_requests' %}
+            <div class="mb-12">
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">이벤트 포인트 지급 요청 확인</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">이벤트 게시판에서 신청된 요청을 확인한 뒤, 공유 링크를 검토하고 해당 이메일로 포인트를 지급하세요.</p>
+                <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto -mx-3 md:mx-0">
+                    <table class="w-full text-left min-w-[900px] text-[11px] font-bold border-collapse">
+                        <thead class="bg-gray-800 text-white">
+                            <tr>
+                                <th class="p-3 border border-gray-600">신청일시</th>
+                                <th class="p-3 border border-gray-600">신청 이메일</th>
+                                <th class="p-3 border border-gray-600">공유 URL</th>
+                                <th class="p-3 border border-gray-600">내용</th>
+                                <th class="p-3 border border-gray-600 w-24 text-center">상태</th>
+                                <th class="p-3 border border-gray-600">포인트 지급</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in event_point_requests %}
+                            <tr class="border-b border-gray-100" data-request-id="{{ r.id }}" data-email="{{ r.applicant_email }}">
+                                <td class="p-3 text-gray-600">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
+                                <td class="p-3">{{ r.applicant_email }}</td>
+                                <td class="p-3"><a href="{{ r.shared_url }}" target="_blank" rel="noopener noreferrer" class="text-violet-600 hover:underline break-all">{{ r.shared_url[:50] }}{% if r.shared_url|length > 50 %}...{% endif %}</a></td>
+                                <td class="p-3 text-gray-600 max-w-[200px] truncate">{{ r.content or '-' }}</td>
+                                <td class="p-3 text-center"><span class="font-black {% if r.status == 'approved' %}text-teal-600{% elif r.status == 'rejected' %}text-red-600{% else %}text-amber-600{% endif %}">{{ '지급완료' if r.status == 'approved' else ('반려' if r.status == 'rejected' else '검토중') }}</span></td>
+                                <td class="p-3">
+                                    {% if r.status != 'approved' %}
+                                    <input type="number" class="event_req_point_amount border border-gray-200 rounded-lg px-2 py-1 text-[10px] w-20" placeholder="원" min="1" value="1000">
+                                    <button type="button" class="event_req_grant_btn ml-1 px-2 py-1 bg-teal-100 text-teal-700 rounded-lg text-[10px] font-black">포인트 지급</button>
+                                    {% else %}
+                                    <span class="text-teal-600 font-black">{{ r.point_amount|int }}원 지급됨</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="6" class="p-8 text-center text-gray-400">요청이 없습니다.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <script>
+            (function(){
+                document.querySelectorAll('.event_req_grant_btn').forEach(function(btn){
+                    btn.addEventListener('click', function(){
+                        var row = this.closest('tr');
+                        var id = row && row.getAttribute('data-request-id');
+                        var email = row && row.getAttribute('data-email');
+                        var amountInput = row && row.querySelector('.event_req_point_amount');
+                        var amount = amountInput ? (parseInt(amountInput.value, 10) || 0) : 0;
+                        if (!id || amount < 1) { alert('지급 포인트(원)를 입력해 주세요.'); return; }
+                        btn.disabled = true;
+                        fetch('/admin/event_point_request/' + id + '/grant', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amount }), credentials: 'same-origin' })
+                            .then(function(r){ return r.json().then(function(d){ return r.ok ? d : Promise.reject(d); }); })
+                            .then(function(){ location.reload(); })
+                            .catch(function(d){ alert((d && d.error) || '지급 처리 중 오류가 발생했습니다.'); btn.disabled = false; });
+                    });
+                });
+            })();
+            </script>
+
         {% elif tab == 'point_manage' %}
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">포인트 정책 및 회원별 관리</h3>
                 <p class="text-[11px] text-gray-500 font-bold mb-4">구매금액의 0.1% 자동 적립, 설정한 금액 이상 구매 시 설정한 한도까지 사용 가능.</p>
+                <div class="bg-violet-50 border border-violet-200 rounded-2xl p-6 mb-6">
+                    <p class="font-black text-violet-800 text-xs mb-3">이벤트 일괄 포인트 지급</p>
+                    <p class="text-[10px] text-violet-700 mb-3">지급할 회원의 이메일 또는 회원ID를 한 줄에 하나씩 입력하거나, 텍스트/CSV 파일을 업로드하세요. (쉼표·줄바꿈 구분)</p>
+                    <form id="point_bulk_grant_form" class="space-y-4">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-[10px] text-gray-600 font-bold">대상 목록 (이메일 또는 회원ID)</label>
+                            <textarea name="identifiers" id="point_bulk_identifiers" rows="6" class="border border-violet-200 rounded-xl px-3 py-2 text-xs w-full font-mono" placeholder="user1@example.com&#10;user2@example.com&#10;3&#10;5"></textarea>
+                            <div class="flex items-center gap-2">
+                                <input type="file" id="point_bulk_file" name="identifiers_file" accept=".txt,.csv" class="text-[10px] border border-violet-200 rounded-lg px-2 py-1">
+                                <span class="text-[10px] text-gray-500">파일 선택 시 내용이 위 입력란에 채워집니다.</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-end gap-4">
+                            <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">지급 포인트(원)</span><input type="number" name="amount" id="point_bulk_amount" value="1000" min="1" class="border border-violet-200 rounded-xl px-3 py-2 text-xs w-28"></label>
+                            <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">포인트 유형</span><select name="point_type" class="border border-violet-200 rounded-xl px-3 py-2 text-xs w-32"><option value="event" selected>이벤트</option><option value="accumulated">적립</option><option value="cash">캐시충전</option></select></label>
+                            <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">사유(메모)</span><input type="text" name="memo" value="이벤트 일괄 지급" maxlength="200" class="border border-violet-200 rounded-xl px-3 py-2 text-xs w-48" placeholder="이벤트 일괄 지급"></label>
+                            <button type="submit" class="px-5 py-2.5 bg-violet-600 text-white rounded-xl font-black text-xs hover:bg-violet-700">일괄 지급 실행</button>
+                        </div>
+                        <p id="point_bulk_result" class="text-[11px] font-bold hidden"></p>
+                    </form>
+                </div>
                 <div class="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-6">
                     <p class="font-black text-amber-800 text-xs mb-3">포인트 정책 설정 (전역 기본)</p>
                     <form id="point_config_form" class="space-y-4">
@@ -12113,6 +12696,7 @@ def admin_dashboard():
                             <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">적립률 (1=0.1%)</span><input type="number" name="accumulation_rate" value="{{ point_accumulation_rate }}" min="0" max="100" class="border border-gray-200 rounded-xl px-3 py-2 text-xs w-24"></label>
                             <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">사용 가능 최소 주문금액(원)</span><input type="number" name="min_order_to_use" value="{{ point_min_order }}" min="0" class="border border-gray-200 rounded-xl px-3 py-2 text-xs w-36"></label>
                             <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">1회 최대 사용(원)</span><input type="number" name="max_points_per_order" value="{{ point_max_use }}" min="0" class="border border-gray-200 rounded-xl px-3 py-2 text-xs w-32"></label>
+                            <label class="flex flex-col gap-1"><span class="text-[10px] text-gray-600 font-bold">가입 시 이벤트 포인트(원)</span><input type="number" name="welcome_event_points" value="{{ welcome_event_points }}" min="0" class="border border-gray-200 rounded-xl px-3 py-2 text-xs w-32" placeholder="0이면 미지급"></label>
                             <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded-xl font-black text-xs">저장</button>
                         </div>
                         <p class="text-[10px] text-amber-700">적립률 1 = 구매금액의 0.1%. 레벨별·유형별 0 입력 시 전역값 사용.</p>
@@ -12258,11 +12842,57 @@ def admin_dashboard():
                 document.getElementById('point_config_form').addEventListener('submit', function(e) {
                     e.preventDefault();
                     var fd = new FormData(this);
-                    fetch('/admin/point/config', { method: 'POST', body: fd }).then(function(r) { return r.json(); }).then(function(d) {
-                        showMsg(d.error || '저장되었습니다.', !d.error);
-                        if (!d.error) setTimeout(function() { location.reload(); }, 600);
-                    }).catch(function() { showMsg('통신 오류', false); });
+                    fetch('/admin/point/config', { method: 'POST', body: fd, credentials: 'same-origin' })
+                        .then(function(r) {
+                            return r.json().then(function(d) {
+                                if (!r.ok) throw new Error(d.error || '저장 실패');
+                                return d;
+                            });
+                        })
+                        .then(function(d) {
+                            showMsg(d.error || '저장되었습니다.', !d.error);
+                            if (!d.error) setTimeout(function() { location.reload(); }, 600);
+                        })
+                        .catch(function(err) {
+                            var msg = (err && err.message && (err.message === '저장 실패' || err.message === '권한 없음' || err.message.indexOf('저장') !== -1)) ? err.message : '통신 오류';
+                            showMsg(msg, false);
+                        });
                 });
+                var bulkForm = document.getElementById('point_bulk_grant_form');
+                if (bulkForm) {
+                    var bulkFile = document.getElementById('point_bulk_file');
+                    if (bulkFile) {
+                        bulkFile.addEventListener('change', function() {
+                            var f = this.files && this.files[0];
+                            if (!f) return;
+                            var r = new FileReader();
+                            r.onload = function() { document.getElementById('point_bulk_identifiers').value = r.result || ''; };
+                            r.readAsText(f, 'UTF-8');
+                        });
+                    }
+                    bulkForm.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        var resultEl = document.getElementById('point_bulk_result');
+                        var fd = new FormData(this);
+                        resultEl.classList.add('hidden');
+                        fetch('/admin/point/bulk_grant', { method: 'POST', body: fd, credentials: 'same-origin' })
+                            .then(function(r) { return r.json().then(function(d) { return r.ok ? d : Promise.reject(d); }); })
+                            .then(function(d) {
+                                var msg = d.granted_count + '명에게 지급 완료.';
+                                if (d.not_found_total > 0) msg += ' (조회 불가: ' + d.not_found_total + '건)';
+                                resultEl.textContent = msg;
+                                resultEl.classList.remove('hidden');
+                                resultEl.className = 'text-[11px] font-bold text-teal-600';
+                                if (d.not_found_total > 0) setTimeout(function() { location.reload(); }, 1500);
+                                else setTimeout(function() { location.reload(); }, 1200);
+                            })
+                            .catch(function(d) {
+                                resultEl.textContent = (d && d.error) ? d.error : '일괄 지급 처리 중 오류가 발생했습니다.';
+                                resultEl.classList.remove('hidden');
+                                resultEl.className = 'text-[11px] font-bold text-red-600';
+                            });
+                    });
+                }
                 document.querySelectorAll('.point_adj_btn').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         var uid = parseInt(this.getAttribute('data-user-id'), 10);
@@ -12598,6 +13228,7 @@ def admin_dashboard():
                             <tr>
                                 <th class="p-3 border border-gray-600 w-12 text-center">ID</th>
                                 <th class="p-3 border border-gray-600 w-20 text-center">가입구분</th>
+                                <th class="p-3 border border-gray-600 w-24 text-center">유입경로</th>
                                 <th class="p-3 border border-gray-600">이메일</th>
                                 <th class="p-3 border border-gray-600 w-24">이름</th>
                                 <th class="p-3 border border-gray-600 w-28">전화</th>
@@ -12610,6 +13241,9 @@ def admin_dashboard():
                                 <th class="p-3 border border-gray-600 w-14 text-center">등급</th>
                                 <th class="p-3 border border-gray-600 w-14 text-center">직접설정</th>
                                 <th class="p-3 border border-gray-600 w-20 text-right">포인트</th>
+                                <th class="p-3 border border-gray-600 w-20 text-right">적립포인트</th>
+                                <th class="p-3 border border-gray-600 w-20 text-right">이벤트포인트</th>
+                                <th class="p-3 border border-gray-600 w-20 text-right">캐시충전포인트</th>
                                 <th class="p-3 border border-gray-600 w-12 text-center">게시글</th>
                                 <th class="p-3 border border-gray-600 w-12 text-center">댓글</th>
                                 <th class="p-3 border border-gray-600 w-12 text-center">추천</th>
@@ -12621,6 +13255,7 @@ def admin_dashboard():
                             <tr class="border-b border-gray-100 hover:bg-gray-50/50" data-member-id="{{ u.id }}" data-member-name="{{ (u.name or u.email or '')|e }}">
                                 <td class="p-3 border border-gray-100 text-center text-gray-500">{{ u.id }}</td>
                                 <td class="p-3 border border-gray-100 text-center text-[10px]">{% if u.auth_provider == 'kakao' %}카카오{% elif u.auth_provider == 'naver' %}네이버{% elif u.auth_provider == 'google' %}구글{% else %}자체가입{% endif %}</td>
+                                <td class="p-3 border border-gray-100 text-center text-[10px] text-teal-700" title="{% if u.utm_medium or u.utm_campaign %}{{ (u.utm_medium or '')|e }}{% if u.utm_medium and u.utm_campaign %} / {% endif %}{{ (u.utm_campaign or '')|e }}{% endif %}">{{ (u.utm_source or '')|trim or '직접/기타' }}</td>
                                 <td class="p-3 border border-gray-100">{{ u.email or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ u.name or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ u.phone or '-' }}</td>
@@ -12633,6 +13268,9 @@ def admin_dashboard():
                                 <td class="p-3 border border-gray-100 text-center">{{ u.member_grade or 1 }}</td>
                                 <td class="p-3 border border-gray-100 text-center">{% if u.member_grade_overridden|default(false) %}Y{% else %}-{% endif %}</td>
                                 <td class="p-3 border border-gray-100 text-right">{{ "{:,}".format(u.points or 0) }}원</td>
+                                <td class="p-3 border border-gray-100 text-right text-teal-700">{{ "{:,}".format(getattr(u, 'points_accumulated', 0) or 0) }}</td>
+                                <td class="p-3 border border-gray-100 text-right text-amber-700">{{ "{:,}".format(getattr(u, 'points_event', 0) or 0) }}</td>
+                                <td class="p-3 border border-gray-100 text-right text-blue-700">{{ "{:,}".format(getattr(u, 'points_cash', 0) or 0) }}</td>
                                 <td class="p-3 border border-gray-100 text-center">{{ getattr(u, 'activity_posts', 0) or 0 }}</td>
                                 <td class="p-3 border border-gray-100 text-center">{{ getattr(u, 'activity_comments', 0) or 0 }}</td>
                                 <td class="p-3 border border-gray-100 text-center">{{ getattr(u, 'activity_votes', 0) or 0 }}</td>
@@ -12646,7 +13284,7 @@ def admin_dashboard():
                                 </td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="18" class="p-8 text-center text-gray-400 font-bold">등록된 회원이 없습니다.</td></tr>
+                            <tr><td colspan="22" class="p-8 text-center text-gray-400 font-bold">등록된 회원이 없습니다.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -13387,6 +14025,34 @@ def admin_dashboard():
                 </div>
                 <p class="mt-4 text-[10px] text-gray-500">CPA = 광고비 ÷ 구매자 수 · ROAS = 매출 ÷ 광고비 × 100 (광고비 입력 시만 표시)</p>
             </div>
+            <div class="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mb-8 mt-8">
+                <h2 class="text-xl font-black text-gray-800 mb-2">📤 이벤트 공유 링크 성과</h2>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">이벤트 게시판에서 「공유 링크 생성 및 복사」로 발행된 링크별 클릭 수입니다. 총 발행 {{ share_link_total_issued }}건 · 총 클릭 {{ share_link_total_clicks }}회</p>
+                <div class="overflow-x-auto -mx-3 md:mx-0">
+                    <table class="w-full text-left min-w-[600px] text-[11px] font-bold">
+                        <thead class="bg-gray-800 text-white">
+                            <tr>
+                                <th class="p-3">발행 일시</th>
+                                <th class="p-3">코드</th>
+                                <th class="p-3">신청 이메일</th>
+                                <th class="p-3 text-right">클릭 수</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sl in share_links %}
+                            <tr class="border-b border-gray-100">
+                                <td class="p-3 text-gray-600">{{ sl.created_at.strftime('%Y-%m-%d %H:%M') if sl.created_at else '-' }}</td>
+                                <td class="p-3 font-mono">{{ sl.code }}</td>
+                                <td class="p-3">{{ sl.applicant_email or '-' }}</td>
+                                <td class="p-3 text-right font-black text-teal-600">{{ sl.visit_count|default(0) }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="p-8 text-center text-gray-400">아직 발행된 공유 링크가 없습니다. 이벤트 게시판에서 링크를 생성하면 여기서 조회됩니다.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
             <script>
             (function(){
                 document.querySelectorAll('.utm-ad-spend').forEach(function(inp){
@@ -13719,6 +14385,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                 {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=board_manage" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'board_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">게시판 관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=event_point_requests" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'event_point_requests' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이벤트 포인트 요청</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=member_grade" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'member_grade' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원 등급</a>{% endif %}
             </div>
@@ -17793,6 +18460,8 @@ if __name__ == "__main__":
             pass
 # 프로덕션(gunicorn 등) 앱 로드 시 테이블 생성 + 마이그레이션
 with app.app_context():
+    # 모든 모델(이벤트 게시판·공유 링크 등) 테이블 자동 생성 — 서버 업로드 시 flask db migrate/upgrade 수동 실행 불필요
+    from models import EventBoardPost, ShareLink, EventPointRequest  # noqa: F401 - 테이블 생성용 로드
     db.create_all()
     from sqlalchemy import text
     try:

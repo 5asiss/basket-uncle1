@@ -35,9 +35,12 @@ def register_admin_routes(app):
         admin_member_grade_set,
         admin_member_grade_config,
         admin_member_grade_auto_apply,
+        admin_member_grade_bulk_set,
         admin_point_config,
         admin_point_adjust,
         admin_point_log,
+        admin_point_bulk_grant,
+        admin_event_point_request_grant,
         admin_member_send_message,
         admin_member_delete,
         admin_dashboard,
@@ -134,12 +137,15 @@ def register_admin_routes(app):
     # member_grade
     admin_bp.add_url_rule('/admin/member_grade/set', view_func=login_required(admin_member_grade_set), methods=['POST'])
     admin_bp.add_url_rule('/admin/member_grade/config', view_func=login_required(admin_member_grade_config), methods=['POST'])
+    admin_bp.add_url_rule('/admin/member_grade/bulk_set', view_func=login_required(admin_member_grade_bulk_set), methods=['POST'])
     admin_bp.add_url_rule('/admin/member_grade/auto_apply', view_func=login_required(admin_member_grade_auto_apply), methods=['POST'])
 
     # point
     admin_bp.add_url_rule('/admin/point/config', view_func=login_required(admin_point_config), methods=['POST'])
     admin_bp.add_url_rule('/admin/point/adjust', view_func=login_required(admin_point_adjust), methods=['POST'])
     admin_bp.add_url_rule('/admin/point/log', view_func=login_required(admin_point_log))
+    admin_bp.add_url_rule('/admin/point/bulk_grant', view_func=login_required(admin_point_bulk_grant), methods=['POST'])
+    admin_bp.add_url_rule('/admin/event_point_request/<int:request_id>/grant', view_func=login_required(admin_event_point_request_grant), methods=['POST'])
 
     # api member
     admin_bp.add_url_rule('/admin/api/member/<int:uid>/message', view_func=login_required(admin_member_send_message), methods=['POST'])

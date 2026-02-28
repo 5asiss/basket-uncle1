@@ -275,6 +275,45 @@ class FreeBoard(db.Model):
     is_notice = db.Column(db.Boolean, default=False)
 
 
+class EventPointRequest(db.Model):
+    """이벤트 게시판 — SNS 공유 URL·신청 이메일·글 작성 후 포인트 지급 요청. 관리자가 링크 확인 후 이메일별 포인트 지급."""
+    __tablename__ = "event_point_request"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    applicant_email = db.Column(db.String(120), nullable=False)
+    shared_url = db.Column(db.String(500), nullable=False)
+    content = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default='requested')  # requested | approved | rejected
+    point_amount = db.Column(db.Integer, default=0)       # 지급한 포인트(원)
+    created_at = db.Column(db.DateTime, default=_now_kst)
+    admin_notes = db.Column(db.Text, nullable=True)
+    granted_at = db.Column(db.DateTime, nullable=True)
+    granted_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+
+class EventBoardPost(db.Model):
+    """이벤트 게시판 일반 글 (포인트 지급 요청 위 게시판 형식)."""
+    __tablename__ = "event_board_post"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    user_name = db.Column(db.String(50), nullable=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=_now_kst)
+
+
+class ShareLink(db.Model):
+    """이벤트 게시판 등에서 발행하는 바구니삼촌 공유 추적 링크. 복사할 때마다 1건 발행, /r/<code> 방문 시 클릭 집계."""
+    __tablename__ = "share_link"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(24), unique=True, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    applicant_email = db.Column(db.String(120), nullable=True)
+    source = db.Column(db.String(30), default='event_share')
+    created_at = db.Column(db.DateTime, default=_now_kst)
+    visit_count = db.Column(db.Integer, default=0)
+
+
 class DeliveryRequest(db.Model):
     __tablename__ = "delivery_request"
     id = db.Column(db.Integer, primary_key=True)
