@@ -21,7 +21,10 @@ cloudinary
 # PostgreSQL 드라이버 (Render PostgreSQL 마이그레이션용)
 psycopg2-binary
 
-# --- 프로젝트 메모 (pip 설치와 무관) ---
+# 당근마켓 자동 포스팅 스크립트 (scripts/daangn_auto_post.py)
+selenium
+
+# --- 프로젝트 메모
 # 배차관리에서 수정할때 기사 타입 (직영/일반) , 픽업완료 버튼 추가 픽업상태 오더관리랑 동기화
 
 

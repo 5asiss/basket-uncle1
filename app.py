@@ -18652,6 +18652,7 @@ def _safe_utf8_str(val):
     return str(val)
 
 
+
 def _dataframe_utf8_safe(df):
     """엑셀 다운로드 전 DataFrame 문자열 컬럼 정규화 (한글 깨짐 방지)."""
     if df is None or df.empty:

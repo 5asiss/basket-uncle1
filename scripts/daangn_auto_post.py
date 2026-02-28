@@ -6,6 +6,7 @@
 # - DAANGN_USE_UTILS=1 이면 utils.get_daangn_today_message() 사용 (DAANGN_EXTRA_LINE으로 특가 문구 추가 가능)
 # - 실행: python scripts/daangn_auto_post.py [메시지 텍스트]
 # --------------------------------------------------------------------------------
+# pyright: reportMissingImports=false
 import os
 import sys
 import time
