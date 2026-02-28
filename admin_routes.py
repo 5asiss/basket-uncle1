@@ -46,6 +46,7 @@ def register_admin_routes(app):
         admin_product_bulk_upload_template,
         admin_bulk_upload_images,
         admin_upload_delete,
+        admin_upload_delete_all,
         admin_product_bulk_upload,
         admin_restaurant_request_comment,
         admin_restaurant_request_hide,
@@ -162,6 +163,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/product/bulk_upload_template', view_func=login_required(admin_product_bulk_upload_template))
     admin_bp.add_url_rule('/admin/product/bulk_upload_images', view_func=login_required(admin_bulk_upload_images), methods=['POST'])
     admin_bp.add_url_rule('/admin/product/upload_delete', view_func=login_required(admin_upload_delete), methods=['POST'])
+    admin_bp.add_url_rule('/admin/product/upload_delete_all', view_func=login_required(admin_upload_delete_all), methods=['POST'])
     admin_bp.add_url_rule('/admin/product/bulk_upload', view_func=login_required(admin_product_bulk_upload), methods=['POST'])
 
     # 아래 모든 구체 라우트를 catch-all 전에 등록 (순서 중요)

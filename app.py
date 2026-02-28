@@ -10892,7 +10892,10 @@ def admin_dashboard():
                 <div class="mt-5 p-5 bg-white rounded-xl border border-teal-200 text-left text-[11px]">
                     <p class="font-black text-teal-800 mb-2">🖼 이미지 대량 업로드 후 확인 방법</p>
                     <p class="text-gray-600 mb-3">1) 업로드 직후 상단 플래시 메시지에서 «N개 저장» 확인. 2) 아래 <b>저장된 이미지 목록</b>에서 파일명이 보이는지 확인. 3) 엑셀 대표·상세이미지파일명에 그 파일명 그대로 입력 후 상품 업로드. 4) 관리자 → 상품관리에서 해당 상품을 열어 이미지가 붙었는지 확인.</p>
-                    <p class="font-black text-gray-700 mb-2">저장된 이미지 목록 (최근 100개, 최신순) — 파일 클릭 시 미리보기, 삭제 버튼으로 서버에서 제거</p>
+                    <p class="font-black text-gray-700 mb-2">저장된 이미지 목록 (최근 100개, 최신순) — 파일 클릭 시 미리보기, 🗑 개별 삭제 / 아래 버튼으로 전체 삭제</p>
+                    <form action="/admin/product/upload_delete_all" method="POST" class="mb-2" onsubmit="return confirm('static/uploads/ 폴더의 이미지 파일을 모두 삭제합니다. 복구할 수 없습니다. 계속할까요?');">
+                        <button type="submit" class="px-4 py-2 rounded-xl bg-red-500 text-white font-black text-[10px] hover:bg-red-600 transition">🗑 이미지 전체삭제</button>
+                    </form>
                     {% if list_uploaded_images %}
                     <ul class="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 bg-gray-50 rounded-lg border border-gray-100 text-[10px] font-mono">
                         {% for f in list_uploaded_images %}
@@ -15217,6 +15220,36 @@ def admin_upload_delete():
             flash(f"파일을 찾을 수 없거나 삭제할 수 없습니다: {filename}")
     except OSError as e:
         flash(f"삭제 실패: {e}")
+    return redirect('/admin?tab=bulk_register')
+
+
+@login_required
+def admin_upload_delete_all():
+    """static/uploads/ 루트에 있는 이미지 파일 전부 삭제. 하위 폴더(reviews, board 등)는 건드리지 않음."""
+    if not current_user.is_admin:
+        return redirect('/')
+    if request.method != 'POST':
+        return redirect('/admin?tab=bulk_register')
+    upload_dir = os.path.join(app.root_path, 'static', 'uploads')
+    real_upload = os.path.realpath(upload_dir)
+    count = 0
+    try:
+        if not os.path.isdir(upload_dir):
+            flash("업로드 폴더가 없습니다.")
+            return redirect('/admin?tab=bulk_register')
+        exts = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
+        for fn in os.listdir(upload_dir):
+            if fn.startswith('.'):
+                continue
+            path = os.path.join(upload_dir, fn)
+            if not os.path.isfile(path):
+                continue
+            if os.path.realpath(path).startswith(real_upload) and os.path.splitext(fn)[1].lower() in exts:
+                os.remove(path)
+                count += 1
+        flash(f"static/uploads/ 이미지 {count}개를 삭제했습니다.")
+    except OSError as e:
+        flash(f"전체 삭제 중 오류: {e}")
     return redirect('/admin?tab=bulk_register')
 
 
