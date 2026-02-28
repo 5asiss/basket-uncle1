@@ -15334,6 +15334,14 @@ def admin_product_bulk_upload():
                         if found:
                             image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
                             break
+                    if not image_url:
+                        name_no_spaces = name_val.replace(" ", "")
+                        if name_no_spaces != name_val:
+                            for suffix in ("1", "_1"):
+                                found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
+                                if found:
+                                    image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                    break
                 if not image_url:
                     main_img = _bulk_image_filename_only(main_img_raw)
                     if main_img and not _bulk_is_placeholder_image(main_img):
@@ -15373,6 +15381,12 @@ def admin_product_bulk_upload():
                         found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
                         if not found and suffix.isdigit():
                             found = _bulk_find_upload_by_basename(upload_dir, name_val + "_" + suffix)
+                        if not found:
+                            name_no_spaces = name_val.replace(" ", "")
+                            if name_no_spaces != name_val:
+                                found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
+                                if not found and suffix.isdigit():
+                                    found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + "_" + suffix)
                         if found:
                             detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                     if detail_parts:
