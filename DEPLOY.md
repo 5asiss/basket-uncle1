@@ -64,7 +64,8 @@ git push -u origin main
 3. **Connect repository** → GitHub에서 `basket-uncle` 선택
 4. 설정:
    - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `gunicorn --bind 0.0.0.0:$PORT app:app`
+   - **Start Command:** `gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app`  
+     (타임아웃 300초: 상품 대량등록·엑셀 업로드 등 긴 요청 방지. 기본 30초면 재배포 환경에서 대량 업로드 시 502/500 발생 가능)
    - **Environment:** 위 표의 환경 변수 추가 (비밀키는 Secret으로)
 5. **Create Web Service** 후 빌드/배포 완료될 때까지 대기
 6. 배포 URL로 접속해 동작 확인

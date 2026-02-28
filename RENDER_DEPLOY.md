@@ -13,7 +13,7 @@
 
 - [ ] **실행 가능 여부**
   - 로컬에서 `pip install -r requirements.txt` 후 `python app.py` 로 실행해 보기
-  - (선택) `gunicorn --bind 0.0.0.0:5000 app:app` 로 실행해 보기
+  - (선택) `gunicorn --bind 0.0.0.0:5000 --timeout 300 app:app` 로 실행해 보기
 
 - [ ] **Git 상태**
   - 커밋할 파일만 스테이징 (`.env`, `*.db` 제외되는지 확인)
@@ -53,11 +53,11 @@ git push -u origin main
 
 - [ ] **Build / Start 명령**
   - Build Command: `pip install -r requirements.txt`
-  - Start Command: `gunicorn --bind 0.0.0.0:$PORT app:app`
+  - Start Command: `gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app`
   - Render 가 `PORT` 를 자동으로 넣어 주므로 `$PORT` 사용
 
 - [ ] **Python 버전**
-  - Render → Build & Deploy → Environment 에서 `PYTHON_VERSION=3.12.0` (또는 3.11) 설정 가능
+  - Render → Build & Deploy → Environment 에서 `PYTHON_VERSION=3.13` (또는 3.12) 설정 가능
 
 - [ ] **DB 안내**
   - 기본값은 SQLite. Render 무료 플랜에서는 디스크가 재시작 시 초기화될 수 있음.
@@ -74,7 +74,7 @@ git push -u origin main
    - **Name**: basket-uncle (원하는 이름)
    - **Runtime**: Python
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn --bind 0.0.0.0:$PORT app:app`
+   - **Start Command**: `gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app`
 5. **Environment** 탭에서 `.env.example` 참고해 변수 추가
 6. **Create Web Service** → 빌드 후 URL 로 접속해 동작 확인
 
