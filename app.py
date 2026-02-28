@@ -15349,6 +15349,12 @@ def admin_product_bulk_upload():
                                 if found:
                                     image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
                                     break
+                    if not image_url:
+                        for base in (name_val + "1", name_val + "_1", name_val.replace(" ", "") + "1", name_val.replace(" ", "") + "_1"):
+                            found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
+                            if found:
+                                image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                break
                 if not image_url:
                     main_img = _bulk_image_filename_only(main_img_raw)
                     if main_img and not _bulk_is_placeholder_image(main_img):
@@ -15394,6 +15400,11 @@ def admin_product_bulk_upload():
                                 found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
                                 if not found and suffix.isdigit():
                                     found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + "_" + suffix)
+                        if not found:
+                            for base in (name_val + suffix, name_val + "_" + suffix, name_val.replace(" ", "") + suffix, name_val.replace(" ", "") + "_" + suffix):
+                                found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
+                                if found:
+                                    break
                         if found:
                             detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                     if detail_parts:
@@ -15459,6 +15470,16 @@ def _bulk_normalize_name(s):
     return unicodedata.normalize("NFC", t) if t else ""
 
 
+def _bulk_normalize_for_fuzzy_match(s):
+    """파일명 비교용 퍼지 키: 공백·._- 제거, 소문자, NFC. '고추장 오돌뼈 200g1' == '고추장오돌뼈 200g 1' 등."""
+    if not s or not isinstance(s, str):
+        return ""
+    t = unicodedata.normalize("NFC", s.strip().lower())
+    for c in " \t._-\u00a0\u200b\u200c\u200d\ufeff":
+        t = t.replace(c, "")
+    return t
+
+
 def _bulk_is_placeholder_image(s):
     """엑셀 양식 placeholder(파일명.jpg 등)이면 True. 실제 파일명만 URL에 쓰기 위해."""
     if not s or not isinstance(s, str):
@@ -15489,7 +15510,7 @@ def _bulk_image_filename_only(s):
 
 def _bulk_find_upload_file(upload_dir, filename):
     """upload_dir 안에 filename과 일치하는 파일이 있으면 URL용 파일명 반환, 없으면 None.
-    Windows에서는 대소문자 구분 없이 매칭. 엑셀 인코딩 차이를 위해 NFC 정규화도 시도."""
+    Windows에서는 대소문자 구분 없이 매칭. NFC/NFD·퍼지(공백·기호 무시) 매칭 시도."""
     if not filename or not isinstance(filename, str):
         return None
     name = filename.strip().strip('"').strip("'").replace("\\", "/").lstrip("/")
@@ -15498,22 +15519,24 @@ def _bulk_find_upload_file(upload_dir, filename):
     name = _bulk_normalize_name(name) or name.strip()
     if not name:
         return None
-    for candidate in (name, unicodedata.normalize("NFC", name)) if unicodedata.normalize("NFC", name) != name else (name,):
+    for candidate in (name, unicodedata.normalize("NFC", name), unicodedata.normalize("NFD", name)):
         direct = os.path.join(upload_dir, candidate)
         if os.path.isfile(direct):
             return candidate
-    if os.name == "nt":
-        want_low = name.lower()
-        want_nfc = unicodedata.normalize("NFC", name).lower()
-        try:
-            for fn in os.listdir(upload_dir):
-                p = os.path.join(upload_dir, fn)
-                if not os.path.isfile(p):
-                    continue
-                if fn.lower() == want_low or fn.lower() == want_nfc:
-                    return fn
-        except OSError:
-            pass
+    want_low = name.lower()
+    want_nfc = unicodedata.normalize("NFC", name).lower()
+    want_fuzzy = _bulk_normalize_for_fuzzy_match(name)
+    try:
+        for fn in os.listdir(upload_dir):
+            p = os.path.join(upload_dir, fn)
+            if not os.path.isfile(p):
+                continue
+            if fn.lower() == want_low or fn.lower() == want_nfc:
+                return fn
+            if want_fuzzy and _bulk_normalize_for_fuzzy_match(fn) == want_fuzzy:
+                return fn
+    except OSError:
+        pass
     return None
 
 
@@ -15529,6 +15552,29 @@ def _bulk_find_upload_by_basename(upload_dir, base_without_ext):
         found = _bulk_find_upload_file(upload_dir, base + ext)
         if found:
             return found
+    return None
+
+
+def _bulk_find_upload_by_basename_fuzzy(upload_dir, base_without_ext):
+    """공백·._- 차이 무시하고 퍼지 매칭. 상품명+숫자 형태가 파일명과 조금 달라도 매칭."""
+    if not base_without_ext or not isinstance(base_without_ext, str):
+        return None
+    want = _bulk_normalize_for_fuzzy_match(base_without_ext)
+    if not want:
+        return None
+    exts = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
+    try:
+        for fn in os.listdir(upload_dir):
+            p = os.path.join(upload_dir, fn)
+            if not os.path.isfile(p):
+                continue
+            base, ext = os.path.splitext(fn)
+            if ext.lower() not in exts:
+                continue
+            if _bulk_normalize_for_fuzzy_match(base) == want:
+                return fn
+    except OSError:
+        pass
     return None
 
 
