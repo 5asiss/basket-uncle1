@@ -383,6 +383,31 @@ def logi_admin_dashboard():
                 </div>
             </div> 
 
+            <!-- 기사용 로그인 바로가기 (동일 화면에서 /logi/work 로그인) -->
+            <div class="bg-white p-5 rounded-[2rem] border border-emerald-100 shadow-sm mb-6">
+                <h3 class="text-[11px] font-black text-emerald-600 mb-3 italic flex items-center gap-2">
+                    <span class="w-1.5 h-4 bg-emerald-500 rounded-full"></span> 기사용 접속 (바삼기사)
+                </h3>
+                <p class="text-[11px] text-slate-500 font-bold mb-3">
+                    기사님 성함과 전화번호를 입력하면, <b>/logi/work</b> 페이지로 이동하여 바로 업무를 시작할 수 있습니다.
+                </p>
+                <form action="{{ url_for('logi.logi_driver_work') }}" method="GET" class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                    <div class="flex flex-col">
+                        <label class="text-[10px] text-slate-500 font-black mb-1">기사 성함</label>
+                        <input type="text" name="driver_name" placeholder="성함 입력" class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold" autocomplete="name">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-[10px] text-slate-500 font-black mb-1">전화번호 (숫자만)</label>
+                        <input type="tel" name="auth_phone" placeholder="010..." class="border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold" autocomplete="tel">
+                    </div>
+                    <div class="flex flex-col">
+                        <button type="submit" class="w-full bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-xs font-black hover:bg-emerald-700">
+                            기사 로그인 페이지 열기
+                        </button>
+                    </div>
+                </form>
+            </div>
+
             <div class="bg-white p-5 rounded-[2rem] border border-blue-50 shadow-sm mb-6">
                 <h3 class="text-[11px] font-black text-blue-500 mb-4 italic flex items-center gap-2"><span class="w-1.5 h-4 bg-blue-500 rounded-full"></span> 카테고리별 품목 합계 및 전체선택</h3>
                 <div class="space-y-4">

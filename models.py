@@ -31,6 +31,7 @@ class User(db.Model, UserMixin):
     phone = db.Column(db.String(20))
     address = db.Column(db.String(200))
     address_detail = db.Column(db.String(200))
+    address_apt_name = db.Column(db.String(100), nullable=True)
     entrance_pw = db.Column(db.String(100))
     request_memo = db.Column(db.String(500))
     is_admin = db.Column(db.Boolean, default=False)
@@ -46,6 +47,7 @@ class User(db.Model, UserMixin):
     utm_source = db.Column(db.String(100), nullable=True)
     utm_medium = db.Column(db.String(100), nullable=True)
     utm_campaign = db.Column(db.String(100), nullable=True)
+
     __table_args__ = (db.UniqueConstraint('auth_provider', 'auth_provider_id', name='uq_user_auth_provider'),)
 
 
