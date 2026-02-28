@@ -5604,6 +5604,19 @@ def product_detail(pid):
     if (not detail_images) and getattr(p, 'image_url', None):
         detail_images = [p.image_url]
 
+    # 배포 환경에서 모바일에서 이미지가 안 나오는 현상 방지: 상대 경로를 절대 URL로 변환 (SITE_URL 또는 request 기준)
+    _base_url = (os.getenv('SITE_URL') or request.url_root or '').strip().rstrip('/')
+    def _abs_url(url):
+        if not url or not url.strip():
+            return _base_url + '/static/uploads/placeholder.png'
+        u = url.strip()
+        if u.startswith('http://') or u.startswith('https://'):
+            return u
+        return _base_url + (u if u.startswith('/') else '/' + u)
+    product_image_url_absolute = _abs_url(getattr(p, 'image_url', None))
+    detail_images_absolute = [_abs_url(img) for img in detail_images]
+    product_base_url = _base_url
+
     _record_page_view('product')
     is_expired = (p.deadline and p.deadline < now_kst())
     cat_info = Category.query.filter_by(name=p.category).first()
@@ -5649,7 +5662,7 @@ def product_detail(pid):
     <div class="max-w-5xl xl:max-w-[1400px] 2xl:max-w-[1600px] mx-auto px-0 md:px-8 lg:px-12 xl:px-16 2xl:px-20 pb-16 font-black text-left">
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-12 lg:gap-16 xl:gap-20 items-start">
-            <div class="relative w-full bg-white overflow-hidden md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100">
+            <div class="relative w-full min-h-[280px] md:min-h-0 bg-white overflow-hidden md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100 flex items-center justify-center">
                 {% if p.description %}
                 <div class="absolute top-6 left-0 z-20">
                     <span class="px-5 py-2 text-xs md:text-sm font-black text-white shadow-xl rounded-r-full 
@@ -5662,7 +5675,7 @@ def product_detail(pid):
                 </div>
                 {% endif %}
 
-                <img src="{{ p.image_url }}" class="w-full h-auto p-6 md:p-12" loading="lazy">
+                <img src="{{ product_image_url_absolute }}" alt="{{ p.name }}" class="w-full h-auto max-h-[70vh] md:max-h-none object-contain p-6 md:p-12" loading="lazy" onerror="this.onerror=null; this.src='https://placehold.co/600x600/f1f5f9/94a3b8?text=상품';">
                 
                 {% if is_expired or p.stock <= 0 %}
                 <div class="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px]">
@@ -5797,7 +5810,7 @@ def product_detail(pid):
                         {% for cp in same_category_products[:4] %}
                         <a href="/product/{{ cp.id }}" class="group block bg-white rounded-2xl border border-gray-100 p-3 shadow-sm hover:shadow-lg hover:border-teal-200 transition-all text-left">
                             <div class="aspect-square rounded-xl overflow-hidden bg-gray-50 mb-2">
-                                <img src="{{ cp.image_url or 'https://placehold.co/400x400/f1f5f9/94a3b8?text=상품' }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" onerror="this.src='https://placehold.co/400x400/f1f5f9/94a3b8?text=상품'">
+                                <img src="{{ (product_base_url + (cp.image_url if cp.image_url.startswith('/') else '/' + cp.image_url)) if (cp.image_url and not cp.image_url.startswith('http')) else (cp.image_url or 'https://placehold.co/400x400/f1f5f9/94a3b8?text=상품') }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" onerror="this.src='https://placehold.co/400x400/f1f5f9/94a3b8?text=상품'">
                             </div>
                             <p class="text-[11px] font-black text-gray-800 truncate leading-tight">{{ cp.name }}</p>
                             <p class="text-[10px] font-bold text-teal-600 mt-0.5">{{ "{:,}".format(cp.price) }}원</p>
@@ -5829,12 +5842,12 @@ def product_detail(pid):
                     <i class="fas fa-quote-right text-teal-200 text-4xl mt-6"></i>
                 </div>
                 <div class="flex flex-col gap-0 max-w-4xl xl:max-w-6xl 2xl:max-w-7xl mx-auto">
-                    {% if detail_images %}
-                        {% for img in detail_images %}
-                        <img src="{{ img.strip() }}" class="w-full shadow-sm" loading="lazy" onerror="this.style.display='none'">
+                    {% if detail_images_absolute %}
+                        {% for img in detail_images_absolute %}
+                        <img src="{{ img }}" alt="" class="w-full min-h-[200px] md:min-h-0 shadow-sm object-contain bg-gray-50" loading="lazy" onerror="this.onerror=null; this.src='https://placehold.co/800x400/f1f5f9/94a3b8?text=이미지';">
                         {% endfor %}
                     {% else %}
-                        <img src="{{ p.image_url }}" class="w-full rounded-3xl opacity-60 grayscale p-10">
+                        <img src="{{ product_image_url_absolute }}" alt="" class="w-full rounded-3xl opacity-60 grayscale p-10 object-contain" onerror="this.onerror=null; this.src='https://placehold.co/600x600/f1f5f9/94a3b8?text=상품';">
                     {% endif %}
                 </div>
             </div>
@@ -6060,6 +6073,8 @@ def product_detail(pid):
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, 
                                   p=p, is_expired=is_expired, detail_images=detail_images, 
+                                  detail_images_absolute=detail_images_absolute,
+                                  product_image_url_absolute=product_image_url_absolute,
                                   cat_info=cat_info, latest_all=latest_all, 
                                   keyword_recommends=keyword_recommends, 
                                   same_category_products=same_category_products,
@@ -6071,9 +6086,10 @@ def product_detail(pid):
                                   recommend_cats_detail=recommend_cats_detail,
                                   cat_previews_detail=cat_previews_detail,
                                   category_delivery_desc=category_delivery_desc,
+                                  product_base_url=product_base_url,
                                   product_share_url=request.url_root.rstrip('/') + '/product/' + str(pid),
                                   product_share_title=p.name or '상품',
-                                  product_share_image=(p.image_url if (p.image_url and (p.image_url.startswith('http://') or p.image_url.startswith('https://'))) else (request.url_root.rstrip('/') + (p.image_url or '/static/uploads/placeholder.png'))),
+                                  product_share_image=product_image_url_absolute,
                                   kakao_js_key=KAKAO_REST_API_KEY or '')
 
 
