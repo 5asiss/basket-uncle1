@@ -17619,6 +17619,7 @@ with app.app_context():
             db.session.rollback()
     init_db() # 기존 쇼핑몰 초기화 함수 호출
     
+    
     # 로컬 테스트 및 Render 배포 호환 포트 설정 (기본 5000)
     port = int(os.environ.get("PORT", 5000))
     root = os.path.dirname(os.path.abspath(__file__))
