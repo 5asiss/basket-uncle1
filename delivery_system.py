@@ -1349,6 +1349,13 @@ def logi_bulk_pickup():
         if t and t.status in ['배정완료', '대기']: 
             t.status, t.pickup_at = '픽업', datetime.now()
             logi_add_log(t.id, t.order_id, '픽업', '일괄 상차 완료 처리')
+            # 메인 앱에 배송중 반영 및 고객 메시지 발송
+            try:
+                url = (request.host_url or request.url_root or '').rstrip('/') + '/api/logi/delivery-in-progress'
+                if url.startswith('http'):
+                    requests.post(url, json={'order_id': t.order_id, 'category': t.category or ''}, timeout=10)
+            except Exception:
+                pass
     db_delivery.session.commit(); return jsonify({"success": True})
 
 @logi_bp.route('/update_status/<int:tid>/<string:new_status>')
@@ -1360,6 +1367,14 @@ def logi_update_task_status(tid, new_status):
         if new_status == '픽업': t.pickup_at = datetime.now()
         logi_add_log(t.id, t.order_id, new_status, f'{old} -> {new_status} 상태 변경')
         db_delivery.session.commit()
+        # 픽업 시 메인 앱 배송중 반영 및 고객 메시지 발송
+        if new_status == '픽업':
+            try:
+                url = (request.host_url or request.url_root or '').rstrip('/') + '/api/logi/delivery-in-progress'
+                if url.startswith('http'):
+                    requests.post(url, json={'order_id': t.order_id, 'category': t.category or ''}, timeout=10)
+            except Exception:
+                pass
     return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
 
 @logi_bp.route('/complete_action/<int:tid>', methods=['POST'])

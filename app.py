@@ -8246,6 +8246,32 @@ def _save_delivery_proof_base64(data_url_or_base64):
         return None
 
 
+@app.route('/api/logi/delivery-in-progress', methods=['POST'])
+def api_logi_delivery_in_progress():
+    """로지(기사) 픽업(상차) 콜백. order_id(문자열), category 수신 → 해당 품목 배송중 반영 및 고객 메시지 발송."""
+    data = request.get_json() or {}
+    order_id_str = (data.get('order_id') or '').strip()
+    category = (data.get('category') or '').strip()
+    if not order_id_str:
+        return jsonify({"success": False, "message": "order_id가 필요합니다."}), 400
+    order = Order.query.filter_by(order_id=order_id_str).first()
+    if not order:
+        return jsonify({"success": False, "message": "주문을 찾을 수 없습니다."}), 404
+    items = OrderItem.query.filter_by(order_id=order.id, cancelled=False).filter(OrderItem.product_category == category).all()
+    if not items:
+        return jsonify({"success": False, "message": "해당 카테고리 품목이 없습니다."}), 404
+    for oi in items:
+        old_status = getattr(oi, 'item_status', None) or '결제완료'
+        oi.item_status = '배송중'
+        oi.status_message = None
+        db.session.add(OrderItemLog(order_id=order.id, order_item_id=oi.id, log_type='item_status', old_value=old_status, new_value='배송중', created_at=datetime.now()))
+    db.session.commit()
+    title, body = get_template_content('delivery_in_progress', order_id=order.order_id)
+    if order.user_id:
+        send_message(order.user_id, title, body, 'delivery_in_progress', order.id)
+    return jsonify({"success": True, "message": "배송중 반영 및 고객 알림 발송 완료."})
+
+
 @app.route('/api/logi/delivery-complete', methods=['POST'])
 def api_logi_delivery_complete():
     """로지(기사) 배송완료 콜백. order_id(문자열), category, photo(base64) 수신 → 품목 배송완료 처리 및 고객 메시지에 사진 포함."""
