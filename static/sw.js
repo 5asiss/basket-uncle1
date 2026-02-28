@@ -1,4 +1,4 @@
-const CACHE_NAME = 'basket-uncle-v3';
+const CACHE_NAME = 'basket-uncle-v4';
 
 // 설치: 정적 자원 + 오프라인 페이지 캐시
 self.addEventListener('install', (event) => {
@@ -64,6 +64,7 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 // fetch: 네트워크 우선, 실패 시 캐시 → 오프라인 페이지
+// 상품 이미지(/static/uploads/): 네트워크 우선, 실패 응답(404 등)은 캐시하지 않음 → 모바일에서 이미지 안 나오는 현상 방지
 self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
@@ -77,13 +78,33 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-  if (/\.(js|css|jpg|jpeg|png|gif|ico|woff2?|svg)(\?.*)?$/i.test(event.request.url)) {
+  var url = event.request.url;
+  var isUpload = url.indexOf('/static/uploads/') !== -1 || url.indexOf('uploads/') !== -1;
+
+  if (/\.(js|css|jpg|jpeg|png|gif|ico|woff2?|svg)(\?.*)?$/i.test(url)) {
+    if (isUpload) {
+      // 상품/업로드 이미지: 네트워크 우선, 성공한 응답만 캐시 (404 등 실패 응답 캐시 금지)
+      event.respondWith(
+        fetch(event.request).then(function(res) {
+          if (res.ok) {
+            var clone = res.clone();
+            caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
+          }
+          return res;
+        }).catch(function() {
+          return caches.match(event.request);
+        })
+      );
+      return;
+    }
+    // 일반 정적 자원: 캐시 우선, 단 성공한 응답만 캐시
     event.respondWith(
-      caches.match(event.request).then((cached) => {
+      caches.match(event.request).then(function(cached) {
         if (cached) return cached;
-        return fetch(event.request).then((res) => {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return fetch(event.request).then(function(res) {
+          if (!res.ok) return res;
+          var clone = res.clone();
+          caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
           return res;
         });
       })
