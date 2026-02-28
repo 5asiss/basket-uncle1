@@ -3,7 +3,7 @@
 
 # 수동 설정 시 Dashboard 에서:
 # - Build Command: pip install -r requirements.txt
-# - Start Command: gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app
+# - Start Command: gunicorn -c gunicorn_config.py app:app  (PORT는 설정 파일에서 읽음)
 # - Environment: FLASK_SECRET_KEY, TOSS_CLIENT_KEY, TOSS_SECRET_KEY 등 .env.example 참고
 
 # 백업 Cron: 매일 04:00 KST = 19:00 UTC. Web Service URL과 BACKUP_CRON_SECRET을 Cron 서비스 환경변수에 설정.
@@ -14,7 +14,7 @@ services:
     name: basket-uncle
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app
+    startCommand: gunicorn -c gunicorn_config.py app:app
     healthCheckPath: /health
     envVars:
       - key: FLASK_SECRET_KEY

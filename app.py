@@ -2868,7 +2868,7 @@ def inject_globals():
 @app.route('/health')
 def health_check():
     """Render 등 호스팅 헬스체크·포트 감지용. DB/로직 없이 200만 반환."""
-    return "", 200
+    return "ok", 200, {"Content-Type": "text/plain"}
 
 
 @app.route('/api/search')
