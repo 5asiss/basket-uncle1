@@ -9,6 +9,7 @@ import re
 import json
 import random
 import uuid
+import unicodedata
 from urllib.parse import quote
 
 import pandas as pd
@@ -2730,12 +2731,12 @@ def inject_globals():
 
 @app.route('/api/search')
 def api_search():
-    """검색 무한 스크롤용 API (30개 단위, offset/limit)"""
+    """검색 무한 스크롤용 API (50개 단위, offset/limit)"""
     q = request.args.get('q', '').strip()
     if not q:
         return jsonify([])
     offset = int(request.args.get('offset', 0))
-    limit = min(int(request.args.get('limit', 30)), 50)
+    limit = min(int(request.args.get('limit', 50)), 100)
     query = Product.query.filter(Product.is_active == True, Product.name.contains(q)).order_by(Product.id.desc())
     products = query.offset(offset).limit(limit).all()
     return jsonify([{
@@ -2747,15 +2748,15 @@ def api_search():
 
 @app.route('/search')
 def search_view():
-    """검색 결과 전용 페이지 (30개 초기 로딩 + 무한 스크롤, 트래픽 절감)"""
+    """검색 결과 전용 페이지 (50개 초기 로딩 + 무한 스크롤, 트래픽 절감)"""
     query = request.args.get('q', '').strip()
     if not query:
         return redirect(url_for('index'))
 
     base_query = Product.query.filter(Product.is_active == True, Product.name.contains(query)).order_by(Product.id.desc())
     total_count = base_query.count()
-    search_products = base_query.limit(30).all()
-    search_has_more = total_count > 30
+    search_products = base_query.limit(50).all()
+    search_has_more = total_count > 50
 
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
     recommend_cats = categories_for_member_grade(grade).limit(3).all()
@@ -2816,7 +2817,7 @@ def search_view():
     {% if search_has_more %}
     <script>
     (function(){
-        var searchOffset = 30;
+        var searchOffset = 50;
         var searchLoading = false;
         var searchHasMore = true;
         var searchQ = {{ query|tojson }};
@@ -2825,7 +2826,7 @@ def search_view():
             if (searchLoading || !searchHasMore) return;
             searchLoading = true;
             document.getElementById('search-spinner').classList.remove('hidden');
-            fetch('/api/search?q=' + encodeURIComponent(searchQ) + '&offset=' + searchOffset + '&limit=30')
+            fetch('/api/search?q=' + encodeURIComponent(searchQ) + '&offset=' + searchOffset + '&limit=50')
                 .then(function(r){ return r.json(); })
                 .then(function(data){
                     if (!data || data.length === 0){ searchHasMore = false; document.getElementById('search-end-message').classList.remove('hidden'); }
@@ -2841,7 +2842,7 @@ def search_view():
                                 + '<button onclick="addToCart(\\'' + p.id + '\\')" class="bg-teal-600 w-8 h-8 md:w-14 md:h-14 rounded-xl text-white flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button></div></div></div>');
                         });
                         searchOffset += data.length;
-                        if (data.length < 30) { searchHasMore = false; document.getElementById('search-end-message').classList.remove('hidden'); }
+                        if (data.length < 50) { searchHasMore = false; document.getElementById('search-end-message').classList.remove('hidden'); }
                     }
                 })
                 .catch(function(e){ searchHasMore = false; })
@@ -3358,9 +3359,9 @@ def index():
     
     order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     
-    # 최신 상품 30개 중 30개 랜덤
-    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(30).all()
-    random_latest = random.sample(latest_all, min(len(latest_all), 30)) if latest_all else []
+    # 최신 상품 50개 중 50개 랜덤
+    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(50).all()
+    random_latest = random.sample(latest_all, min(len(latest_all), 50)) if latest_all else []
     
     # 오늘 마감 상품 (트래픽 절감용 상한)
     today_end = now_kst().replace(hour=23, minute=59, second=59)
@@ -5031,9 +5032,9 @@ def board_comment_add():
 # [추가] 무한 스크롤을 위한 상품 데이터 제공 API
 @app.route('/api/category_products/<string:cat_name>')
 def api_category_products(cat_name):
-    """무한 스크롤용 데이터 제공 API (30개 단위)"""
+    """무한 스크롤용 데이터 제공 API (50개 단위)"""
     page = int(request.args.get('page', 1))
-    per_page = 30
+    per_page = 50
     offset = (page - 1) * per_page
     
     query = Product.query.filter_by(is_active=True)
@@ -5064,11 +5065,11 @@ def api_category_products(cat_name):
     return jsonify(res_data)
 @app.route('/category/<string:cat_name>')
 def category_view(cat_name):
-    """카테고리별 상품 목록 뷰 (무한 스크롤, 30개 단위, 스크롤 시 1초 대기 후 추가 로딩)"""
+    """카테고리별 상품 목록 뷰 (무한 스크롤, 50개 단위, 스크롤 시 1초 대기 후 추가 로딩)"""
     _record_page_view('category')
     order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     cat = None
-    limit_num = 30
+    limit_num = 50
     
     if cat_name == '최신상품':
         products = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(limit_num).all()
@@ -5201,7 +5202,7 @@ def category_view(cat_name):
 
         page++;
         try {
-            const res = await fetch(`/api/category_products/${encodeURIComponent(catName)}?page=${page}&per_page=30`);
+            const res = await fetch(`/api/category_products/${encodeURIComponent(catName)}?page=${page}&per_page=50`);
             const data = await res.json();
 
             if (!data || data.length === 0) {
@@ -5248,7 +5249,7 @@ def category_view(cat_name):
                 grid.insertAdjacentHTML('beforeend', html);
             });
 
-            if (data.length < 30) {
+            if (data.length < 50) {
                 hasMore = false;
                 document.getElementById('end-message').classList.remove('hidden');
             }
@@ -9838,7 +9839,7 @@ def admin_dashboard():
     if tab == 'products':
         product_q = (request.args.get('q') or request.args.get('product_q') or '').strip()
         product_page = max(1, int(request.args.get('page', 1)))
-        per_page = 30
+        per_page = 50
         q = Product.query
         if not is_master:
             q = q.filter(Product.category.in_(my_categories))
@@ -15290,6 +15291,7 @@ def admin_product_bulk_upload():
             if not name_val or name_val.startswith('('):
                 continue
             name_val = name_val.strip().replace('\ufeff', '').strip()
+            name_val = _bulk_normalize_name(name_val)
             try:
                 price_val = int(float(row.get('가격', 0)))
             except (ValueError, TypeError):
@@ -15327,9 +15329,11 @@ def admin_product_bulk_upload():
             image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
             if not image_url:
                 if not main_img_raw or _bulk_is_placeholder_image(main_img_raw):
-                    found = _bulk_find_upload_by_basename(upload_dir, name_val + "1")
-                    if found:
-                        image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                    for suffix in ("1", "_1"):
+                        found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
+                        if found:
+                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                            break
                 if not image_url:
                     main_img = _bulk_image_filename_only(main_img_raw)
                     if main_img and not _bulk_is_placeholder_image(main_img):
@@ -15367,6 +15371,8 @@ def admin_product_bulk_upload():
                     detail_parts = []
                     for suffix in ("2", "3", "4", "5", "6", "7", "8", "9", "10"):
                         found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
+                        if not found and suffix.isdigit():
+                            found = _bulk_find_upload_by_basename(upload_dir, name_val + "_" + suffix)
                         if found:
                             detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                     if detail_parts:
@@ -15407,7 +15413,9 @@ def admin_product_bulk_upload():
                 if detail_fs:
                     parts.append(f"상세:{','.join(detail_fs)}")
                 lines.append(f"{name} ({'; '.join(parts)})")
-            flash(f"다음 상품 이미지가 서버(static/uploads/)에 없어 URL이 비었습니다: {' | '.join(lines[:10])}{' ...' if len(lines) > 10 else ''}")
+            n = len(missing_images)
+            flash(f"이미지가 없는 {n}건: {' | '.join(lines[:10])}{' ...' if len(lines) > 10 else ''}")
+            flash("→ 엑셀의 대표·상세이미지파일명을 '저장된 이미지 목록'에 보이는 파일명과 똑같이 쓰거나, 칸을 비우면 상품명+1·상품명+2 패턴으로 찾습니다. 공백·오타·인코딩이 다르면 매칭되지 않습니다.")
         return redirect('/admin?tab=bulk_register')
     except Exception as e:
         db.session.rollback()
@@ -15417,6 +15425,17 @@ def admin_product_bulk_upload():
         db.session.rollback()
         flash(f"업로드 중 오류가 발생했습니다: {str(e)}")
         return redirect('/admin?tab=bulk_register')
+
+
+def _bulk_normalize_name(s):
+    """엑셀에서 읽은 상품명·파일명 정규화: BOM·유니코드 공백 제거, NFC 정규화. 매칭 실패 방지용."""
+    if not s or not isinstance(s, str):
+        return s if s else ""
+    t = s.replace("\ufeff", "").strip()
+    for c in ("\u200b", "\u200c", "\u200d", "\ufeff", "\u00a0"):
+        t = t.replace(c, " ")
+    t = " ".join(t.split())
+    return unicodedata.normalize("NFC", t) if t else ""
 
 
 def _bulk_is_placeholder_image(s):
@@ -15449,23 +15468,28 @@ def _bulk_image_filename_only(s):
 
 def _bulk_find_upload_file(upload_dir, filename):
     """upload_dir 안에 filename과 일치하는 파일이 있으면 URL용 파일명 반환, 없으면 None.
-    Windows에서는 대소문자 구분 없이 매칭."""
+    Windows에서는 대소문자 구분 없이 매칭. 엑셀 인코딩 차이를 위해 NFC 정규화도 시도."""
     if not filename or not isinstance(filename, str):
         return None
     name = filename.strip().strip('"').strip("'").replace("\\", "/").lstrip("/")
     if "/" in name:
         name = os.path.basename(name)
+    name = _bulk_normalize_name(name) or name.strip()
     if not name:
         return None
-    direct = os.path.join(upload_dir, name)
-    if os.path.isfile(direct):
-        return name
+    for candidate in (name, unicodedata.normalize("NFC", name)) if unicodedata.normalize("NFC", name) != name else (name,):
+        direct = os.path.join(upload_dir, candidate)
+        if os.path.isfile(direct):
+            return candidate
     if os.name == "nt":
         want_low = name.lower()
+        want_nfc = unicodedata.normalize("NFC", name).lower()
         try:
             for fn in os.listdir(upload_dir):
                 p = os.path.join(upload_dir, fn)
-                if os.path.isfile(p) and fn.lower() == want_low:
+                if not os.path.isfile(p):
+                    continue
+                if fn.lower() == want_low or fn.lower() == want_nfc:
                     return fn
         except OSError:
             pass
