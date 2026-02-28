@@ -3072,32 +3072,32 @@ def index():
 </div>
 
 <div id="products">
-    <!-- 카테고리 바로가기 (기능별/카테고리별) -->
-    <section class="mb-10">
-        <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
-            <h2 class="section-title bar-green"><span class="bar"></span> 카테고리</h2>
+    <!-- 카테고리 바로가기 (기능별/카테고리별) - 표시 크기 축소 -->
+    <section class="mb-6">
+        <div class="flex justify-between items-end border-b border-slate-100 pb-2 mb-3">
+            <h2 class="section-title bar-green text-base md:text-lg"><span class="bar"></span> 카테고리</h2>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 lg:gap-4">
+        <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2 md:gap-3">
             {% for cat, prods in grouped_products.items() %}
-            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center p-5 lg:p-6 rounded-2xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-lg transition-all text-center">
-                <span class="w-12 h-12 lg:w-14 lg:h-14 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 text-xl lg:text-2xl mb-2"><i class="fas fa-th-large"></i></span>
-                <span class="text-xs md:text-sm lg:text-base font-black text-slate-700">{{ cat.name }}</span>
-                <span class="text-[10px] text-slate-400 font-bold mt-0.5">{{ prods|length }}종</span>
+            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-md transition-all text-center">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-teal-50 flex items-center justify-center text-teal-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-large"></i></span>
+                <span class="text-[10px] md:text-xs font-black text-slate-700 leading-tight">{{ cat.name }}</span>
+                <span class="text-[9px] text-slate-400 font-bold mt-0.5">{{ prods|length }}종</span>
             </a>
             {% endfor %}
-            <a href="/category/오늘마감" class="flex flex-col items-center justify-center p-5 rounded-2xl border border-red-100 bg-red-50/50 hover:shadow-lg transition-all text-center">
-                <span class="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center text-red-600 text-xl mb-2"><i class="fas fa-clock"></i></span>
-                <span class="text-xs md:text-sm font-black text-red-800">오늘 마감</span>
+            <a href="/category/오늘마감" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border border-red-100 bg-red-50/50 hover:shadow-md transition-all text-center">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-600 text-base md:text-lg mb-1.5"><i class="fas fa-clock"></i></span>
+                <span class="text-[10px] md:text-xs font-black text-red-800">오늘 마감</span>
             </a>
-            <a href="/category/최신상품" class="flex flex-col items-center justify-center p-5 rounded-2xl border border-blue-100 bg-blue-50/50 hover:shadow-lg transition-all text-center">
-                <span class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 text-xl mb-2"><i class="fas fa-star"></i></span>
-                <span class="text-xs md:text-sm font-black text-blue-800">최신 상품</span>
+            <a href="/category/최신상품" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border border-blue-100 bg-blue-50/50 hover:shadow-md transition-all text-center">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 text-base md:text-lg mb-1.5"><i class="fas fa-star"></i></span>
+                <span class="text-[10px] md:text-xs font-black text-blue-800">최신 상품</span>
             </a>
             {% if has_more_categories %}
-            <a href="/categories" class="flex flex-col items-center justify-center p-5 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 hover:border-teal-300 hover:bg-teal-50/50 transition-all text-center col-span-2 sm:col-span-3 md:col-span-2">
-                <span class="w-12 h-12 rounded-xl bg-teal-100 flex items-center justify-center text-teal-600 text-xl mb-2"><i class="fas fa-th-list"></i></span>
-                <span class="text-xs md:text-sm font-black text-slate-700">카테고리 전체보기</span>
-                <span class="text-[10px] text-slate-400 font-bold mt-0.5">총 {{ total_categories_count }}개 더보기</span>
+            <a href="/categories" class="flex flex-col items-center justify-center p-3 md:p-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 hover:border-teal-300 hover:bg-teal-50/50 transition-all text-center col-span-2 sm:col-span-2 md:col-span-2">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-teal-100 flex items-center justify-center text-teal-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-list"></i></span>
+                <span class="text-[10px] md:text-xs font-black text-slate-700">카테고리 전체보기</span>
+                <span class="text-[9px] text-slate-400 font-bold mt-0.5">총 {{ total_categories_count }}개</span>
             </a>
             {% endif %}
         </div>
@@ -7735,9 +7735,13 @@ def order_confirm():
                 </div>
             </details>
             <div class="space-y-2">
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm font-black text-teal-700 border-b border-gray-200 pb-2">
+                    <input type="checkbox" id="consent_all" class="rounded border-gray-300 text-teal-600">
+                    <span>전체 동의하기</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="consent-item rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="consent-item rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="consent-item rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
             <form id="payForm" action="/order/payment" method="POST">
@@ -7755,6 +7759,18 @@ def order_confirm():
     <script>
     var orderTotal = { total };
     var maxUse = { max_use };
+    (function() {{
+        var all = document.getElementById('consent_all');
+        var items = document.querySelectorAll('.consent-item');
+        if (all && items.length) {{
+            all.addEventListener('change', function() {{ items.forEach(function(el) {{ el.checked = all.checked; }}); }});
+            items.forEach(function(el) {{
+                el.addEventListener('change', function() {{
+                    all.checked = Array.prototype.every.call(items, function(c) {{ return c.checked; }});
+                }});
+            }});
+        }}
+    }})();
     function startPayment() {{
         if(!document.getElementById('consent_partial_cancel').checked) {{ alert("취소 안내에 동의해 주세요."); return; }}
         if(!document.getElementById('consent_agency').checked) {{ alert("구매대행 서비스 동의가 필요합니다."); return; }}
@@ -7840,9 +7856,13 @@ def order_confirm():
                 </div>
             </details>
             <div class="space-y-2">
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm font-black text-teal-700 border-b border-gray-200 pb-2">
+                    <input type="checkbox" id="consent_all_quick" class="rounded border-gray-300 text-teal-600">
+                    <span>전체 동의하기</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
             <form id="payForm" action="/order/payment" method="POST">
@@ -7863,6 +7883,18 @@ def order_confirm():
     var quickExtraFee = { quick_extra_fee };
     var isQuickZone = { 'true' if is_quick_zone else 'false' };
     var totalWithQuick = { total_with_quick };
+    (function() {{
+        var all = document.getElementById('consent_all_quick');
+        var items = document.querySelectorAll('.consent-item-q');
+        if (all && items.length) {{
+            all.addEventListener('change', function() {{ items.forEach(function(el) {{ el.checked = all.checked; }}); }});
+            items.forEach(function(el) {{
+                el.addEventListener('change', function() {{
+                    all.checked = Array.prototype.every.call(items, function(c) {{ return c.checked; }});
+                }});
+            }});
+        }}
+    }})();
     function startPayment() {{
         if(!document.getElementById('consent_partial_cancel').checked) {{ alert("취소 안내에 동의해 주세요."); return; }}
         if(!document.getElementById('consent_agency').checked) {{ alert("구매대행 서비스 동의가 필요합니다."); return; }}
@@ -8298,8 +8330,7 @@ def admin_bulk_request_delivery():
         # 해당 주문의 모든 품목에도 배송요청 상태 적용
         for oi in OrderItem.query.filter_by(order_id=o.id, cancelled=False).all():
             oi.item_status = '배송요청'
-        title, body = get_template_content('delivery_requested', order_id=o.order_id)
-        send_message(o.user_id, title, body, 'delivery_requested', o.id)
+        # 배송요청 시에는 고객 메시지 발송하지 않음 (기사 픽업 시 배송중 메시지만 발송)
         count += 1
 
     db.session.commit()
@@ -8388,6 +8419,10 @@ def api_logi_delivery_in_progress():
     title, body = get_template_content('delivery_in_progress', order_id=order.order_id)
     if order.user_id:
         send_message(order.user_id, title, body, 'delivery_in_progress', order.id)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     return jsonify({"success": True, "message": "배송중 반영 및 고객 알림 발송 완료."})
 
 
@@ -8423,8 +8458,9 @@ def api_logi_delivery_complete():
     if order.user_id:
         try:
             send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=message_image_url)
+            db.session.commit()
         except Exception:
-            pass
+            db.session.rollback()
     # ② 카카오 알림톡 (기존대로 유지)
     try:
         extra_vars = {}
@@ -8509,12 +8545,9 @@ def admin_order_item_status():
     db.session.add(OrderItemLog(order_id=order_id, order_item_id=item_id, log_type='item_status', old_value=old_item_status, new_value=item_status, created_at=now_kst()))
     db.session.commit()
     # 배송 상태 변경 시 회원에게 자동 메시지 (배송완료 시 기사 사진 있으면 첨부)
-    # '배송중' 메시지는 관리자 변경 시에는 보내지 않음 → 기사 상차 완료 시에만 POST /api/logi/delivery-in-progress 로 전송
-    if item_status in ('배송요청', '배송완료', '배송지연'):
-        if item_status == '배송요청':
-            title, body = get_template_content('delivery_requested', order_id=order.order_id)
-            send_message(order.user_id, title, body, 'delivery_requested', order.id)
-        elif item_status == '배송완료':
+    # 배송요청 시 고객 메시지 발송 안 함. 배송중 메시지는 기사 픽업 시에만 POST /api/logi/delivery-in-progress 로 발송.
+    if item_status in ('배송완료', '배송지연'):
+        if item_status == '배송완료':
             title, body = get_template_content('delivery_complete', order_id=order.order_id)
             proof_url = getattr(oi, 'delivery_proof_image_url', None) or None
             send_message(order.user_id, title, body, 'delivery_complete', order.id, image_url=proof_url)
