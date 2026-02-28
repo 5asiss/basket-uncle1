@@ -10739,7 +10739,7 @@ def admin_dashboard():
 
     # 3. HTML 템플릿 코드
     # 3. HTML 템플릿 코드 (카테고리 설정 탭 완벽 복구본)
-    admin_html = """
+    admin_html = r"""
     <style id="admin-mobile-optimize">
     /* Admin 모바일 최적화: safe-area, 터치 영역, 테이블 가로 스크롤 */
     @media (max-width: 768px) {
@@ -18905,9 +18905,11 @@ with app.app_context():
             db.session.commit()
         except Exception:
             db.session.rollback()
-    init_db() # 기존 쇼핑몰 초기화 함수 호출
-    
-    # 로컬 테스트 및 Render 배포 호환 포트 설정 (기본 5000)
+    # init_db()와 app.run()은 아래 if __name__ == "__main__" 블록에서만 실행 (import 시 서버 미기동)
+
+if __name__ == "__main__":
+    with app.app_context():
+        init_db()
     port = int(os.environ.get("PORT", 5000))
     root = os.path.dirname(os.path.abspath(__file__))
     extra_files = [

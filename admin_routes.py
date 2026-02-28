@@ -4,14 +4,13 @@
 # -------------------------------------------------------------------------------
 from flask import Blueprint
 
-admin_bp = Blueprint('admin', __name__, url_prefix='')
-
 
 def register_admin_routes(app):
     """app이 완전히 로드된 뒤 호출. admin 뷰 함수를 app에서 가져와 Blueprint로 등록."""
-    # 이미 등록된 경우(순환 import로 인한 재호출) add_url_rule 방지
     if 'admin' in app.blueprints:
         return
+    # 호출마다 새 Blueprint 생성 (python app.py 시 __main__과 app 모듈이 각각 다른 app 인스턴스를 쓰므로, 한 블루프린트를 두 번 등록하려다 에러 나는 것 방지)
+    admin_bp = Blueprint('admin', __name__, url_prefix='')
     from flask_login import login_required
     from app import (
         admin_logi_redirect,
