@@ -15034,6 +15034,10 @@ def admin_product_bulk_upload():
             return redirect('/admin?tab=bulk_register')
         upload_dir = os.path.join(app.root_path, 'static', 'uploads')
         os.makedirs(upload_dir, exist_ok=True)
+        # DB 삭제 후 카테고리가 없으면 등록 건수가 0이 되므로, 사전 안내
+        if not Category.query.first():
+            flash("등록된 카테고리가 없습니다. 먼저 [카테고리] 탭에서 카테고리를 추가한 뒤 대량등록을 진행해 주세요.")
+            return redirect('/admin?tab=bulk_register')
         count = 0
         for idx, row in df.iterrows():
             cat_name = _cell_str(row.get('카테고리', ''))
@@ -15139,6 +15143,10 @@ def admin_product_bulk_upload():
     except Exception as e:
         db.session.rollback()
         flash(f"업로드 실패: {str(e)}")
+        return redirect('/admin?tab=bulk_register')
+    except BaseException as e:
+        db.session.rollback()
+        flash(f"업로드 중 오류가 발생했습니다: {str(e)}")
         return redirect('/admin?tab=bulk_register')
     finally:
         if tmp_dir and os.path.isdir(tmp_dir):
@@ -18905,7 +18913,17 @@ with app.app_context():
             db.session.commit()
         except Exception:
             db.session.rollback()
-    # init_db()와 app.run()은 아래 if __name__ == "__main__" 블록에서만 실행 (import 시 서버 미기동)
+    # Render 등 gunicorn 기동 시: DB 삭제 후 재시작이면 관리자·카테고리가 없을 수 있음 → 빈 DB일 때 초기화 자동 실행
+    try:
+        if not User.query.filter_by(email="admin@uncle.com").first() and not Category.query.first():
+            init_db()
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+# init_db()와 app.run()은 아래 if __name__ == "__main__" 블록에서만 실행 (import 시 서버 미기동)
 
 if __name__ == "__main__":
     with app.app_context():

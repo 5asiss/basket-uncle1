@@ -1,5 +1,107 @@
 # 바구니삼촌 자동화 스크립트
 
+## 0. DB 초기화
+
+### 사용 DB
+
+- **기본**: `DATABASE_URL` 미설정 시 `sqlite:///direct_trade_mall.db` (프로젝트 루트 또는 `instance/` 아래)
+- **PostgreSQL**: Render 등에서 `DATABASE_URL`에 연결 문자열 설정
+
+### 방법 1) 테이블 생성 + 누락 컬럼 추가 (기존 데이터 유지)
+
+앱을 실행하면 `init_db()`가 자동 호출되어 테이블이 없으면 생성하고, 컬럼이 없으면 `ALTER TABLE`로 추가합니다.
+
+```bash
+# 서버 실행 시 자동 실행됨
+python app.py
+```
+
+**서버 없이 init_db만 실행** (테이블/컬럼만 맞추고 싶을 때):
+
+```bash
+python -c "from app import app, init_db; app.app_context().push(); init_db(); print('DB 초기화(테이블·컬럼·기초데이터) 완료')"
+```
+
+### 방법 2) 완전 초기화 (DB 비우고 처음부터)
+
+**SQLite 사용 시**
+
+1. 앱/서버 중지
+2. DB 파일 삭제  
+   - 기본 경로: 프로젝트 루트의 `direct_trade_mall.db` 또는 `instance/direct_trade_mall.db`
+3. 아래 중 하나 실행  
+   - `python app.py` 로 서버 기동 (기동 시 `init_db()` 호출)  
+   - 또는: `python -c "from app import app, init_db; app.app_context().push(); init_db(); print('OK')"`
+
+**PostgreSQL 사용 시**
+
+- 테이블만 지우고 다시 만들려면 `db.drop_all()` 후 `db.create_all()` 사용 (데이터 전부 삭제됨)
+- 운영 DB에서는 **사용하지 말 것**. 필요 시 별도 스크립트로 백업 후 진행
+
+```bash
+# 로컬/개발용 예시 (데이터 전부 삭제됨!)
+python -c "
+from app import app, db, init_db
+with app.app_context():
+    db.drop_all()
+    init_db()
+    print('DB 완전 초기화 완료')
+"
+```
+
+### 서버에서 DB 삭제 후 재시작 (Render 등)
+
+**PostgreSQL 사용 시 (Render 등)**
+
+1. **방법 A – One-off / Shell에서 초기화 후 재시작**
+   - Render: **Shell** 탭에서 접속하거나, **Background Worker** 또는 **One-off Job**으로 아래 명령 실행 (Start Command를 일시적으로 아래로 변경해 한 번 실행 후 원복해도 됨).
+   ```bash
+   python -c "
+   from app import app, db, init_db
+   with app.app_context():
+       db.drop_all()
+       init_db()
+       print('DB 완전 초기화 완료')
+   "
+   ```
+   - 실행 후 **Web Service**를 **Manual Deploy** 또는 **Restart** 한 번 하면 앱이 새 DB 상태로 동작합니다.
+2. **방법 B – DB만 새로 만들기**
+   - Render Dashboard → **PostgreSQL** → 해당 DB 삭제 후 **새 PostgreSQL** 생성.
+   - 새 DB의 **Internal Database URL**을 복사해 **Web Service** 환경 변수 `DATABASE_URL`에 넣고 **Save** → **Manual Deploy**.
+   - 앱 기동 시 테이블이 없으면 `db.create_all()` 등으로 생성되므로, 최초 요청 전에 **Shell**에서 `init_db()` 한 번 실행해 두면 관리자 계정·기초 데이터까지 생성됩니다:
+   ```bash
+   python -c "from app import app, init_db; app.app_context().push(); init_db(); print('OK')"
+   ```
+
+**SQLite 사용 시 (Render Web Service)**
+
+- 디스크가 휘발성이라 **재배포/재시작** 시 DB 파일이 사라질 수 있음. 그때는 새 인스턴스에서 앱이 뜨면서 새 DB 파일이 생기고, `python app.py`로 기동할 때만 `init_db()`가 자동 호출됩니다.
+- **gunicorn**으로 기동 중이면 `init_db()`는 자동 호출되지 않으므로, **한 번만** 아래처럼 초기화해 두는 것을 권장합니다 (Shell 또는 One-off):
+  ```bash
+  python -c "from app import app, init_db; app.app_context().push(); init_db(); print('OK')"
+  ```
+- 서버에서 **DB 파일만 지우고** 다시 초기화하려면 (SSH/Shell 접속 가능한 경우):
+  1. 앱 중지(또는 해당 프로세스만 종료)
+  2. DB 파일 삭제: `rm -f instance/direct_trade_mall.db direct_trade_mall.db` (실제 사용 경로에 맞게)
+  3. 위 `python -c "from app import app, init_db; ..."` 실행 후 앱 재시작
+
+**요약**
+
+| 환경 | DB 삭제 후 재시작 방법 |
+|------|------------------------|
+| **PostgreSQL (Render)** | Shell/One-off에서 `db.drop_all()` + `init_db()` 실행 → Web Service **Restart** 또는 **Manual Deploy** |
+| **PostgreSQL (Render)** | 또는 Dashboard에서 DB 삭제 → 새 DB 생성 → `DATABASE_URL` 변경 → Deploy 후 Shell에서 `init_db()` 1회 실행 |
+| **SQLite (로컬/일반 서버)** | 앱 중지 → DB 파일 삭제 → `python app.py` 또는 `init_db()` 한 줄 실행 후 앱 재시작 |
+
+### init_db()가 하는 일
+
+- `db.create_all()` 로 모든 테이블 생성
+- 기존 테이블에 없는 컬럼 `ALTER TABLE` 로 추가
+- 관리자 계정 없으면 생성: `admin@uncle.com` / `1234`
+- 카테고리 없으면 샘플 카테고리 2개 생성
+
+---
+
 ## 1. DB 연동 개인화 알림톡 (휴면 고객 재방문 유도)
 
 - **대상**: 최근 N주간 주문이 없는 **송도** 고객 (SQL로 추출)
