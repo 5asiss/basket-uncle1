@@ -2729,6 +2729,13 @@ def inject_globals():
     except Exception:
         return dict(cart_count=0, unread_message_count=0, now=now_kst(), managers=[], nav_categories=[])
 
+
+@app.route('/health')
+def health_check():
+    """Render 등 호스팅 헬스체크·포트 감지용. DB/로직 없이 200만 반환."""
+    return "", 200
+
+
 @app.route('/api/search')
 def api_search():
     """검색 무한 스크롤용 API (50개 단위, offset/limit)"""
