@@ -10800,25 +10800,37 @@ def admin_dashboard():
 
         {% if tab == 'bulk_register' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-teal-200 bg-teal-50/80 text-left">
-                <p class="font-black text-teal-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📦</span> 상품 대량등록 (우리상품등록과 동일한 양식)</p>
-                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 항목을 채운 뒤 업로드하면 상품이 일괄 반영됩니다. <b>ZIP 업로드</b> 시 엑셀과 동일 위치에 상품명 폴더를 두고, 폴더 안에 1~10번 이미지를 넣으면 1번=대표이미지, 2~10번=상세이미지로 자동 반영됩니다.</p>
+                <p class="font-black text-teal-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📦</span> 상품 대량등록</p>
+                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 채운 뒤 <b>엑셀 파일(.xlsx/.xls)만</b> 업로드하세요. 이미지는 아래 <b>「이미지 올리기」</b>로 먼저 올리거나, 서버 <code class="bg-white px-1 rounded">static/uploads/</code>에 넣고, 엑셀의 대표이미지파일명·상세이미지파일명에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=_1, 상세=_2~_10.</p>
                 <div class="flex flex-wrap items-center gap-3 mb-4">
                     <a href="/admin/product/bulk_upload_template" class="bg-white text-teal-600 border-2 border-teal-300 px-5 py-3 rounded-xl font-black text-xs shadow-sm hover:bg-teal-50 transition">📥 엑셀 업로드 양식 다운로드</a>
                 </div>
+                <div class="mb-5 p-5 bg-white rounded-2xl border border-teal-100">
+                    <p class="font-black text-gray-800 text-[11px] mb-3">🖼 대량등록용 이미지 올리기</p>
+                    <p class="text-[11px] text-gray-600 mb-3">아래에서 이미지를 선택해 올리면 <code class="bg-gray-100 px-1 rounded">static/uploads/</code>에 저장됩니다. 저장된 <b>파일명 그대로</b> 엑셀의 대표이미지파일명·상세이미지파일명에 입력하세요.</p>
+                    <form action="/admin/product/bulk_upload_images" method="POST" enctype="multipart/form-data" class="flex flex-wrap items-end gap-3">
+                        <div class="flex-1 min-w-[200px]">
+                            <label class="block text-[10px] font-black text-gray-600 mb-1">이미지 파일 선택 (여러 개 가능)</label>
+                            <input type="file" name="images" multiple accept=".jpg,.jpeg,.png,.gif,.webp" class="w-full bg-gray-50 p-3 rounded-xl text-xs border border-gray-200">
+                        </div>
+                        <button type="submit" class="bg-amber-500 text-white px-6 py-3 rounded-xl font-black text-xs hover:bg-amber-600">이미지 올리기</button>
+                    </form>
+                </div>
                 <form action="/admin/product/bulk_upload" method="POST" enctype="multipart/form-data" class="flex flex-wrap items-end gap-4 p-5 bg-white rounded-2xl border border-teal-100">
                     <div class="flex-1 min-w-[200px]">
-                        <label class="block text-[10px] font-black text-gray-600 mb-1">엑셀 또는 ZIP 파일 선택</label>
-                        <input type="file" name="excel_file" class="w-full bg-gray-50 p-3 rounded-xl text-xs border border-gray-200" accept=".xlsx,.xls,.zip" required>
+                        <label class="block text-[10px] font-black text-gray-600 mb-1">엑셀 파일 선택</label>
+                        <input type="file" name="excel_file" class="w-full bg-gray-50 p-3 rounded-xl text-xs border border-gray-200" accept=".xlsx,.xls" required>
                     </div>
                     <button type="submit" class="bg-teal-600 text-white px-8 py-3 rounded-xl font-black text-sm hover:bg-teal-700">상품 업로드</button>
                 </form>
                 <div class="mt-5 p-5 bg-white/70 rounded-xl border border-teal-100 text-left text-[11px] text-gray-700 space-y-2">
-                    <p class="font-black text-gray-800 mb-2">📋 ZIP 업로드 구조</p>
-                    <p>· ZIP 안에 <b>엑셀 파일(.xlsx)</b> 하나와, 엑셀과 <b>같은 위치</b>에 <b>상품명과 똑같은 이름의 폴더</b>를 두세요.</p>
-                    <p>· 각 폴더 안에는 <b>1, 2, 3, … 10</b> 번 이미지 파일을 넣습니다 (예: 1.jpg, 2.png). <b>1번=대표이미지</b>, <b>2~10번=상세이미지</b> 순서로 적용됩니다. 빈 란이나 사진이 부족·많아도 오류 없이 처리되며, 입력 안 된 항목은 기본값으로 등록됩니다.</p>
-                    <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼 (우리상품등록 기준)</p>
-                    <p>· <b>필수</b>: 카테고리, 상품명, 가격 · 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
-                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일/+2일/+3일/당일배송), 규격, 공급가, 재고, 마감일시, 재고초기화시각, 초기화수량, 세금(과세/면세). 비어 있으면 기본값 적용.</p>
+                    <p class="font-black text-gray-800 mb-2">📋 이미지 사용 방법</p>
+                    <p>· <b>방법 1</b>: 위 「이미지 올리기」에서 파일을 선택해 올리면 <code class="bg-white px-1 rounded">static/uploads/</code>에 저장됩니다. 엑셀에는 저장된 <b>파일명 그대로</b> 입력하세요.</p>
+                    <p>· <b>방법 2</b>: 서버의 <code class="bg-white px-1 rounded">static/uploads/</code> 폴더에 직접 이미지 파일을 넣은 경우에도, 엑셀의 대표이미지파일명·상세이미지파일명란에 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg).</p>
+                    <p>· 대표=접미사 _1, 상세=_2~_10. 상세이미지파일명은 쉼표로 구분해 여러 개 입력 가능.</p>
+                    <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼</p>
+                    <p>· <b>필수</b>: 카테고리, 상품명, 가격. 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
+                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, 재고, 마감일시, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+_1, <b>상세이미지파일명</b>=품명+_2~_10 또는 쉼표 구분.</p>
                 </div>
             </div>
         {% endif %}
@@ -10928,8 +10940,8 @@ def admin_dashboard():
                 <ul class="text-[11px] text-gray-700 space-y-1.5 mb-4">
                     <li><b>엑셀 대량 등록</b>: 아래 「엑셀 업로드」 버튼을 누르면 양식 다운로드와 업로드 창이 나옵니다.</li>
                     <li><b>양식 다운로드</b>: <a href="/admin/product/bulk_upload_template" class="text-blue-600 font-black underline hover:no-underline">📥 상품 엑셀 업로드 양식 다운로드</a></li>
-                    <li><b>필수 컬럼</b>: 카테고리, 상품명, 규격, 가격, 이미지파일명 (첫 줄 헤더 이름을 정확히 맞춰주세요)</li>
-                    <li><b>이미지 폴더 위치</b>: 서버/프로젝트의 <code class="bg-white px-1.5 py-0.5 rounded border border-amber-200 font-mono text-[10px]">static/uploads/</code> 폴더에 이미지 파일을 넣고, 엑셀에는 <b>파일명만</b> 입력 (예: apple.jpg)</li>
+                    <li><b>필수 컬럼</b>: 카테고리, 상품명, 가격. 대표이미지파일명(품명+_1), 상세이미지파일명(품명+_2~_10) (첫 줄 헤더 이름 정확히)</li>
+                    <li><b>이미지 폴더 위치</b>: 서버의 <code class="bg-white px-1.5 py-0.5 rounded border border-amber-200 font-mono text-[10px]">static/uploads/</code>에 이미지를 넣고 엑셀에는 <b>파일명만</b> 입력 (예: 상품명01_1.jpg)</li>
                     <li>카테고리는 먼저 「카테고리 설정」 탭에서 등록한 이름과 동일해야 합니다. 가격은 숫자만 입력하세요.</li>
                 </ul>
                 <p class="text-[10px] text-amber-700/90">개별 상품은 「+ 상품 등록」으로 하나씩 등록할 수 있습니다.</p>
@@ -10945,8 +10957,8 @@ def admin_dashboard():
                 </form>
                 <div class="mt-5 p-5 bg-white/70 rounded-xl border border-blue-100 text-left text-[11px] text-gray-700 space-y-2">
                     <p class="font-black text-gray-800 mb-2">📋 업로드 양식 사용법 (상세)</p>
-                    <p>· <b>필수 컬럼</b>: 카테고리, 상품명, 규격, 가격, 이미지파일명 (헤더 이름 정확히 일치)</p>
-                    <p>· <b>이미지 파일 폴더 위치</b>: 프로젝트 내 <code class="bg-gray-100 px-1 rounded">static/uploads/</code> 폴더에 상품 이미지 파일을 넣고, 엑셀의 「이미지파일명」란에는 <b>파일명만</b> 입력 (예: apple.jpg). 해당 경로에 없는 파일명은 이미지 없이 등록됩니다.</p>
+                    <p>· <b>필수 컬럼</b>: 카테고리, 상품명, 가격. 대표이미지파일명(품명+_1), 상세이미지파일명(품명+_2~_10 또는 쉼표 구분). 헤더 이름 정확히 일치.</p>
+                    <p>· <b>이미지 파일</b>: <code class="bg-gray-100 px-1 rounded">static/uploads/</code>에 넣고 엑셀에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=접미사 _1, 상세=_2~_10.</p>
                     <p>· 카테고리는 미리 「카테고리 설정」에서 등록된 이름과 동일해야 합니다. 가격은 숫자만 입력하세요.</p>
                 </div>
             </div>
@@ -14963,17 +14975,19 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
 # --------------------------------------------------------------------------------
 @login_required
 def admin_product_bulk_upload_template():
-    """상품 엑셀 업로드용 양식 다운로드. 우리상품등록(상품 등록) 화면과 동일한 항목."""
+    """상품 엑셀 업로드용 양식 다운로드. 대표이미지: 품명+접미사_1, 상세이미지: 품명+접미사_2 ~ _10."""
     if not current_user.is_admin:
         return redirect('/')
     columns = [
         '카테고리', '상품명', 'Short Intro', '상세문구', '배송', '가격', '규격', '공급가', '재고',
-        '마감일시', '재고초기화시각', '초기화수량', '대표이미지파일명', '상세이미지파일명', '세금'
+        '마감일시', '재고초기화시각', '초기화수량', '대표이미지파일명', '상세이미지파일명'
     ]
     df = pd.DataFrame(columns=columns)
     df.loc[0] = [
-        '(카테고리명)', '(상품명)', '(한줄소개/뱃지)', '(상세 사진 위 문구)', '+1일',
-        0, '(예: 5kg/1박스)', '', 50, '', '09:00', 50, '(파일명.jpg)', '(a.jpg,b.jpg)', '과세'
+        '가공식품', '간장 오리주물럭 300g', '맵지 않아 온 가족이 즐기는 단짠단짠의 정석!',
+        '주문 마감당일 오후 배송됩니다!', '+1일', 5900, '300g', 5000, 30,
+        '2026-03-02,23:59', '', 30,
+        '간장 오리주물럭 300g01_1', '간장 오리주물럭 300g02_2'
     ]
     out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w:
@@ -14982,51 +14996,80 @@ def admin_product_bulk_upload_template():
     return send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name='상품_대량등록_양식.xlsx', as_attachment=True)
 
 
+def _bulk_safe_image_filename(filename):
+    """대량등록용: 경로 제거 후 파일명만 반환. 엑셀에서 그대로 쓸 수 있게 한글 등 유지."""
+    if not filename or not isinstance(filename, str):
+        return None
+    name = os.path.basename(filename).strip()
+    for c in '\\/:*?"<>|':
+        name = name.replace(c, '_')
+    if not name:
+        return None
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        return None
+    return name
+
+
+@login_required
+def admin_bulk_upload_images():
+    """대량등록용 이미지를 static/uploads/에 저장. 엑셀에서 파일명 그대로 참조 가능."""
+    if not current_user.is_admin:
+        return redirect('/')
+    if request.method != 'POST':
+        return redirect('/admin?tab=bulk_register')
+    files = request.files.getlist('images') or request.files.getlist('images[]')
+    upload_dir = os.path.join(app.root_path, 'static', 'uploads')
+    os.makedirs(upload_dir, exist_ok=True)
+    saved = []
+    skipped = 0
+    for f in files:
+        if not f or not getattr(f, 'filename', None) or (f.filename or '').strip() == '':
+            continue
+        safe_name = _bulk_safe_image_filename(f.filename)
+        if not safe_name:
+            continue
+        try:
+            path = os.path.join(upload_dir, safe_name)
+            if os.path.isfile(path):
+                skipped += 1
+                continue  # 같은 이름 이미 있으면 건너뜀
+            if getattr(f, 'stream', None) and hasattr(f.stream, 'seek'):
+                try:
+                    f.stream.seek(0)
+                except Exception:
+                    pass
+            data = f.read()
+            if not data:
+                continue
+            with open(path, 'wb') as out:
+                out.write(data)
+            saved.append(safe_name)
+        except Exception as e:
+            flash(f"이미지 저장 실패 ({f.filename}): {str(e)}")
+    if saved:
+        flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요.")
+    elif skipped:
+        flash(f"같은 이름의 파일이 이미 있어 {skipped}개는 건너뛰었습니다. 새 파일만 선택해 주세요.")
+    else:
+        flash("저장된 이미지가 없습니다. jpg, png, gif, webp 파일을 선택해 주세요.")
+    return redirect('/admin?tab=bulk_register')
+
+
 @login_required
 def admin_product_bulk_upload():
-    """엑셀 또는 ZIP 대량 업로드. ZIP 시 엑셀과 동일 위치에 상품명 폴더, 폴더 안 1~10번 이미지(1=대표, 2~10=상세). 빈란/사진 부족·과다 시 기본값·오류 없이 처리."""
+    """엑셀 파일만 업로드. 이미지는 서버 static/uploads/에 두고 엑셀에는 파일명만 입력."""
     if not current_user.is_admin:
         return redirect('/')
     file = request.files.get('excel_file')
     if not file or file.filename == '':
         return redirect('/admin?tab=bulk_register')
-    import zipfile
-    import tempfile
-    import shutil
-    tmp_dir = None
-    images_root = None
+    fn = (file.filename or '').strip().lower()
+    if not (fn.endswith('.xlsx') or fn.endswith('.xls')):
+        flash("엑셀 파일(.xlsx 또는 .xls)만 업로드 가능합니다.")
+        return redirect('/admin?tab=bulk_register')
     try:
-        fn = (file.filename or '').strip().lower()
-        if fn.endswith('.zip'):
-            tmp_dir = tempfile.mkdtemp(prefix='bulk_')
-            try:
-                try:
-                    with zipfile.ZipFile(file, 'r', metadata_encoding='cp949') as zf:
-                        zf.extractall(tmp_dir)
-                except TypeError:
-                    with zipfile.ZipFile(file, 'r') as zf:
-                        zf.extractall(tmp_dir)
-                except Exception:
-                    with zipfile.ZipFile(file, 'r') as zf:
-                        zf.extractall(tmp_dir)
-            except Exception as e:
-                flash(f"ZIP 해제 실패: {str(e)}")
-                return redirect('/admin?tab=bulk_register')
-            xlsx_path = None
-            for root, dirs, files in os.walk(tmp_dir):
-                for f in files:
-                    if f.lower().endswith('.xlsx') or f.lower().endswith('.xls'):
-                        xlsx_path = os.path.join(root, f)
-                        break
-                if xlsx_path:
-                    break
-            if not xlsx_path or not os.path.isfile(xlsx_path):
-                flash("ZIP 안에 엑셀 파일(.xlsx 또는 .xls)이 없습니다.")
-                return redirect('/admin?tab=bulk_register')
-            df = pd.read_excel(xlsx_path)
-            images_root = os.path.dirname(xlsx_path)
-        else:
-            df = pd.read_excel(file)
+        df = pd.read_excel(file)
         df.columns = df.columns.astype(str).str.strip()
         required = ['카테고리', '상품명', '가격']
         if not all(c in df.columns for c in required):
@@ -15034,7 +15077,6 @@ def admin_product_bulk_upload():
             return redirect('/admin?tab=bulk_register')
         upload_dir = os.path.join(app.root_path, 'static', 'uploads')
         os.makedirs(upload_dir, exist_ok=True)
-        # DB 삭제 후 카테고리가 없으면 등록 건수가 0이 되므로, 사전 안내
         if not Category.query.first():
             flash("등록된 카테고리가 없습니다. 먼저 [카테고리] 탭에서 카테고리를 추가한 뒤 대량등록을 진행해 주세요.")
             return redirect('/admin?tab=bulk_register')
@@ -15049,6 +15091,7 @@ def admin_product_bulk_upload():
             name_val = _cell_str(row.get('상품명', ''))
             if not name_val or name_val.startswith('('):
                 continue
+            name_val = name_val.strip().replace('\ufeff', '').strip()
             try:
                 price_val = int(float(row.get('가격', 0)))
             except (ValueError, TypeError):
@@ -15066,7 +15109,7 @@ def admin_product_bulk_upload():
             deadline_val = _cell_str(row.get('마감일시', ''))
             deadline = None
             if deadline_val:
-                deadline_val = deadline_val.strip().replace(',', ' ')[:19]  # 엑셀 "2026-02-28,23:59" 형태 지원
+                deadline_val = deadline_val.strip().replace(',', ' ')[:19]
                 for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
                     try:
                         deadline = datetime.strptime(deadline_val.strip()[:19], fmt)
@@ -15080,42 +15123,35 @@ def admin_product_bulk_upload():
                 tax_type = '과세'
             image_url = ""
             detail_image_url = ""
-            if images_root:
-                main_url, detail_urls = _bulk_collect_images_from_folder(images_root, name_val, upload_dir)
-                image_url = main_url or ""
-                detail_image_url = ",".join(detail_urls) if detail_urls else (main_url or "")
-            else:
-                main_img_raw = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
-                # 엑셀에 전체 경로가 있으면(예: "C:\...\1.jpg") 해당 파일을 복사해 사용
-                image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
-                if not image_url:
-                    main_img = _bulk_image_filename_only(main_img_raw)
-                    if main_img and not _bulk_is_placeholder_image(main_img):
-                        image_url = f"/static/uploads/{main_img.lstrip('/')}"
-                # 대표가 전체 경로면 같은 폴더의 2.jpg~10.jpg를 상세이미지로 자동 수집
-                path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
-                is_abs = path_for_same_folder and ((len(path_for_same_folder) >= 2 and path_for_same_folder[1] == ':') or path_for_same_folder.startswith('/') or '\\' in path_for_same_folder)
-                if is_abs and os.path.isfile(path_for_same_folder):
-                    detail_from_folder = _bulk_copy_detail_2_to_10_from_same_folder(path_for_same_folder, upload_dir)
-                    if detail_from_folder:
-                        detail_image_url = ",".join(detail_from_folder)
-                if not detail_image_url:
-                    detail_imgs_raw = _cell_str(row.get('상세이미지파일명', ''))
-                    if detail_imgs_raw and not _bulk_is_placeholder_image(detail_imgs_raw):
-                        parts = [p.strip().lstrip('/').strip('"').strip("'") for p in detail_imgs_raw.split(',') if p.strip() and not _bulk_is_placeholder_image(p.strip())]
-                        detail_parts = []
-                        for p in parts:
-                            u = _bulk_try_copy_from_absolute_path(p, upload_dir)
-                            if u:
-                                detail_parts.append(u)
-                            else:
-                                fn = _bulk_image_filename_only(p)
-                                if fn:
-                                    detail_parts.append(f"/static/uploads/{fn}")
-                        if detail_parts:
-                            detail_image_url = ",".join(detail_parts)
-                if not detail_image_url:
-                    detail_image_url = image_url or ""
+            main_img_raw = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
+            image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
+            if not image_url:
+                main_img = _bulk_image_filename_only(main_img_raw)
+                if main_img and not _bulk_is_placeholder_image(main_img):
+                    image_url = f"/static/uploads/{main_img.lstrip('/')}"
+            path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
+            is_abs = path_for_same_folder and ((len(path_for_same_folder) >= 2 and path_for_same_folder[1] == ':') or path_for_same_folder.startswith('/') or '\\' in path_for_same_folder)
+            if is_abs and os.path.isfile(path_for_same_folder):
+                detail_from_folder = _bulk_copy_detail_2_to_10_from_same_folder(path_for_same_folder, upload_dir)
+                if detail_from_folder:
+                    detail_image_url = ",".join(detail_from_folder)
+            if not detail_image_url:
+                detail_imgs_raw = _cell_str(row.get('상세이미지파일명', ''))
+                if detail_imgs_raw and not _bulk_is_placeholder_image(detail_imgs_raw):
+                    parts = [p.strip().lstrip('/').strip('"').strip("'") for p in detail_imgs_raw.split(',') if p.strip() and not _bulk_is_placeholder_image(p.strip())]
+                    detail_parts = []
+                    for p in parts:
+                        u = _bulk_try_copy_from_absolute_path(p, upload_dir)
+                        if u:
+                            detail_parts.append(u)
+                        else:
+                            fn_img = _bulk_image_filename_only(p)
+                            if fn_img:
+                                detail_parts.append(f"/static/uploads/{fn_img}")
+                    if detail_parts:
+                        detail_image_url = ",".join(detail_parts)
+            if not detail_image_url:
+                detail_image_url = image_url or ""
             new_p = Product(
                 category=cat_name,
                 name=name_val,
@@ -15148,12 +15184,6 @@ def admin_product_bulk_upload():
         db.session.rollback()
         flash(f"업로드 중 오류가 발생했습니다: {str(e)}")
         return redirect('/admin?tab=bulk_register')
-    finally:
-        if tmp_dir and os.path.isdir(tmp_dir):
-            try:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            except Exception:
-                pass
 
 
 def _bulk_is_placeholder_image(s):
@@ -15220,9 +15250,9 @@ def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
 def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
     """대표이미지 전체 경로 기준으로 같은 폴더의 상세이미지(2~10번)를 Cloudinary 또는 로컬에 복사.
 
-    - 기존: 파일명이 1.jpg, 2.jpg, ... 10.jpg 형태인 경우만 지원
-    - 확장: 파일명이 "상품명+숫자" 형식인 경우도 지원 (예: '간장 오리주물럭 300g01_1.jpg', '...01_2.jpg')
-      → 파일명에서 마지막 숫자 덩어리를 인덱스로 보고, 2~10은 상세이미지로 처리
+    - 파일명이 1.jpg, 2.jpg, ... 10.jpg 형태인 경우
+    - 또는 '상품명+접미사_숫자' 형식(예: 품명01_1=대표, 품명02_2~품명10_10=상세)인 경우
+      → 접미사에서 마지막 숫자(_1~_10)를 인덱스로 사용
     """
     if not main_absolute_path or not isinstance(main_absolute_path, str):
         return []
@@ -15286,7 +15316,10 @@ def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
 
 
 def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
-    """images_root(및 하위)에서 상품명과 동일한 폴더를 찾아 1~10번 이미지 수집. 1=대표, 2~10=상세. 복사 후 URL 반환."""
+    """images_root(및 하위)에서 상품명과 일치하는 폴더 또는 '상품명+접미사_숫자' 파일을 찾아 수집.
+    - 대표이미지: 품명+접미사_1 (예: 간장 오리주물럭 300g01_1.jpg)
+    - 상세이미지: 품명+접미사_2 ~ _10 (예: 간장 오리주물럭 300g02_2.jpg)
+    폴더 안에 1.jpg~10.jpg가 있는 기존 방식도 지원. 복사 후 URL 반환."""
     import shutil
     import unicodedata
     import re
@@ -15358,8 +15391,8 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
         except Exception:
             return main_url, detail_urls
     else:
-        # 1-B) 폴더가 없고, "상품명 + 숫자" 형식의 파일이 images_root (또는 하위) 에 흩어져 있는 경우
-        # 예: "간장 오리주물럭 300g01_1.jpg", "고추장 오돌뼈 200g01_.JPG"
+        # 1-B) 폴더가 없고, "상품명+접미사_숫자" 형식의 파일이 images_root(엑셀과 같은 폴더)에 있는 경우
+        # 예: 엑셀과 같은 폴더에 "간장 오리주물럭 300g01_1.jpg", "간장 오리주물럭 300g02_2.jpg"
         try:
             for root, _, files in os.walk(images_root):
                 for f in files:
@@ -15367,17 +15400,21 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
                     if ext.lower() not in IMAGE_EXT:
                         continue
                     base_norm = norm_for_match(base)
-                    if not base_norm.startswith(product_name_match):
+                    # 패턴: 품명 + (선택 숫자) + _ + 1~10 → 대표/상세 인덱스
+                    m = re.search(r'_(\d+)\s*$', base_norm)
+                    if not m:
                         continue
-                    # 상품명 이후 뒤에 붙은 부분에서 마지막 숫자 덩어리를 인덱스로 사용 (없으면 1)
-                    suffix = base_norm[len(product_name_match):].strip()
-                    m = re.search(r'(\d+)\s*$', suffix)
                     try:
-                        idx = int(m.group(1)) if m else 1
+                        idx = int(m.group(1))
                     except Exception:
-                        idx = 1
-                    if 1 <= idx <= 10:
-                        by_num[idx] = os.path.join(root, f)
+                        continue
+                    if idx < 1 or idx > 10:
+                        continue
+                    prefix = base_norm[:m.start()].strip()
+                    # 접두사가 상품명으로 시작하는지 확인 (공백/전각 정규화 후)
+                    if not prefix.startswith(product_name_match) and not norm_for_match(prefix).startswith(product_name_match):
+                        continue
+                    by_num[idx] = os.path.join(root, f)
         except Exception:
             return main_url, detail_urls
 
