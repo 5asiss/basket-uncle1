@@ -664,8 +664,7 @@ def run_backup():
     app_root = app.root_path
     main_uri = (app.config.get("SQLALCHEMY_DATABASE_URI") or "").strip()
     binds = app.config.get("SQLALCHEMY_BINDS") or {}
-    files_to_backup = []
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")  # 초 포함해 동일 분 내 중복 태그 방지
     tmp_dir = tempfile.mkdtemp(prefix="basket_backup_")
 
     # 1) 메인 DB: SQLite 파일 또는 PostgreSQL pg_dump

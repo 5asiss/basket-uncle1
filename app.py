@@ -7734,7 +7734,7 @@ def order_cancel_item(order_id, item_id):
         body = {"cancelAmount": cancel_amount, "cancelReason": "품목 부분 취소"}
         if tax_free_cancel:
             body["taxFreeAmount"] = tax_free_cancel
-        res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
+        res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"}, timeout=30)
         if res.status_code not in (200, 201):
             try:
                 err = res.json()
@@ -7756,9 +7756,6 @@ def order_cancel_item(order_id, item_id):
     flash("해당 품목이 취소되었습니다. 환불은 카드사 정책에 따라 3~7일 소요될 수 있습니다.")
     return redirect('/mypage')
 
-    flash("해당 품목이 취소되었습니다. 환불은 카드사 정책에 따라 3~7일 소요될 수 있습니다.")
-    return redirect('/mypage')
-
 
 def _do_full_order_cancel(order):
     """주문 전액 취소 공통 처리: 토스 전액 취소, 재고 복구, 포인트 사용분 복구, 알림. order는 이미 본인·결제완료 검증된 상태."""
@@ -7771,7 +7768,11 @@ def _do_full_order_cancel(order):
     if order.payment_key and order.total_price and order.total_price > 0:
         url = f"https://api.tosspayments.com/v1/payments/{order.payment_key}/cancel"
         auth_key = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
-        res = requests.post(url, json={"cancelReason": "주문 전액 취소"}, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
+        body = {"cancelReason": "주문 전액 취소"}
+        tax_free = getattr(order, 'tax_free_amount', None) or 0
+        if tax_free and int(tax_free) > 0:
+            body["taxFreeAmount"] = int(tax_free)
+        res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"}, timeout=30)
         if res.status_code not in (200, 201):
             try:
                 err = res.json()
@@ -8887,7 +8888,7 @@ def admin_order_item_status():
             body = {"cancelAmount": cancel_amount, "cancelReason": "품절로 인한 부분 취소"}
             if tax_free_cancel:
                 body["taxFreeAmount"] = tax_free_cancel
-            res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
+            res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"}, timeout=30)
             if res.status_code not in (200, 201):
                 try:
                     err = res.json()
@@ -9831,6 +9832,8 @@ def admin_dashboard():
     settlement_detail_orders = []
     settlement_category_totals = {}
     settlement_supplier_totals = {}
+    settlement_summary = None  # 검색 기간 기준 총 수익/지출/받을돈/나갈돈 (tab == 'settlement'일 때 채움)
+    list_uploaded_images = []  # 대량등록 탭에서 static/uploads/ 이미지 목록 (확인용)
 
     if tab == 'products':
         product_q = (request.args.get('q') or request.args.get('product_q') or '').strip()
@@ -10075,6 +10078,41 @@ def admin_dashboard():
             settlement_category_totals[cat] = settlement_category_totals.get(cat, 0) + row_total
             if r.get('category_type') == '공급자형':
                 settlement_supplier_totals[cat] = settlement_supplier_totals.get(cat, 0) + row_total
+        # 검색 기간·필터 기준 합계 (총 수익, 총 지출, 받을돈, 나갈돈)
+        _q_rev = db.session.query(
+            db.func.coalesce(db.func.sum(Order.total_price), 0).label('tot'),
+            db.func.coalesce(db.func.sum(Order.points_used), 0).label('pts')
+        ).filter(
+            Order.created_at >= start_dt,
+            Order.created_at <= end_dt,
+            Order.status != '결제취소'
+        )
+        _row_rev = _q_rev.first()
+        _total_revenue = int((_row_rev.tot or 0) - (_row_rev.pts or 0))
+        _refund = int(db.session.query(db.func.coalesce(db.func.sum(Order.total_price), 0)).filter(
+            Order.created_at >= start_dt,
+            Order.created_at <= end_dt,
+            Order.status == '결제취소'
+        ).scalar() or 0)
+        _q_sett_base = Settlement.query.filter(
+            Settlement.sale_dt >= start_dt,
+            Settlement.sale_dt <= end_dt
+        )
+        if not is_master:
+            _q_sett_base = _q_sett_base.filter(Settlement.category.in_(my_categories))
+        if sel_order_cat != '전체':
+            _q_sett_base = _q_sett_base.filter(Settlement.category == sel_order_cat)
+        _settlement_paid = int(_q_sett_base.filter(Settlement.settlement_status == '입금완료').with_entities(db.func.coalesce(db.func.sum(Settlement.settlement_total), 0)).scalar() or 0)
+        _settlement_pending = int(_q_sett_base.filter(Settlement.settlement_status == '입금대기').with_entities(db.func.coalesce(db.func.sum(Settlement.settlement_total), 0)).scalar() or 0)
+        settlement_summary = {
+            'total_revenue': _total_revenue,
+            'total_refund': _refund,
+            'total_expense': _refund + _settlement_paid,
+            'settlement_paid': _settlement_paid,
+            'receivable': 0,
+            'payable': _settlement_pending,
+            'net_profit': _total_revenue - _refund - _settlement_paid,
+        }
         # 오더 목록 (정산 테이블은 n넘버 기준이므로 빈 목록 유지)
         settlement_detail_orders = []
             
@@ -10737,6 +10775,25 @@ def admin_dashboard():
             stats_revenue_total = int(rev_all or 0)
             stats_cart_items_total = db.session.query(db.func.coalesce(db.func.sum(Cart.quantity), 0)).scalar() or 0
 
+    if tab == 'bulk_register':
+        upload_dir = os.path.join(app.root_path, 'static', 'uploads')
+        if os.path.isdir(upload_dir):
+            try:
+                items = []
+                for fn in os.listdir(upload_dir):
+                    if fn.startswith('.'):
+                        continue
+                    ext = os.path.splitext(fn)[1].lower()
+                    if ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
+                        path = os.path.join(upload_dir, fn)
+                        if os.path.isfile(path):
+                            st = os.stat(path)
+                            items.append({'name': fn, 'size': st.st_size, 'mtime': st.st_mtime})
+                items.sort(key=lambda x: x['mtime'], reverse=True)
+                list_uploaded_images = items[:100]
+            except Exception:
+                list_uploaded_images = []
+
     # 3. HTML 템플릿 코드
     # 3. HTML 템플릿 코드 (카테고리 설정 탭 완벽 복구본)
     admin_html = r"""
@@ -10831,6 +10888,20 @@ def admin_dashboard():
                     <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼</p>
                     <p>· <b>필수</b>: 카테고리, 상품명, 가격. 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
                     <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, 재고, 마감일시, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+_1, <b>상세이미지파일명</b>=품명+_2~_10 또는 쉼표 구분.</p>
+                </div>
+                <div class="mt-5 p-5 bg-white rounded-xl border border-teal-200 text-left text-[11px]">
+                    <p class="font-black text-teal-800 mb-2">🖼 이미지 대량 업로드 후 확인 방법</p>
+                    <p class="text-gray-600 mb-3">1) 업로드 직후 상단 플래시 메시지에서 «N개 저장» 확인. 2) 아래 <b>저장된 이미지 목록</b>에서 파일명이 보이는지 확인. 3) 엑셀 대표·상세이미지파일명에 그 파일명 그대로 입력 후 상품 업로드. 4) 관리자 → 상품관리에서 해당 상품을 열어 이미지가 붙었는지 확인.</p>
+                    <p class="font-black text-gray-700 mb-2">저장된 이미지 목록 (최근 100개, 최신순)</p>
+                    {% if list_uploaded_images %}
+                    <ul class="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 bg-gray-50 rounded-lg border border-gray-100 text-[10px] font-mono">
+                        {% for f in list_uploaded_images %}
+                        <li class="flex items-center gap-1"><a href="/static/uploads/{{ f.name }}" target="_blank" class="text-teal-600 hover:underline" title="미리보기">{{ f.name }}</a><span class="text-gray-400">({{ (f.size / 1024)|round(1) }}KB)</span></li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-gray-400">static/uploads/에 이미지가 없거나 조회되지 않습니다. 위 「이미지 올리기」로 먼저 올리세요.</p>
+                    {% endif %}
                 </div>
             </div>
         {% endif %}
@@ -13999,6 +14070,36 @@ def admin_dashboard():
                 </form>
                 <p class="mt-3 text-[11px] text-gray-600 font-bold">엑셀: <a href="/admin/orders/settlement_detail_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_cat={{ sel_order_cat | urlencode }}&settlement_status={{ sel_settlement_status | urlencode }}{% if order_id_search %}&order_id={{ order_id_search | urlencode }}{% endif %}{% if payment_key_search %}&payment_key={{ payment_key_search | urlencode }}{% endif %}" class="text-teal-600 hover:underline">정산 상세 (n넘버)</a> · <a href="/admin/settlement/category_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&category={{ sel_order_cat | urlencode }}" class="text-teal-600 hover:underline">카테고리별 판매 품목 (품목·규격·수량)</a></p>
 
+                {% if settlement_summary %}
+                <div class="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-emerald-700 font-black uppercase mb-1">총 수익</p>
+                        <p class="text-lg font-black text-emerald-800">{{ "{:,}".format(settlement_summary.total_revenue) }}원</p>
+                    </div>
+                    <div class="bg-red-50 border border-red-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-red-700 font-black uppercase mb-1">환불</p>
+                        <p class="text-lg font-black text-red-800">{{ "{:,}".format(settlement_summary.total_refund) }}원</p>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-slate-700 font-black uppercase mb-1">총 지출</p>
+                        <p class="text-lg font-black text-slate-800">{{ "{:,}".format(settlement_summary.total_expense) }}원</p>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-amber-700 font-black uppercase mb-1">받을 돈</p>
+                        <p class="text-lg font-black text-amber-800">{{ "{:,}".format(settlement_summary.receivable) }}원</p>
+                    </div>
+                    <div class="bg-orange-50 border border-orange-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-orange-700 font-black uppercase mb-1">나갈 돈</p>
+                        <p class="text-lg font-black text-orange-800">{{ "{:,}".format(settlement_summary.payable) }}원</p>
+                    </div>
+                    <div class="bg-indigo-50 border-2 border-indigo-300 rounded-2xl p-4">
+                        <p class="text-[10px] text-indigo-700 font-black uppercase mb-1">순이익</p>
+                        <p class="text-xl font-black text-indigo-800">{{ "{:,}".format(settlement_summary.net_profit) }}원</p>
+                    </div>
+                </div>
+                <p class="mt-2 text-[10px] text-gray-500 font-bold">위 합계는 현재 검색 기간·카테고리/입금상태 필터를 반영한 수치입니다. 총 수익·환불은 주문일 기준, 정산 지급/대기는 판매일(sale_dt) 기준입니다.</p>
+                {% endif %}
+
                 <div class="mt-6 p-6 rounded-2xl bg-gray-50 border border-gray-200">
                     <h4 class="text-sm font-black text-gray-800 mb-3">토스 결제 조회 / 정산확인</h4>
                     <p class="text-[11px] text-gray-500 mb-3">주문번호 또는 결제ID로 토스 결제 정보를 조회하고, 입금확인 처리할 수 있습니다.</p>
@@ -14807,6 +14908,35 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                     <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg lg:col-span-2">조회하기</button>
                 </form>
                 <p class="mt-3 text-[11px] text-gray-600 font-bold">엑셀: <a href="/admin/orders/settlement_detail_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_cat={{ sel_order_cat | urlencode }}&settlement_status={{ sel_settlement_status | urlencode }}{% if order_id_search %}&order_id={{ order_id_search | urlencode }}{% endif %}{% if payment_key_search %}&payment_key={{ payment_key_search | urlencode }}{% endif %}" class="text-teal-600 hover:underline">정산 상세 (n넘버)</a> · <a href="/admin/settlement/category_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&category={{ sel_order_cat | urlencode }}" class="text-teal-600 hover:underline">카테고리별 판매 품목 (품목·규격·수량)</a></p>
+                {% if settlement_summary %}
+                <div class="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-emerald-700 font-black uppercase mb-1">총 수익</p>
+                        <p class="text-lg font-black text-emerald-800">{{ "{:,}".format(settlement_summary.total_revenue) }}원</p>
+                    </div>
+                    <div class="bg-red-50 border border-red-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-red-700 font-black uppercase mb-1">환불</p>
+                        <p class="text-lg font-black text-red-800">{{ "{:,}".format(settlement_summary.total_refund) }}원</p>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-slate-700 font-black uppercase mb-1">총 지출</p>
+                        <p class="text-lg font-black text-slate-800">{{ "{:,}".format(settlement_summary.total_expense) }}원</p>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-amber-700 font-black uppercase mb-1">받을 돈</p>
+                        <p class="text-lg font-black text-amber-800">{{ "{:,}".format(settlement_summary.receivable) }}원</p>
+                    </div>
+                    <div class="bg-orange-50 border border-orange-200 rounded-2xl p-4">
+                        <p class="text-[10px] text-orange-700 font-black uppercase mb-1">나갈 돈</p>
+                        <p class="text-lg font-black text-orange-800">{{ "{:,}".format(settlement_summary.payable) }}원</p>
+                    </div>
+                    <div class="bg-indigo-50 border-2 border-indigo-300 rounded-2xl p-4">
+                        <p class="text-[10px] text-indigo-700 font-black uppercase mb-1">순이익</p>
+                        <p class="text-xl font-black text-indigo-800">{{ "{:,}".format(settlement_summary.net_profit) }}원</p>
+                    </div>
+                </div>
+                <p class="mt-2 text-[10px] text-gray-500 font-bold">위 합계는 현재 검색 기간·카테고리/입금상태 필터를 반영한 수치입니다. 총 수익·환불은 주문일 기준, 정산 지급/대기는 판매일(sale_dt) 기준입니다.</p>
+                {% endif %}
                 <div class="mt-6 p-6 rounded-2xl bg-gray-50 border border-gray-200">
                     <h4 class="text-sm font-black text-gray-800 mb-3">토스 결제 조회 / 정산확인</h4>
                     <p class="text-[11px] text-gray-500 mb-3">주문번호 또는 결제ID로 토스 결제 정보를 조회하고, 입금확인 처리할 수 있습니다.</p>
@@ -15081,6 +15211,7 @@ def admin_product_bulk_upload():
             flash("등록된 카테고리가 없습니다. 먼저 [카테고리] 탭에서 카테고리를 추가한 뒤 대량등록을 진행해 주세요.")
             return redirect('/admin?tab=bulk_register')
         count = 0
+        missing_images = []  # (상품명, 대표파일명, [상세파일명...]) 서버에 없어서 매칭 안 된 경우
         for idx, row in df.iterrows():
             cat_name = _cell_str(row.get('카테고리', ''))
             if not cat_name or cat_name.startswith('('):
@@ -15123,12 +15254,18 @@ def admin_product_bulk_upload():
                 tax_type = '과세'
             image_url = ""
             detail_image_url = ""
+            missing_main = None
+            missing_details = []
             main_img_raw = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
             image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
             if not image_url:
                 main_img = _bulk_image_filename_only(main_img_raw)
                 if main_img and not _bulk_is_placeholder_image(main_img):
-                    image_url = f"/static/uploads/{main_img.lstrip('/')}"
+                    server_path = os.path.join(upload_dir, main_img)
+                    if os.path.isfile(server_path):
+                        image_url = f"/static/uploads/{main_img.lstrip('/')}"
+                    else:
+                        missing_main = main_img
             path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
             is_abs = path_for_same_folder and ((len(path_for_same_folder) >= 2 and path_for_same_folder[1] == ':') or path_for_same_folder.startswith('/') or '\\' in path_for_same_folder)
             if is_abs and os.path.isfile(path_for_same_folder):
@@ -15147,9 +15284,14 @@ def admin_product_bulk_upload():
                         else:
                             fn_img = _bulk_image_filename_only(p)
                             if fn_img:
-                                detail_parts.append(f"/static/uploads/{fn_img}")
+                                if os.path.isfile(os.path.join(upload_dir, fn_img)):
+                                    detail_parts.append(f"/static/uploads/{fn_img}")
+                                else:
+                                    missing_details.append(fn_img)
                     if detail_parts:
                         detail_image_url = ",".join(detail_parts)
+            if missing_main or missing_details:
+                missing_images.append((name_val, missing_main or '', list(missing_details)))
             if not detail_image_url:
                 detail_image_url = image_url or ""
             new_p = Product(
@@ -15175,6 +15317,16 @@ def admin_product_bulk_upload():
             count += 1
         db.session.commit()
         flash(f"{count}개 상품이 등록되었습니다.")
+        if missing_images:
+            lines = []
+            for name, main_f, detail_fs in missing_images:
+                parts = []
+                if main_f:
+                    parts.append(f"대표:{main_f}")
+                if detail_fs:
+                    parts.append(f"상세:{','.join(detail_fs)}")
+                lines.append(f"{name} ({'; '.join(parts)})")
+            flash(f"다음 상품 이미지가 서버(static/uploads/)에 없어 URL이 비었습니다: {' | '.join(lines[:10])}{' ...' if len(lines) > 10 else ''}")
         return redirect('/admin?tab=bulk_register')
     except Exception as e:
         db.session.rollback()
@@ -16758,7 +16910,7 @@ def admin_backup_cron():
     key = (request.args.get("key") or "").strip()
     secret = os.getenv("BACKUP_CRON_SECRET", "").strip()
     if not secret or key != secret:
-        return "Unauthorized", 401
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
     ok, msg = run_backup()
     return jsonify({"success": ok, "message": msg})
 
