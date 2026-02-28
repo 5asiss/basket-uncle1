@@ -78,6 +78,8 @@ def register_admin_routes(app):
         admin_board_comment_delete,
         admin_seed_test_data,
         admin_delete_test_data,
+        admin_orders_delete_all,
+        admin_db_reset_all,
         admin_seed_virtual_reviews,
         admin_seed_virtual_orders,
         admin_seed_virtual_payment_orders,
@@ -202,6 +204,8 @@ def register_admin_routes(app):
     # seed / test
     admin_bp.add_url_rule('/admin/seed_test_data', view_func=login_required(admin_seed_test_data))
     admin_bp.add_url_rule('/admin/delete_test_data', view_func=login_required(admin_delete_test_data))
+    admin_bp.add_url_rule('/admin/orders/delete_all', view_func=login_required(admin_orders_delete_all), methods=['POST'])
+    admin_bp.add_url_rule('/admin/db/reset_all', view_func=login_required(admin_db_reset_all), methods=['POST'])
     admin_bp.add_url_rule('/admin/seed_virtual_reviews', view_func=login_required(admin_seed_virtual_reviews))
     admin_bp.add_url_rule('/admin/seed_virtual_orders', view_func=login_required(admin_seed_virtual_orders))
     admin_bp.add_url_rule('/admin/seed_virtual_payment_orders', view_func=login_required(admin_seed_virtual_payment_orders))

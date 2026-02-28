@@ -34,7 +34,7 @@ def now_kst():
 # --------------------------------------------------------------------------------
 # 1. 초기 설정 및 Flask 인스턴스 생성
 # --------------------------------------------------------------------------------
-from delivery_system import logi_bp, db_delivery
+from delivery_system import logi_bp, db_delivery, DeliveryTask, DeliveryLog
 
 app = Flask(__name__)
 # 프록시(Render, nginx 등) 뒤에서 redirect_uri가 올바르게 https·실도메인으로 생성되도록
@@ -159,6 +159,7 @@ from models import (
     BoardComment, DailyStat, SellerOrderConfirmation, EmailOrderLineStatus, OrderViewLink, SitePopup, DeliveryZone,
     MainDisplayConfig,
     MemberGradeConfig, PointConfig, PointLog, MarketingCost, Review, ReviewVote, UserConsent, Settlement,
+    MarketingAlimtalkLog,
     POINT_TYPE_ACCUMULATED, POINT_TYPE_EVENT, POINT_TYPE_CASH,
     EventPointRequest,
     ShareLink,
@@ -332,6 +333,140 @@ def _geocode_address(address_str):
     _cache[addr] = None
     _geocode_address._cache_keys.append(addr)
     return None
+
+
+def _reverse_geocode_to_zip(lat, lng):
+    """위경도 역지오코딩으로 우편번호 조회. 캐시 사용(최대 500개). KAKAO_REST_API_KEY 있으면 카카오 로컬 API(한국 5자리 정확), 없으면 Nominatim 폴백."""
+    if lat is None or lng is None:
+        return ''
+    try:
+        key = (round(float(lat), 4), round(float(lng), 4))
+    except (TypeError, ValueError):
+        return ''
+    if not hasattr(_reverse_geocode_to_zip, '_cache'):
+        _reverse_geocode_to_zip._cache = {}
+        _reverse_geocode_to_zip._keys = []
+    _cache, _keys = _reverse_geocode_to_zip._cache, _reverse_geocode_to_zip._keys
+    if key in _cache:
+        return _cache[key]
+    _max = 500
+    if len(_keys) >= _max:
+        for k in _keys[:_max // 4]:
+            _cache.pop(k, None)
+        _reverse_geocode_to_zip._keys = _keys[_max // 4:]
+        _keys = _reverse_geocode_to_zip._keys
+    postcode = ''
+
+    # 1) 카카오 로컬 API (한국 5자리 우편번호 정확)
+    try:
+        kakao_key = KAKAO_REST_API_KEY
+        if kakao_key:
+            r = requests.get(
+                "https://dapi.kakao.com/v2/local/geo/coord2address.json",
+                params={"x": lng, "y": lat, "input_coord": "WGS84"},
+                headers={"Authorization": f"KakaoAK {kakao_key}"},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                docs = (data or {}).get("documents") or []
+                if docs:
+                    doc = docs[0]
+                    ra = doc.get("road_address") or {}
+                    postcode = (ra.get("zone_no") or "").strip()
+                    if not postcode and doc.get("address"):
+                        postcode = (doc["address"].get("zip_code") or "").strip()
+    except Exception:
+        pass
+
+    # 2) Nominatim 폴백 (한국은 postcode 누락 많음)
+    if not postcode:
+        try:
+            r = requests.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lng, "format": "json", "addressdetails": 1},
+                headers={"User-Agent": "BasketUncle/1.0 (https://github.com/basket-uncle; delivery-export)"},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                addr = (data or {}).get("address") or {}
+                postcode = (addr.get("postcode") or addr.get("postal_code") or "").strip()
+        except Exception:
+            pass
+
+    _cache[key] = postcode
+    _reverse_geocode_to_zip._keys.append(key)
+    return postcode
+
+
+def _address_to_zip_kakao(address_str):
+    """주소 문자열로 카카오 주소 검색 API 호출 → 5자리 우편번호(zone_no) 반환. 캐시(최대 300개)."""
+    if not address_str or not address_str.strip():
+        return ''
+    addr = address_str.strip()
+    m = re.match(r'\(([^)]+)\)', addr)
+    if m:
+        addr = m.group(1).strip()
+    if not addr:
+        return ''
+    if not hasattr(_address_to_zip_kakao, '_cache'):
+        _address_to_zip_kakao._cache = {}
+        _address_to_zip_kakao._keys = []
+    _cache, _keys = _address_to_zip_kakao._cache, _address_to_zip_kakao._keys
+    if addr in _cache:
+        return _cache[addr]
+    _max = 300
+    if len(_keys) >= _max:
+        for k in _keys[:_max // 3]:
+            _cache.pop(k, None)
+        _address_to_zip_kakao._keys = _keys[_max // 3:]
+        _keys = _address_to_zip_kakao._keys
+    postcode = ''
+    try:
+        kakao_key = KAKAO_REST_API_KEY
+        if kakao_key:
+            r = requests.get(
+                "https://dapi.kakao.com/v2/local/search/address.json",
+                params={"query": addr},
+                headers={"Authorization": f"KakaoAK {kakao_key}"},
+                timeout=8,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                docs = (data or {}).get("documents") or []
+                if docs:
+                    doc = docs[0]
+                    ra = doc.get("road_address") or {}
+                    postcode = (ra.get("zone_no") or "").strip()
+                    if not postcode and doc.get("address"):
+                        postcode = (doc["address"].get("zip_code") or "").strip()
+    except Exception:
+        pass
+    _cache[addr] = postcode
+    _address_to_zip_kakao._keys.append(addr)
+    return postcode
+
+
+def _order_delivery_zip(order):
+    """주문의 배송지 주소를 우편번호로 변환. KAKAO_REST_API_KEY 있으면 카카오 API 우선(한국 5자리 정확), 없으면 좌표 역지오코딩 또는 주소 지오코딩 후 역지오코딩."""
+    if not order:
+        return ''
+    lat, lng = getattr(order, 'delivery_lat', None), getattr(order, 'delivery_lng', None)
+    if lat is not None and lng is not None:
+        return _reverse_geocode_to_zip(lat, lng)
+    addr = (order.delivery_address or '').strip()
+    if not addr:
+        return ''
+    # 주소만 있을 때: 카카오 주소 검색으로 우편번호 직접 조회(정확) → 실패 시 기존 지오코딩+역지오코딩
+    if KAKAO_REST_API_KEY:
+        z = _address_to_zip_kakao(addr)
+        if z:
+            return z
+    coords = _geocode_address(addr)
+    if coords:
+        return _reverse_geocode_to_zip(coords[0], coords[1])
+    return ''
 
 
 def _bunji_code_from_address(address_str):
@@ -5588,6 +5723,71 @@ def product_detail(pid):
                 <button class="w-full bg-gray-200 text-gray-400 py-5 md:py-7 rounded-[2rem] font-black text-xl md:text-2xl cursor-not-allowed italic" disabled>판매가 마감되었습니다</button>
                 {% endif %}
 
+                <div class="mt-6 relative">
+                    <button type="button" id="product-share-btn" onclick="var m=document.getElementById('product-share-menu'); m.classList.toggle('hidden'); if(!m.classList.contains('hidden')){ setTimeout(function(){ document.addEventListener('click', function closeShare(e){ if(!e.target.closest('#product-share-menu') && !e.target.closest('#product-share-btn')){ m.classList.add('hidden'); document.removeEventListener('click', closeShare); } }); }, 0); }" class="w-full py-4 md:py-5 rounded-2xl bg-gradient-to-r from-teal-50 to-emerald-50 border-2 border-teal-200 text-teal-700 font-black text-base md:text-lg hover:from-teal-100 hover:to-emerald-100 hover:border-teal-300 hover:shadow-md transition-all flex items-center justify-center gap-3 shadow-sm">
+                        <svg class="w-6 h-6 text-teal-500 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg>
+                        <span>상품정보공유</span>
+                    </button>
+                    <div id="product-share-menu" class="hidden absolute left-0 right-0 top-full mt-3 bg-white rounded-2xl border-2 border-gray-100 shadow-xl py-3 z-30 overflow-hidden">
+                        <p class="px-5 py-2 text-[10px] font-black text-gray-400 uppercase tracking-wider">링크 공유</p>
+                        <button type="button" onclick="shareProduct('kakao')" class="w-full px-5 py-4 text-left text-sm font-bold text-gray-800 hover:bg-[#FEF9E7] flex items-center gap-4 transition">
+                            <span class="w-12 h-12 rounded-xl bg-[#FEE500] flex items-center justify-center shrink-0 shadow-sm">
+                                <svg class="w-7 h-7 text-[#191919]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5.8 0 10.5 3.66 10.5 8.19 0 4.52-4.7 8.2-10.5 8.2-1.15 0-2.26-.15-3.31-.43l-3.98 1.05.97-3.8C2.93 14.5 1.5 12.03 1.5 11.19 1.5 6.66 6.2 3 12 3z"/></svg>
+                            </span>
+                            <span>카카오톡</span>
+                        </button>
+                        <button type="button" onclick="shareProduct('message')" class="w-full px-5 py-4 text-left text-sm font-bold text-gray-800 hover:bg-blue-50 flex items-center gap-4 transition">
+                            <span class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                                <svg class="w-6 h-6 text-blue-600" fill="currentColor" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/></svg>
+                            </span>
+                            <span>내 메시지</span>
+                        </button>
+                        <button type="button" onclick="shareProduct('copy')" class="w-full px-5 py-4 text-left text-sm font-bold text-gray-800 hover:bg-gray-50 flex items-center gap-4 transition">
+                            <span class="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                                <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                            </span>
+                            <span>링크 복사</span>
+                        </button>
+                    </div>
+                </div>
+                {% if kakao_js_key %}
+                <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.6.0/kakao.min.js" integrity="sha384-6bF3YJb2HdCjYjOHoJAGxF8b3B2dMylA2NlO+nOuC+f2nL0KpQ5jPYLEEFrHpJZw" crossorigin="anonymous"></script>
+                <script>Kakao.init({{ kakao_js_key | tojson }});</script>
+                {% endif %}
+                <script>
+                (function(){
+                    var shareUrl = {{ product_share_url | tojson }};
+                    var shareTitle = {{ product_share_title | tojson }};
+                    var shareImage = {{ product_share_image | tojson }};
+                    window.shareProduct = function(mode){
+                        var menu = document.getElementById('product-share-menu');
+                        if(menu) menu.classList.add('hidden');
+                        if(mode === 'copy'){
+                            if(navigator.clipboard && navigator.clipboard.writeText){
+                                navigator.clipboard.writeText(shareUrl).then(function(){ alert('링크가 복사되었습니다.'); }).catch(function(){ fallbackCopy(shareUrl); });
+                            } else { fallbackCopy(shareUrl); }
+                            return;
+                        }
+                        if(mode === 'message'){
+                            if(navigator.share){
+                                navigator.share({ title: shareTitle, text: shareTitle + ' - 바구니삼촌', url: shareUrl }).catch(function(){ copyAndAlert(); });
+                            } else { copyAndAlert(); }
+                            return;
+                        }
+                        if(mode === 'kakao'){
+                            if(typeof Kakao !== 'undefined' && Kakao.Share){
+                                try {
+                                    Kakao.Share.sendDefault({ objectType: 'feed', content: { title: shareTitle, description: '바구니삼촌 상품', imageUrl: shareImage, link: { webUrl: shareUrl, mobileWebUrl: shareUrl } } });
+                                } catch(e){ copyAndAlert(); }
+                            } else { copyAndAlert(); }
+                            return;
+                        }
+                        function copyAndAlert(){ if(navigator.clipboard) navigator.clipboard.writeText(shareUrl).then(function(){ alert('링크가 복사되었습니다. 원하는 앱에 붙여넣기 하세요.'); }); else fallbackCopy(shareUrl); }
+                        function fallbackCopy(str){ var ta = document.createElement('textarea'); ta.value = str; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); alert('링크가 복사되었습니다.'); }
+                    };
+                })();
+                </script>
+
                 {% if same_category_products %}
                 <div class="mt-12 pt-10 border-t border-gray-100">
                     <h3 class="text-base md:text-lg font-black text-gray-800 mb-4 flex items-center gap-2">
@@ -5870,7 +6070,11 @@ def product_detail(pid):
                                   user_logged_in=current_user.is_authenticated,
                                   recommend_cats_detail=recommend_cats_detail,
                                   cat_previews_detail=cat_previews_detail,
-                                  category_delivery_desc=category_delivery_desc)
+                                  category_delivery_desc=category_delivery_desc,
+                                  product_share_url=request.url_root.rstrip('/') + '/product/' + str(pid),
+                                  product_share_title=p.name or '상품',
+                                  product_share_image=(p.image_url if (p.image_url and (p.image_url.startswith('http://') or p.image_url.startswith('https://'))) else (request.url_root.rstrip('/') + (p.image_url or '/static/uploads/placeholder.png'))),
+                                  kakao_js_key=KAKAO_REST_API_KEY or '')
 
 
 @app.route('/admin/debug/product/<int:pid>')
@@ -11068,7 +11272,7 @@ def admin_dashboard():
                 <div class="flex flex-wrap gap-2 sm:gap-3 [&>button]:min-h-[44px] [&>a]:min-h-[44px] [&>a]:flex [&>a]:items-center [&>a]:inline-flex">
                     <button onclick="document.getElementById('excel_upload_form').classList.toggle('hidden')" class="bg-blue-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg">엑셀 업로드</button>
                     <a href="/admin/add" class="bg-teal-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg">+ 상품 등록</a>
-                    {% if is_master %}<a href="/admin/seed_test_data" class="bg-amber-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-amber-600" onclick="return confirm('테스트 카테고리 3개(테스트-채소/과일/수산)와 각 10개씩 가상 상품을 생성합니다. 계속할까요?');">🧪 테스트 데이터</a><a href="/admin/delete_test_data" class="bg-red-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-red-600" onclick="return confirm('테스트-채소/과일/수산 카테고리와 해당 상품을 모두 삭제합니다. 복구할 수 없습니다. 계속할까요?');">🗑 테스트 삭제</a><a href="/admin/seed_virtual_reviews" class="bg-violet-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-violet-600" onclick="return confirm('전체 상품별로 가상 구매 후기 10개씩 생성합니다. 계속할까요?');">📝 가상 후기</a><a href="/admin/seed_virtual_orders" class="bg-emerald-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-emerald-600" onclick="return confirm('최근 10일 이내 가상 주문 20건(품목 2~3개씩)을 생성합니다. 계속할까요?');">🛒 가상 주문</a><a href="/admin/seed_virtual_payment_orders" class="bg-sky-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-sky-600" onclick="return confirm('가상 결제완료 주문 20건을 추가로 생성합니다. 계속할까요?');">💳 결제완료 20건</a><a href="/admin/seed_virtual_board_data" class="bg-indigo-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-indigo-600" onclick="return confirm('게시판별(전국맛집·배송요청·제휴문의·자유) 가상 글 20개씩 생성합니다. 계속할까요?');">📋 게시판 가상 20건</a>{% endif %}
+                    {% if is_master %}<a href="/admin/seed_test_data" class="bg-amber-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-amber-600" onclick="return confirm('테스트 카테고리 3개(테스트-채소/과일/수산)와 각 10개씩 가상 상품을 생성합니다. 계속할까요?');">🧪 테스트 데이터</a><a href="/admin/delete_test_data" class="bg-red-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-red-600" onclick="return confirm('테스트-채소/과일/수산 카테고리와 해당 상품을 모두 삭제합니다. 복구할 수 없습니다. 계속할까요?');">🗑 테스트 삭제</a><form action="/admin/db/reset_all" method="POST" class="inline-flex items-center gap-2" onsubmit="var p=this.querySelector('[name=db_reset_password]').value; if(p!=='1234'){ alert('비밀번호가 일치하지 않습니다.'); return false; } return confirm('DB 전체(상품·주문·카테고리·게시판 등)를 초기화합니다. 회원은 유지됩니다. 복구 불가. 정말 진행할까요?');"><input type="password" name="db_reset_password" placeholder="비밀번호" class="w-24 border border-gray-300 rounded-xl px-3 py-2 text-[10px] font-bold" autocomplete="off"><button type="submit" class="bg-red-700 text-white px-4 py-2 rounded-2xl font-black text-[10px] shadow-lg hover:bg-red-800">DB 전체 삭제</button></form><a href="/admin/seed_virtual_reviews" class="bg-violet-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-violet-600" onclick="return confirm('전체 상품별로 가상 구매 후기 10개씩 생성합니다. 계속할까요?');">📝 가상 후기</a><a href="/admin/seed_virtual_orders" class="bg-emerald-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-emerald-600" onclick="return confirm('최근 10일 이내 가상 주문 20건(품목 2~3개씩)을 생성합니다. 계속할까요?');">🛒 가상 주문</a><a href="/admin/seed_virtual_payment_orders" class="bg-sky-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-sky-600" onclick="return confirm('가상 결제완료 주문 20건을 추가로 생성합니다. 계속할까요?');">💳 결제완료 20건</a><a href="/admin/seed_virtual_board_data" class="bg-indigo-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-indigo-600" onclick="return confirm('게시판별(전국맛집·배송요청·제휴문의·자유) 가상 글 20개씩 생성합니다. 계속할까요?');">📋 게시판 가상 20건</a>{% endif %}
                 </div>
             </div>
             <form id="products-bulk-form" method="POST" action="/admin/product/bulk_sale_action" class="block">
@@ -13732,6 +13936,12 @@ def admin_dashboard():
                 <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm"><p class="text-[9px] text-gray-400 font-black uppercase mb-1">Orders</p><p class="text-xl font-black text-gray-800">{{ stats.count }}건</p></div>
                 <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm"><p class="text-[9px] text-gray-400 font-black uppercase mb-1">Delivery Fees</p><p class="text-xl font-black text-orange-500">{{ "{:,}".format(stats.delivery) }}원</p></div>
                 <div class="bg-gray-800 p-6 rounded-[2rem] shadow-xl"><p class="text-[9px] text-gray-400 font-black uppercase mb-1 text-white/50">Grand Total</p><p class="text-xl font-black text-white">{{ "{:,}".format(stats.grand_total) }}원</p></div>
+            </div>
+            <div class="mb-6 flex flex-wrap items-center gap-4">
+                <form action="/admin/orders/delete_all" method="POST" class="inline" onsubmit="return confirm('전체 주문·정산·배송·리뷰 등 주문 관련 데이터를 모두 삭제합니다. 복구할 수 없습니다. 정말 진행할까요?');">
+                    <input type="hidden" name="confirm" value="1">
+                    <button type="submit" class="bg-red-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-red-700">🗑 주문정보 전체 삭제</button>
+                </form>
             </div>
 
             <div class="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mb-12">
@@ -16620,16 +16830,39 @@ def admin_purchase_order_preview_image():
 
 @login_required
 def admin_purchase_order_preview_page():
-    """발주서 이미지 미리보기용 HTML 래퍼 페이지."""
+    """발주서 이미지 미리보기용 HTML 래퍼 페이지. 이미지를 같은 요청에서 생성해 base64로 넣어 세션/쿠키 문제로 사진이 안 나오는 현상 방지."""
     if not current_user.is_admin:
         return redirect('/admin')
     po_start_str = (request.args.get('po_start') or '').strip()
     po_end_str = (request.args.get('po_end') or '').strip()
     po_category = (request.args.get('po_category') or '전체').strip() or '전체'
-    # 동일 파라미터로 이미지 엔드포인트 호출
-    from urllib.parse import urlencode
-    qs = urlencode({'po_start': po_start_str, 'po_end': po_end_str, 'po_category': po_category})
-    img_url = f"/admin/purchase_order/preview_image?{qs}"
+    now = now_kst()
+    try:
+        start_dt = datetime.strptime(po_start_str.replace('T', ' ').replace('+', ' '), '%Y-%m-%d %H:%M') if po_start_str else now.replace(hour=0, minute=0, second=0, microsecond=0)
+    except Exception:
+        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        end_dt = datetime.strptime(po_end_str.replace('T', ' ').replace('+', ' '), '%Y-%m-%d %H:%M') if po_end_str else now.replace(hour=23, minute=59, second=59, microsecond=0)
+    except Exception:
+        end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    rows, rows_by_date, grand_total = _get_purchase_order_detail_rows(start_dt, end_dt, po_category)
+    if not rows:
+        html = f"""
+        <html lang="ko">
+        <head><meta charset="UTF-8"><title>발주서 이미지 미리보기</title></head>
+        <body style="margin:20px; font-family: sans-serif;">
+            <h1>발주서 이미지 미리보기 ({po_category})</h1>
+            <p>해당 기간·카테고리에 발주 내역이 없습니다.</p>
+            <p><a href="/admin?tab=purchase_order">발주관리로 돌아가기</a></p>
+        </body>
+        </html>
+        """
+        from flask import Response
+        return Response(html, mimetype='text/html; charset=utf-8')
+    png_bytes = _build_purchase_order_image(rows, rows_by_date, grand_total)
+    import base64
+    b64 = base64.b64encode(png_bytes).decode('ascii')
+    img_data_url = f"data:image/png;base64,{b64}"
     html = f"""
     <html lang="ko">
     <head>
@@ -16645,7 +16878,7 @@ def admin_purchase_order_preview_page():
     <body>
         <div class="wrap">
             <h1>발주서 이미지 미리보기 ({po_category})</h1>
-            <img src="{img_url}" alt="발주서 이미지">
+            <img src="{img_data_url}" alt="발주서 이미지">
         </div>
     </body>
     </html>
@@ -17353,6 +17586,107 @@ def admin_delete_test_data():
         return redirect('/')
     deleted = _delete_test_categories_and_products()
     flash(f"테스트 데이터 삭제 완료. 상품 {deleted}건 및 테스트 카테고리가 삭제되었습니다.")
+    return redirect('/admin')
+
+
+@login_required
+def admin_orders_delete_all():
+    """주문정보 전체 삭제 (Order, OrderItem 및 연관 테이블). 관리자 전용. POST + confirm=1."""
+    if not current_user.is_admin:
+        return redirect('/')
+    if request.method != 'POST' or request.form.get('confirm') != '1':
+        flash("주문 전체 삭제는 POST로 confirm=1 필요합니다.")
+        return redirect('/admin?tab=orders')
+    try:
+        order_ids = [r.id for r in Order.query.with_entities(Order.id).all()]
+        order_id_strs = [r.order_id or '' for r in Order.query.with_entities(Order.order_id).all() if r.order_id]
+        if not order_ids:
+            flash("삭제할 주문이 없습니다.")
+            return redirect('/admin?tab=orders')
+        # FK 순서: order_item 참조하는 것 먼저
+        oi_ids = [r.id for r in OrderItem.query.filter(OrderItem.order_id.in_(order_ids)).with_entities(OrderItem.id).all()]
+        EmailOrderLineStatus.query.filter(EmailOrderLineStatus.order_item_id.in_(oi_ids)).delete(synchronize_session=False) if oi_ids else None
+        OrderItemLog.query.filter(OrderItemLog.order_id.in_(order_ids)).delete(synchronize_session=False)
+        Settlement.query.filter(Settlement.order_id.in_(order_ids)).delete(synchronize_session=False)
+        MarketingCost.query.filter(MarketingCost.order_id.in_(order_ids)).delete(synchronize_session=False)
+        Review.query.filter(Review.order_id.in_(order_ids)).delete(synchronize_session=False)
+        DeliveryTask.query.filter(DeliveryTask.order_id.in_(order_id_strs)).delete(synchronize_session=False)
+        DeliveryLog.query.filter(DeliveryLog.order_id.in_(order_id_strs)).delete(synchronize_session=False)
+        OrderItem.query.filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+        Order.query.filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+        SellerOrderConfirmation.query.delete()
+        db.session.commit()
+        flash("주문정보 전체가 삭제되었습니다.")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"주문 전체 삭제 중 오류: {e}")
+    return redirect('/admin?tab=orders')
+
+
+@login_required
+def admin_db_reset_all():
+    """DB 전체 초기화 (주문·상품·카테고리·회원·게시판 등 모든 데이터 삭제). 마스터 관리자만. POST + 비밀번호 1234."""
+    if not getattr(current_user, 'is_admin', False):
+        return redirect('/')
+    is_master = getattr(current_user, 'email', None) in (os.getenv('MASTER_ADMIN_EMAIL'),) or (current_user.is_admin and User.query.filter_by(is_admin=True).count() <= 1)
+    if not is_master:
+        flash("DB 전체 초기화는 마스터 관리자만 가능합니다.")
+        return redirect('/admin')
+    if request.method != 'POST':
+        return redirect('/admin')
+    if (request.form.get('db_reset_password') or '').strip() != '1234':
+        flash('DB 전체 삭제를 하려면 비밀번호 1234 를 입력하세요.')
+        return redirect('/admin?tab=products')
+    try:
+        # 1) 주문 연관
+        order_ids = [r.id for r in Order.query.with_entities(Order.id).all()]
+        order_id_strs = [r.order_id or '' for r in Order.query.with_entities(Order.order_id).all() if r.order_id]
+        oi_ids = [r.id for r in OrderItem.query.filter(OrderItem.order_id.in_(order_ids)).with_entities(OrderItem.id).all()] if order_ids else []
+        if oi_ids:
+            EmailOrderLineStatus.query.filter(EmailOrderLineStatus.order_item_id.in_(oi_ids)).delete(synchronize_session=False)
+        if order_ids:
+            OrderItemLog.query.filter(OrderItemLog.order_id.in_(order_ids)).delete(synchronize_session=False)
+            Settlement.query.filter(Settlement.order_id.in_(order_ids)).delete(synchronize_session=False)
+            MarketingCost.query.filter(MarketingCost.order_id.in_(order_ids)).delete(synchronize_session=False)
+            Review.query.filter(Review.order_id.in_(order_ids)).delete(synchronize_session=False)
+        DeliveryTask.query.delete()
+        DeliveryLog.query.delete()
+        OrderItem.query.delete()
+        Order.query.delete()
+        SellerOrderConfirmation.query.delete()
+        # 2) 상품·카테고리 연관
+        ReviewVote.query.delete()
+        Review.query.delete()
+        Product.query.delete()
+        CategorySettlement.query.delete()
+        Category.query.delete()
+        # 3) 회원 연관
+        PointLog.query.delete()
+        Cart.query.delete()
+        UserMessage.query.delete()
+        PushSubscription.query.delete()
+        UserConsent.query.delete()
+        # 4) 게시판
+        BoardComment.query.delete()
+        RestaurantRecommend.query.delete()
+        RestaurantVote.query.delete()
+        RestaurantRequest.query.delete()
+        DeliveryRequestVote.query.delete()
+        DeliveryRequest.query.delete()
+        PartnershipInquiry.query.delete()
+        FreeBoard.query.delete()
+        EventPointRequest.query.delete()
+        EventBoardPost.query.delete()
+        ShareLink.query.delete()
+        # 5) 기타
+        DailyStat.query.delete()
+        OrderViewLink.query.delete()
+        MarketingAlimtalkLog.query.delete()
+        db.session.commit()
+        flash("DB 전체 초기화가 완료되었습니다. 카테고리·관리자 계정은 다시 등록해야 합니다.")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"DB 초기화 중 오류: {e}")
     return redirect('/admin')
 
 
@@ -18645,7 +18979,10 @@ def _delivery_summary_rows(is_master, my_categories, sel_order_cat, start_dt, en
                 'order_date': o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '',
                 'status': o.status or '결제완료',
                 'customer': f"{o.customer_name or ''} {o.customer_phone or ''}".strip(),
+                'customer_name': o.customer_name or '',
+                'customer_phone': o.customer_phone or '',
                 'address': o.delivery_address or '',
+                'zipcode': _order_delivery_zip(o),
                 'items': items_str,
             })
     return delivery_rows
@@ -18675,8 +19012,16 @@ def admin_orders_delivery_summary_excel():
     if not delivery_rows:
         flash("다운로드할 배송 집계 데이터가 없습니다.")
         return redirect('/admin?tab=orders')
-    df = pd.DataFrame(delivery_rows)
-    df.columns = ['오더넘버', '주문일시', '상태', '고객정보', '배송지', '품목']
+    df = pd.DataFrame([{
+        '오더넘버': r['order_id'],
+        '주문일시': r['order_date'],
+        '상태': r['status'],
+        '고객명': r.get('customer_name', ''),
+        '전화번호': r.get('customer_phone', ''),
+        '배송지': r['address'],
+        '우편번호': r.get('zipcode', ''),
+        '품목': r['items'],
+    } for r in delivery_rows])
     df = _dataframe_utf8_safe(df)
     out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w:
