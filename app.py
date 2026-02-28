@@ -354,18 +354,25 @@ def _make_order_virt_id(delivery_address):
     for (oid,) in candidates:
         if oid and len(oid) >= len(prefix) + 5 and oid[len(prefix):len(prefix) + 5].isdigit():
             next_idx = max(next_idx, int(oid[len(prefix):len(prefix) + 5]) + 1)
+            
     # 동일 번지수+MM 기준 마지막 3자리(숫자증가) 최대값+1
     pattern = f"{prefix}{next_idx:05d}{mm}"
     seq_candidates = db.session.query(Order.order_id).filter(Order.order_id.like(pattern + "%")).all()
     next_seq = 1
     for (oid,) in seq_candidates:
-        if oid and len(oid) == len(pattern) + 3 and oid[len(pattern):].isdigit():
-            next_seq = max(next_seq, int(oid[len(pattern):]) + 1)
+        if not oid: continue
+        # ★ 핵심 수정: 언더바(_) 뒤의 타임스탬프를 떼어내고 순서(001, 002)만 정확히 계산하도록 변경
+        clean_oid = oid.split('_')[0] 
+        if len(clean_oid) == len(pattern) + 3 and clean_oid[len(pattern):].isdigit():
+            next_seq = max(next_seq, int(clean_oid[len(pattern):]) + 1)
+            
     for _ in range(100):
         candidate = f"{prefix}{next_idx:05d}{mm}{next_seq:03d}"
-        if not Order.query.filter_by(order_id=candidate).first():
+        # 언더바(_)가 포함된 기존 주문번호와도 겹치지 않게 like 검색으로 확실히 확인
+        if not db.session.query(Order.order_id).filter(Order.order_id.like(candidate + "%")).first():
             return candidate
         next_seq += 1
+        
     return f"{prefix}{next_idx:05d}{mm}{next_seq:03d}"
 
 
@@ -7903,18 +7910,30 @@ def order_payment():
 
                 const paymentAmount = Number({ total });
                 const taxFreeAmount = Math.min(paymentAmount, Number({ tax_free }));
+               
+               
+                // ★ 고유한 주문번호 생성을 위해 현재 시간(타임스탬프)을 뒤에 붙여줍니다.
+                    var uniqueOrderId = '{ order_id }_' + new Date().getTime();
 
-                tossPayments
-                    .requestPayment('CARD', {{
-                        amount: paymentAmount,
-                        taxFreeAmount,
-                        orderId: '{ order_id }',
-                        orderName: '{ order_name }',
-                        customerEmail: '{ current_user.email }',
-                        customerName: '{ current_user.name }',
-                        successUrl: window.location.origin + '/payment/success',
-                        failUrl: window.location.origin + '/payment/fail'
-                    }})
+                    tossPayments
+                        .requestPayment('CARD', {{
+                            amount: paymentAmount,
+                            taxFreeAmount: taxFreeAmount,
+                            orderId: uniqueOrderId,  // ← 기존 '{ order_id }' 대신 변수로 교체!
+                            orderName: '{ order_name }',
+                            customerEmail: '{ current_user.email }',
+                            customerName: '{ current_user.name }',
+                            successUrl: window.location.origin + '/payment/success',
+                            failUrl: window.location.origin + '/payment/fail'
+                        }}).catch(function (error) {{
+                            if (error.code === 'USER_CANCEL') {{
+                                // 사용자가 결제창을 닫거나 취소한 경우 알림 생략
+                            }} else {{
+                                alert("결제 오류: " + error.message);
+                            }}
+                            isProcessing = false;
+                            window.location.reload(); // ★ 필수: 취소/에러 시 화면을 강제 새로고침하여 모듈 초기화
+                        }});
                     .catch(function (error) {{
                         if (error.code === 'USER_CANCEL') {{
                             alert('사용자가 결제를 취소했습니다.');
