@@ -10892,11 +10892,18 @@ def admin_dashboard():
                 <div class="mt-5 p-5 bg-white rounded-xl border border-teal-200 text-left text-[11px]">
                     <p class="font-black text-teal-800 mb-2">🖼 이미지 대량 업로드 후 확인 방법</p>
                     <p class="text-gray-600 mb-3">1) 업로드 직후 상단 플래시 메시지에서 «N개 저장» 확인. 2) 아래 <b>저장된 이미지 목록</b>에서 파일명이 보이는지 확인. 3) 엑셀 대표·상세이미지파일명에 그 파일명 그대로 입력 후 상품 업로드. 4) 관리자 → 상품관리에서 해당 상품을 열어 이미지가 붙었는지 확인.</p>
-                    <p class="font-black text-gray-700 mb-2">저장된 이미지 목록 (최근 100개, 최신순)</p>
+                    <p class="font-black text-gray-700 mb-2">저장된 이미지 목록 (최근 100개, 최신순) — 파일 클릭 시 미리보기, 삭제 버튼으로 서버에서 제거</p>
                     {% if list_uploaded_images %}
                     <ul class="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 bg-gray-50 rounded-lg border border-gray-100 text-[10px] font-mono">
                         {% for f in list_uploaded_images %}
-                        <li class="flex items-center gap-1"><a href="/static/uploads/{{ f.name }}" target="_blank" class="text-teal-600 hover:underline" title="미리보기">{{ f.name }}</a><span class="text-gray-400">({{ (f.size / 1024)|round(1) }}KB)</span></li>
+                        <li class="flex items-center gap-1 group">
+                            <a href="/static/uploads/{{ f.name }}" target="_blank" class="text-teal-600 hover:underline" title="미리보기">{{ f.name }}</a>
+                            <span class="text-gray-400">({{ (f.size / 1024)|round(1) }}KB)</span>
+                            <form action="/admin/product/upload_delete" method="POST" class="inline" onsubmit="return confirm('이 이미지를 서버(static/uploads/)에서 삭제할까요?');">
+                                <input type="hidden" name="filename" value="{{ f.name }}">
+                                <button type="submit" class="text-red-500 hover:text-red-700 font-black ml-1" title="삭제">🗑</button>
+                            </form>
+                        </li>
                         {% endfor %}
                     </ul>
                     {% else %}
@@ -15187,6 +15194,33 @@ def admin_bulk_upload_images():
 
 
 @login_required
+def admin_upload_delete():
+    """static/uploads/ 안의 이미지 파일 1개 삭제. 관리자 전용. POST로 filename 전달."""
+    if not current_user.is_admin:
+        return redirect('/')
+    if request.method != 'POST':
+        return redirect('/admin?tab=bulk_register')
+    filename = (request.form.get('filename') or request.args.get('filename') or '').strip()
+    if not filename:
+        flash("삭제할 파일명이 없습니다.")
+        return redirect('/admin?tab=bulk_register')
+    if '..' in filename or '/' in filename or '\\' in filename or os.path.basename(filename) != filename:
+        flash("잘못된 파일명입니다.")
+        return redirect('/admin?tab=bulk_register')
+    upload_dir = os.path.join(app.root_path, 'static', 'uploads')
+    path = os.path.join(upload_dir, filename)
+    try:
+        if os.path.isfile(path) and os.path.realpath(path).startswith(os.path.realpath(upload_dir)):
+            os.remove(path)
+            flash(f"이미지가 삭제되었습니다: {filename}")
+        else:
+            flash(f"파일을 찾을 수 없거나 삭제할 수 없습니다: {filename}")
+    except OSError as e:
+        flash(f"삭제 실패: {e}")
+    return redirect('/admin?tab=bulk_register')
+
+
+@login_required
 def admin_product_bulk_upload():
     """엑셀 파일만 업로드. 이미지는 서버 static/uploads/에 두고 엑셀에는 파일명만 입력."""
     if not current_user.is_admin:
@@ -15259,13 +15293,18 @@ def admin_product_bulk_upload():
             main_img_raw = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
             image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
             if not image_url:
-                main_img = _bulk_image_filename_only(main_img_raw)
-                if main_img and not _bulk_is_placeholder_image(main_img):
-                    found = _bulk_find_upload_file(upload_dir, main_img)
+                if not main_img_raw or _bulk_is_placeholder_image(main_img_raw):
+                    found = _bulk_find_upload_by_basename(upload_dir, name_val + "1")
                     if found:
                         image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
-                    else:
-                        missing_main = main_img
+                if not image_url:
+                    main_img = _bulk_image_filename_only(main_img_raw)
+                    if main_img and not _bulk_is_placeholder_image(main_img):
+                        found = _bulk_find_upload_file(upload_dir, main_img)
+                        if found:
+                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                        else:
+                            missing_main = main_img
             path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
             is_abs = path_for_same_folder and ((len(path_for_same_folder) >= 2 and path_for_same_folder[1] == ':') or path_for_same_folder.startswith('/') or '\\' in path_for_same_folder)
             if is_abs and os.path.isfile(path_for_same_folder):
@@ -15289,6 +15328,14 @@ def admin_product_bulk_upload():
                                     detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                                 else:
                                     missing_details.append(fn_img)
+                    if detail_parts:
+                        detail_image_url = ",".join(detail_parts)
+                else:
+                    detail_parts = []
+                    for suffix in ("2", "3", "4", "5", "6", "7", "8", "9", "10"):
+                        found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
+                        if found:
+                            detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                     if detail_parts:
                         detail_image_url = ",".join(detail_parts)
             if missing_main or missing_details:
@@ -15389,6 +15436,21 @@ def _bulk_find_upload_file(upload_dir, filename):
                     return fn
         except OSError:
             pass
+    return None
+
+
+def _bulk_find_upload_by_basename(upload_dir, base_without_ext):
+    """확장자 없이 base 이름만 주면, .jpg/.jpeg/.png/.webp/.gif 순으로 찾아서 첫 매칭 파일명 반환.
+    상품명+숫자 패턴(예: 간장 오리주물럭 300g1, 간장 오리주물럭 300g2) 인식용."""
+    if not base_without_ext or not isinstance(base_without_ext, str):
+        return None
+    base = base_without_ext.strip()
+    if not base:
+        return None
+    for ext in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+        found = _bulk_find_upload_file(upload_dir, base + ext)
+        if found:
+            return found
     return None
 
 
