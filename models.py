@@ -448,6 +448,14 @@ class PointConfig(db.Model):
     value = db.Column(db.String(50), nullable=True)
 
 
+class SignupWelcomeConfig(db.Model):
+    """신규가입 시 이벤트 포인트 자동지급 설정. 단일 행(id=1) 사용."""
+    __tablename__ = "signup_welcome_config"
+    id = db.Column(db.Integer, primary_key=True)
+    points_amount = db.Column(db.Integer, default=0, nullable=False)  # 원 단위, 0이면 미지급
+    updated_at = db.Column(db.DateTime, default=_now_kst, onupdate=_now_kst)
+
+
 # 포인트 유형: accumulated(적립), event(이벤트), cash(캐시충전)
 POINT_TYPE_ACCUMULATED = "accumulated"
 POINT_TYPE_EVENT = "event"

@@ -36,6 +36,7 @@ def register_admin_routes(app):
         admin_member_grade_auto_apply,
         admin_member_grade_bulk_set,
         admin_point_config,
+        admin_signup_welcome_config,
         admin_point_adjust,
         admin_point_log,
         admin_point_bulk_grant,
@@ -149,6 +150,7 @@ def register_admin_routes(app):
 
     # point
     admin_bp.add_url_rule('/admin/point/config', view_func=login_required(admin_point_config), methods=['POST'])
+    admin_bp.add_url_rule('/admin/signup-welcome-config', view_func=login_required(admin_signup_welcome_config), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/point/adjust', view_func=login_required(admin_point_adjust), methods=['POST'])
     admin_bp.add_url_rule('/admin/point/log', view_func=login_required(admin_point_log))
     admin_bp.add_url_rule('/admin/point/bulk_grant', view_func=login_required(admin_point_bulk_grant), methods=['POST'])

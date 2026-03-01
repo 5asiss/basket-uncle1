@@ -158,7 +158,7 @@ from models import (
     RestaurantVote, PartnershipInquiry, FreeBoard, DeliveryRequest, DeliveryRequestVote,
     BoardComment, DailyStat, SellerOrderConfirmation, EmailOrderLineStatus, OrderViewLink, SitePopup, DeliveryZone,
     MainDisplayConfig,
-    MemberGradeConfig, PointConfig, PointLog, MarketingCost, Review, ReviewVote, UserConsent, Settlement,
+    MemberGradeConfig, PointConfig, SignupWelcomeConfig, PointLog, MarketingCost, Review, ReviewVote, UserConsent, Settlement,
     MarketingAlimtalkLog,
     POINT_TYPE_ACCUMULATED, POINT_TYPE_EVENT, POINT_TYPE_CASH,
     EventPointRequest,
@@ -910,10 +910,15 @@ def _sync_user_points(user_obj):
 
 
 def apply_welcome_event_points(user_obj):
-    """첫 가입 시 이벤트 포인트 자동 지급. PointConfig의 welcome_event_points(원) 설정값만큼 지급. 0이면 미지급."""
+    """첫 가입 시 이벤트 포인트 자동 지급. SignupWelcomeConfig.points_amount(원) 또는 PointConfig welcome_event_points 사용. 0이면 미지급."""
     if not user_obj:
         return
-    amount = _get_point_config_val('welcome_event_points', 0)
+    amount = 0
+    row = SignupWelcomeConfig.query.get(1)
+    if row is not None and getattr(row, 'points_amount', None) is not None:
+        amount = max(0, int(row.points_amount))
+    if amount <= 0:
+        amount = _get_point_config_val('welcome_event_points', 0)
     if amount <= 0:
         return
     _ensure_user_point_columns(user_obj)
@@ -1274,6 +1279,10 @@ HEADER_HTML = """
         .touch-target { min-height: 44px; min-width: 44px; }
         .mobile-px { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
         .mobile-pb { padding-bottom: env(safe-area-inset-bottom); }
+    }
+    @media (min-width: 1024px) {
+        body { font-size: 16px; line-height: 1.6; }
+        main { max-width: 100%; }
     }
     
     .item-badge {
@@ -3134,6 +3143,15 @@ def index():
     color: #f1f5f9;
 }
 @media (min-width: 768px) { .page-main .hero-title { margin-bottom: 1.5rem; } }
+@media (min-width: 1024px) {
+    .page-main .hero-title { font-size: 2.25rem; line-height: 1.25; }
+    .page-main .hero-desc { font-size: 1.125rem; max-width: 42rem; }
+    .page-main .hero-wrap { min-height: 65vh; padding: 5rem 2rem 6rem; }
+}
+@media (min-width: 1280px) {
+    .page-main .hero-title { font-size: 2.75rem; }
+    .page-main .hero-desc { font-size: 1.25rem; }
+}
 .page-main .hero-title .accent { color: #4ade80; font-weight: 900; letter-spacing: -0.02em; }
 .page-main .hero-divider {
     width: 4rem;
@@ -3187,8 +3205,11 @@ def index():
     box-sizing: border-box;
 }
 @media (min-width: 640px) { .page-main #products { padding-left: 1rem; padding-right: 1rem; } }
+@media (min-width: 1024px) {
+    .page-main #products { max-width: 80rem; padding: 3rem 2rem 5rem; padding-left: 2.5rem; padding-right: 2.5rem; }
+}
 @media (min-width: 1280px) {
-    .page-main #products { padding: clamp(3rem, 8vw, 5rem) 1.5rem; padding-left: 3rem; padding-right: 3rem; }
+    .page-main #products { padding: clamp(3rem, 8vw, 5rem) 3rem; padding-left: 3rem; padding-right: 3rem; }
 }
 .page-main .product-card .p-3 { }
 @media (max-width: 767px) {
@@ -3196,6 +3217,8 @@ def index():
     .page-main .section-title .bar { height: 1.25rem; }
 }
 @media (min-width: 1024px) {
+    .page-main .section-title { font-size: 1.5rem; margin-bottom: 1.25rem; }
+    .page-main .section-title .bar { height: 1.75rem; }
     .page-main .product-card h3 { font-size: 0.9375rem; }
     .page-main .product-card .price { font-size: 1.15rem; }
 }
@@ -9668,6 +9691,33 @@ def admin_member_grade_auto_apply():
 
 
 @login_required
+def admin_signup_welcome_config():
+    """신규가입 시 자동지급 포인트 설정 (마스터 전용). GET: 현재 금액 반환, POST: points_amount(원) 저장."""
+    if not current_user.is_admin:
+        return jsonify({'error': '권한 없음'}), 403
+    if request.method == 'GET':
+        row = SignupWelcomeConfig.query.get(1)
+        amount = int(row.points_amount) if row and getattr(row, 'points_amount', None) is not None else 0
+        return jsonify({'points_amount': amount})
+    try:
+        data = request.get_json(silent=True) or request.form
+        amount = int(data.get('points_amount', 0) or 0)
+        if amount < 0:
+            amount = 0
+        row = SignupWelcomeConfig.query.get(1)
+        if not row:
+            row = SignupWelcomeConfig(id=1, points_amount=amount)
+            db.session.add(row)
+        else:
+            row.points_amount = amount
+        db.session.commit()
+        return jsonify({'ok': True, 'points_amount': amount})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': '저장 중 오류가 발생했습니다.'}), 500
+
+
+@login_required
 def admin_point_config():
     """포인트 정책 저장 (마스터 전용). 전역 + 유형별(레벨·금액·기간·횟수·주문당최대)"""
     if not current_user.is_admin:
@@ -10405,6 +10455,7 @@ def admin_dashboard():
 
     point_accumulation_rate = point_min_order = point_max_use = 0
     welcome_event_points = 0
+    signup_welcome_config_amount = 0
     point_users = []
     point_policy_accumulated = point_policy_event = point_policy_cash = {}
     point_policy_by_grade = []
@@ -10412,6 +10463,11 @@ def admin_dashboard():
         rate, min_ord, max_pts = _get_point_config()
         point_accumulation_rate, point_min_order, point_max_use = rate, min_ord, max_pts
         welcome_event_points = _get_point_config_val('welcome_event_points', 0)
+        try:
+            _swc = SignupWelcomeConfig.query.get(1)
+            signup_welcome_config_amount = int(_swc.points_amount) if _swc and getattr(_swc, 'points_amount', None) is not None else welcome_event_points
+        except Exception:
+            signup_welcome_config_amount = welcome_event_points
         for g in range(1, 6):
             point_policy_by_grade.append({
                 'grade': g,
@@ -13172,6 +13228,18 @@ def admin_dashboard():
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">포인트 정책 및 회원별 관리</h3>
                 <p class="text-[11px] text-gray-500 font-bold mb-4">구매금액의 0.1% 자동 적립, 설정한 금액 이상 구매 시 설정한 한도까지 사용 가능.</p>
+                <div class="bg-teal-50 border-2 border-teal-200 rounded-2xl p-6 mb-6">
+                    <p class="font-black text-teal-800 text-sm mb-2">🎁 신규가입 시 자동지급 설정</p>
+                    <p class="text-[10px] text-teal-700 mb-3">회원가입 완료 시 이벤트 포인트를 자동으로 지급합니다. 0원이면 미지급.</p>
+                    <form id="signup_welcome_config_form" class="flex flex-wrap items-end gap-4">
+                        <label class="flex flex-col gap-1">
+                            <span class="text-[10px] text-gray-600 font-bold">자동지급 금액(원)</span>
+                            <input type="number" name="points_amount" id="signup_welcome_points_amount" value="{{ signup_welcome_config_amount }}" min="0" class="border border-teal-200 rounded-xl px-3 py-2 text-sm w-32 font-black" placeholder="0">
+                        </label>
+                        <button type="submit" class="px-4 py-2 bg-teal-600 text-white rounded-xl font-black text-xs hover:bg-teal-700">저장</button>
+                    </form>
+                    <p id="signup_welcome_config_msg" class="text-[11px] font-bold mt-2 hidden"></p>
+                </div>
                 <div class="bg-violet-50 border border-violet-200 rounded-2xl p-6 mb-6">
                     <p class="font-black text-violet-800 text-xs mb-3">이벤트 일괄 포인트 지급</p>
                     <p class="text-[10px] text-violet-700 mb-3">지급할 회원의 이메일 또는 회원ID를 한 줄에 하나씩 입력하거나, 텍스트/CSV 파일을 업로드하세요. (쉼표·줄바꿈 구분)</p>
@@ -13362,6 +13430,24 @@ def admin_dashboard():
                             showMsg(msg, false);
                         });
                 });
+                var signupWelcomeForm = document.getElementById('signup_welcome_config_form');
+                if (signupWelcomeForm) {
+                    signupWelcomeForm.addEventListener('submit', function(e) {
+                        e.preventDefault();
+                        var amount = parseInt(document.getElementById('signup_welcome_points_amount').value, 10) || 0;
+                        if (amount < 0) amount = 0;
+                        var msgEl = document.getElementById('signup_welcome_config_msg');
+                        fetch('/admin/signup-welcome-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ points_amount: amount }), credentials: 'same-origin' })
+                            .then(function(r) { return r.json(); })
+                            .then(function(d) {
+                                if (!msgEl) return;
+                                msgEl.classList.remove('hidden');
+                                if (d.error) { msgEl.textContent = d.error; msgEl.className = 'text-[11px] font-bold mt-2 text-red-600'; }
+                                else { msgEl.textContent = '저장되었습니다. 신규가입 시 ' + (amount > 0 ? amount + '원' : '0원(미지급)') + ' 적용됩니다.'; msgEl.className = 'text-[11px] font-bold mt-2 text-teal-600'; }
+                            })
+                            .catch(function() { if (msgEl) { msgEl.classList.remove('hidden'); msgEl.textContent = '통신 오류'; msgEl.className = 'text-[11px] font-bold mt-2 text-red-600'; } });
+                    });
+                }
                 var bulkForm = document.getElementById('point_bulk_grant_form');
                 if (bulkForm) {
                     var bulkFile = document.getElementById('point_bulk_file');
@@ -19508,7 +19594,10 @@ if __name__ == "__main__":
     with app.app_context():
         # 모든 테이블을 현재 DATABASE_URL 기준 DB에 생성
         db.create_all()
-        
+        # 신규가입 자동지급 설정 테이블 초기 행(id=1) 없으면 생성
+        if SignupWelcomeConfig.query.get(1) is None:
+            db.session.add(SignupWelcomeConfig(id=1, points_amount=0))
+            db.session.commit()
         # [복구] 배송 시스템 최초 관리자 생성 로직 추가
         from delivery_system import AdminUser
         if not AdminUser.query.filter_by(username='admin').first():
@@ -19532,6 +19621,12 @@ with app.app_context():
     # 모든 모델(이벤트 게시판·공유 링크 등) 테이블 자동 생성 — 서버 업로드 시 flask db migrate/upgrade 수동 실행 불필요
     from models import EventBoardPost, ShareLink, EventPointRequest  # noqa: F401 - 테이블 생성용 로드
     db.create_all()
+    try:
+        if SignupWelcomeConfig.query.get(1) is None:
+            db.session.add(SignupWelcomeConfig(id=1, points_amount=0))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
     from sqlalchemy import text
     try:
         rp = db.session.execute(text("PRAGMA table_info(settlement)")).fetchall()
