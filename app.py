@@ -8700,6 +8700,12 @@ def order_payment():
         flash("결제 클라이언트 키가 설정되지 않았습니다. 관리자에게 문의해 주세요.")
         return redirect('/cart')
 
+    # 결제창은 'API 개별 연동 키'(live_ck_/test_ck_) 필요. 결제위젯 연동 키(gck_) 사용 시 400 오류 발생
+    ck = (TOSS_CLIENT_KEY or "").strip()
+    if "_gck_" in ck or ck.startswith("live_gck_") or ck.startswith("test_gck_"):
+        flash("결제창에는 'API 개별 연동 키'(live_ck_ 또는 test_ck_로 시작)를 사용해 주세요. 현재 결제위젯 연동 키(gck_)가 설정되어 있어 결제창 요청이 400 오류로 실패합니다. 개발자센터 > API 키 > 결제창(일반결제)용 클라이언트 키로 변경 후 다시 시도해 주세요.")
+        return redirect('/cart')
+
     content = f"""
     <div class="max-w-md mx-auto py-24 md:py-40 px-6 text-center font-black">
         <div class="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center text-5xl mx-auto mb-10 text-blue-600 shadow-inner animate-pulse">
@@ -8737,6 +8743,20 @@ def order_payment():
    <script>
     // 토스페이먼츠 샘플(tosspayments-sample) 방식: v2 스크립트 로드 후 초기화
     (function() {{
+        var clientKey = "{TOSS_CLIENT_KEY}";
+        // 결제창은 API 개별 연동 키(ck_)만 지원. 결제위젯 키(gck_) 사용 시 SDK가 에러를 냄 → 스크립트 로드 전에 막기
+        if (clientKey.indexOf('_gck_') !== -1 || /^(live|test)_gck_/.test(clientKey)) {{
+            var paymentButton = document.getElementById('payment-button');
+            if (paymentButton) {{
+                paymentButton.onclick = function() {{
+                    alert('결제창에는 API 개별 연동 키(live_ck_ 또는 test_ck_)를 사용해 주세요.\\n현재 결제위젯 연동 키가 설정되어 있습니다.\\n.env 의 TOSS_CLIENT_KEY 를 개발자센터 > API 키 > 결제창(일반결제)용 클라이언트 키로 변경한 뒤 서버를 재시작해 주세요.');
+                }};
+                paymentButton.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 결제 키 설정 오류 (위젯 키 사용 중)';
+                paymentButton.style.background = '#b91c1c';
+            }}
+            return;
+        }}
+
         var s = document.createElement('script');
         s.src = 'https://js.tosspayments.com/v2/standard';
         s.async = false;
@@ -8745,7 +8765,6 @@ def order_payment():
                 console.error('토스페이먼츠 스크립트를 불러오지 못했습니다.');
                 return;
             }}
-            var clientKey = "{TOSS_CLIENT_KEY}";
             var customerKey = '{ customer_key_js }';
             var tossPayments = TossPayments(clientKey);
             var payment = tossPayments.payment({{ customerKey: customerKey }});

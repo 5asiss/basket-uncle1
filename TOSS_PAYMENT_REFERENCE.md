@@ -68,7 +68,7 @@
 
 ## 5. 설정 (config.py)
 
-- **TOSS_CLIENT_KEY**: 결제창 SDK용 (브라우저 노출). 테스트 `test_ck_` / 라이브 `live_ck_`.
+- **TOSS_CLIENT_KEY**: 결제창 SDK용 (브라우저 노출). **반드시 API 개별 연동 키** 사용 — 테스트 `test_ck_` / 라이브 `live_ck_`. 결제위젯 연동 키(`test_gck_`/`live_gck_`)를 넣으면 결제창 요청 시 **400 Bad Request**가 납니다.
 - **TOSS_SECRET_KEY**: 결제 승인·취소 API용 (서버만 사용). 테스트 `test_sk_` / 라이브 `live_sk_`.
 - **TOSS_CONFIRM_KEY**: 웹훅 서명 검증용(선택). 현재 일반 결제만 사용 시 필수 아님.
 
