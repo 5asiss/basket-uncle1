@@ -43,7 +43,12 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_fallback_key")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 
 # 1. 모든 DB 경로 설정 (단일 DB 사용)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///direct_trade_mall.db")
+# 로컬 개발 시 Render 내부 Postgres 호스트에 접속 불가하므로 LOCAL_DATABASE_URL 로 SQLite 사용 권장
+_db_url = os.getenv("LOCAL_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///direct_trade_mall.db"
+if "postgres" in _db_url and "dpg-" in _db_url and not os.getenv("PORT"):
+    # Render 환경이 아닐 때(로컬) Render 내부 호스트는 DNS 미해석 → 로컬용 SQLite로 대체
+    _db_url = os.getenv("LOCAL_DATABASE_URL") or "sqlite:///direct_trade_mall.db"
+app.config['SQLALCHEMY_DATABASE_URI'] = _db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # 2. DB 연결 (공백 제거 버전)
@@ -5852,6 +5857,17 @@ def product_detail(pid):
                 </div>
             </div>
         </div>
+
+        {% if cat_info and cat_info.id %}
+        <div class="mt-16 md:mt-24 px-4 md:px-0">
+            <a href="/category/seller/{{ cat_info.id }}" class="inline-flex items-center gap-3 py-5 px-8 rounded-2xl bg-gray-50 border-2 border-gray-100 hover:border-teal-200 hover:bg-teal-50/50 text-gray-800 font-black text-base md:text-lg transition-all shadow-sm hover:shadow-md">
+                <span class="w-14 h-14 rounded-xl bg-teal-100 flex items-center justify-center text-teal-600"><i class="fas fa-store text-xl"></i></span>
+                <span>판매자 정보보기</span>
+                <i class="fas fa-chevron-right text-teal-500"></i>
+            </a>
+            <p class="text-[11px] text-gray-500 font-bold mt-3">본 상품의 실제 판매 사업자(상호·대표·사업자번호·연락처)를 확인할 수 있습니다.</p>
+        </div>
+        {% endif %}
 
         <div id="reviews" class="mt-40 px-4 md:px-0">
             <h3 class="text-2xl md:text-4xl font-black text-gray-900 mb-12 flex items-center gap-4 tracking-tighter">
