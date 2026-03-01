@@ -8810,133 +8810,133 @@ def payment_success():
         print(f"[Toss confirm error] status={res.status_code} body={res.text}")
         return redirect(url_for('payment_fail', message=err_msg))
 
-    # res.status_code == 200
-        items = Cart.query.filter_by(user_id=current_user.id).all()
-        if not items: return redirect('/cart') # 중복 새로고침 방지
+    # res.status_code == 200 → 주문 생성
+    items = Cart.query.filter_by(user_id=current_user.id).all()
+    if not items: return redirect('/cart') # 중복 새로고침 방지
 
-        cat_groups = {i.product_category: [] for i in items}
-        for i in items: cat_groups[i.product_category].append(f"{i.product_name}({i.quantity})")
-        details = " | ".join([f"[{cat}] {', '.join(prods)}" for cat, prods in cat_groups.items()])
-        
-        cat_price_sums = {}
+    cat_groups = {i.product_category: [] for i in items}
+    for i in items: cat_groups[i.product_category].append(f"{i.product_name}({i.quantity})")
+    details = " | ".join([f"[{cat}] {', '.join(prods)}" for cat, prods in cat_groups.items()])
+    
+    cat_price_sums = {}
+    for i in items:
+        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
+    cat_item_counts = {}
+    for i in items:
+        cat_item_counts[i.product_category] = cat_item_counts.get(i.product_category, 0) + i.quantity
+    delivery_fee, _ = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
+    points_used = session.get('points_used', 0) or 0
+    quick_extra = session.get('quick_extra_fee', 0) or 0
+    original_total = int(amt) + points_used  # 결제창에 넘긴 금액(amt) + 사용 포인트 = 주문 원금액
+    max_allowed_now = _effective_max_point_use(current_user, original_total)
+    points_used = min(points_used, max_allowed_now)
+
+    # 주문 시 변경한 배송지가 있으면 session 값 사용, 없으면 회원 기본 주소 사용
+    delivery_addr = session.get('order_address') or current_user.address or ""
+    delivery_apt = (session.get('order_address_apt') or getattr(current_user, 'address_apt_name', None) or "").strip()
+    delivery_addr_detail = session.get('order_address_detail') or current_user.address_detail or ""
+    delivery_entrance_pw = session.get('order_entrance_pw') or current_user.entrance_pw or ""
+    apt_part = f" {delivery_apt} " if delivery_apt else " "
+    delivery_address_str = f"({delivery_addr}){apt_part}{delivery_addr_detail} (현관:{delivery_entrance_pw})"
+
+    delivery_lat = session.get('delivery_lat')
+    delivery_lng = session.get('delivery_lng')
+    if (delivery_lat is None or delivery_lng is None) and delivery_addr:
+        coords = _geocode_address(delivery_addr)
+        if coords:
+            delivery_lat, delivery_lng = float(coords[0]), float(coords[1])
+
+    # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록. UTM: 세션 우선, 없으면 회원 가입 시 유입 경로 사용(재주문도 같은 유입으로 집계).
+    try:
+        _utm_src = session.get('utm_source') or getattr(current_user, 'utm_source', None)
+        _utm_med = session.get('utm_medium') or getattr(current_user, 'utm_medium', None)
+        _utm_camp = session.get('utm_campaign') or getattr(current_user, 'utm_campaign', None)
+        order = Order(
+            user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email,
+            product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'),
+            order_id=oid, payment_key=pk, delivery_address=delivery_address_str,
+            delivery_lat=delivery_lat, delivery_lng=delivery_lng,
+            request_memo=current_user.request_memo,
+            status='결제완료', points_used=points_used, quick_extra_fee=quick_extra,
+            utm_source=_utm_src, utm_medium=_utm_med, utm_campaign=_utm_camp
+        )
+        db.session.add(order)
+        db.session.flush()  # order.id 확보
         for i in items:
-            cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
-        cat_item_counts = {}
+            db.session.add(OrderItem(order_id=order.id, product_id=i.product_id, product_name=i.product_name, product_category=i.product_category, price=i.price, quantity=i.quantity, tax_type=i.tax_type or '과세', item_status='결제완료'))
+        db.session.flush()  # OrderItem.id 확보
+
+        order_items = OrderItem.query.filter_by(order_id=order.id).order_by(OrderItem.id.asc()).all()
+        delivery_fee_per_settlement = 990
+        for oi in order_items:
+            cat = Category.query.filter_by(name=oi.product_category).first()
+            cat_type = getattr(cat, 'category_type', None) or '입점형'
+            # 공급자형: 배송비·수수료 없음, 공급가(supply_price) 기준
+            if cat_type == '공급자형':
+                p = Product.query.get(oi.product_id)
+                base_price = (getattr(p, 'supply_price', None) or p.price) if p else oi.price
+                sales_amount = base_price * oi.quantity
+                fee = 0
+                delivery_fee_per = 0
+                total = sales_amount
+            else:
+                sales_amount = oi.price * oi.quantity
+                fee = round(sales_amount * 0.055)
+                delivery_fee_per = delivery_fee_per_settlement
+                total = sales_amount - fee - delivery_fee_per
+            settlement_no = "N" + str(oi.id).zfill(10)
+            tax_exempt_val = (getattr(cat, 'tax_type', None) or '과세') == '면세'
+            db.session.add(Settlement(
+                settlement_no=settlement_no, order_id=order.id, order_item_id=oi.id,
+                sale_dt=order.created_at, category=oi.product_category,
+                tax_exempt=tax_exempt_val,
+                product_name=oi.product_name, sales_amount=sales_amount, fee=fee,
+                delivery_fee=delivery_fee_per, settlement_total=total,
+                category_type=cat_type,
+                settlement_status='입금대기', settled_at=None
+            ))
+
         for i in items:
-            cat_item_counts[i.product_category] = cat_item_counts.get(i.product_category, 0) + i.quantity
-        delivery_fee, _ = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
-        points_used = session.get('points_used', 0) or 0
-        quick_extra = session.get('quick_extra_fee', 0) or 0
-        original_total = int(amt) + points_used  # 결제창에 넘긴 금액(amt) + 사용 포인트 = 주문 원금액
-        max_allowed_now = _effective_max_point_use(current_user, original_total)
-        points_used = min(points_used, max_allowed_now)
+            p = Product.query.get(i.product_id)
+            if p:
+                p.stock -= i.quantity
 
-        # 주문 시 변경한 배송지가 있으면 session 값 사용, 없으면 회원 기본 주소 사용
-        delivery_addr = session.get('order_address') or current_user.address or ""
-        delivery_apt = (session.get('order_address_apt') or getattr(current_user, 'address_apt_name', None) or "").strip()
-        delivery_addr_detail = session.get('order_address_detail') or current_user.address_detail or ""
-        delivery_entrance_pw = session.get('order_entrance_pw') or current_user.entrance_pw or ""
-        apt_part = f" {delivery_apt} " if delivery_apt else " "
-        delivery_address_str = f"({delivery_addr}){apt_part}{delivery_addr_detail} (현관:{delivery_entrance_pw})"
+        apply_order_points(current_user, original_total, points_used, order.id)
+        if session.get('save_address_to_profile') and delivery_addr:
+            current_user.address = delivery_addr
+            current_user.address_apt_name = delivery_apt or None
+            current_user.address_detail = delivery_addr_detail
+            current_user.entrance_pw = delivery_entrance_pw
+        session.pop('points_used', None)
+        session.pop('quick_extra_fee', None)
+        session.pop('order_address', None)
+        session.pop('order_address_apt', None)
+        session.pop('order_address_detail', None)
+        session.pop('order_entrance_pw', None)
+        session.pop('save_address_to_profile', None)
+        Cart.query.filter_by(user_id=current_user.id).delete()
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        flash("주문 저장 중 오류가 발생했습니다. 결제는 완료되었을 수 있으니 고객센터로 문의해 주세요.")
+        print(f"payment_success DB Error: {e}")
+        return redirect('/cart')
 
-        delivery_lat = session.get('delivery_lat')
-        delivery_lng = session.get('delivery_lng')
-        if (delivery_lat is None or delivery_lng is None) and delivery_addr:
-            coords = _geocode_address(delivery_addr)
-            if coords:
-                delivery_lat, delivery_lng = float(coords[0]), float(coords[1])
+    title, body = get_template_content('order_created', order_id=oid)
+    send_message(current_user.id, title, body, 'order_created', order.id)
+    try:
+        send_alimtalk_order_event('order_created', order.customer_phone or current_user.phone, order.customer_name or current_user.name, order.order_id)
+    except Exception:
+        pass
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
-        # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록. UTM: 세션 우선, 없으면 회원 가입 시 유입 경로 사용(재주문도 같은 유입으로 집계).
-        try:
-            _utm_src = session.get('utm_source') or getattr(current_user, 'utm_source', None)
-            _utm_med = session.get('utm_medium') or getattr(current_user, 'utm_medium', None)
-            _utm_camp = session.get('utm_campaign') or getattr(current_user, 'utm_campaign', None)
-            order = Order(
-                user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email,
-                product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'),
-                order_id=oid, payment_key=pk, delivery_address=delivery_address_str,
-                delivery_lat=delivery_lat, delivery_lng=delivery_lng,
-                request_memo=current_user.request_memo,
-                status='결제완료', points_used=points_used, quick_extra_fee=quick_extra,
-                utm_source=_utm_src, utm_medium=_utm_med, utm_campaign=_utm_camp
-            )
-            db.session.add(order)
-            db.session.flush()  # order.id 확보
-            for i in items:
-                db.session.add(OrderItem(order_id=order.id, product_id=i.product_id, product_name=i.product_name, product_category=i.product_category, price=i.price, quantity=i.quantity, tax_type=i.tax_type or '과세', item_status='결제완료'))
-            db.session.flush()  # OrderItem.id 확보
-
-            order_items = OrderItem.query.filter_by(order_id=order.id).order_by(OrderItem.id.asc()).all()
-            delivery_fee_per_settlement = 990
-            for oi in order_items:
-                cat = Category.query.filter_by(name=oi.product_category).first()
-                cat_type = getattr(cat, 'category_type', None) or '입점형'
-                # 공급자형: 배송비·수수료 없음, 공급가(supply_price) 기준
-                if cat_type == '공급자형':
-                    p = Product.query.get(oi.product_id)
-                    base_price = (getattr(p, 'supply_price', None) or p.price) if p else oi.price
-                    sales_amount = base_price * oi.quantity
-                    fee = 0
-                    delivery_fee_per = 0
-                    total = sales_amount
-                else:
-                    sales_amount = oi.price * oi.quantity
-                    fee = round(sales_amount * 0.055)
-                    delivery_fee_per = delivery_fee_per_settlement
-                    total = sales_amount - fee - delivery_fee_per
-                settlement_no = "N" + str(oi.id).zfill(10)
-                tax_exempt_val = (getattr(cat, 'tax_type', None) or '과세') == '면세'
-                db.session.add(Settlement(
-                    settlement_no=settlement_no, order_id=order.id, order_item_id=oi.id,
-                    sale_dt=order.created_at, category=oi.product_category,
-                    tax_exempt=tax_exempt_val,
-                    product_name=oi.product_name, sales_amount=sales_amount, fee=fee,
-                    delivery_fee=delivery_fee_per, settlement_total=total,
-                    category_type=cat_type,
-                    settlement_status='입금대기', settled_at=None
-                ))
-
-            for i in items:
-                p = Product.query.get(i.product_id)
-                if p:
-                    p.stock -= i.quantity
-
-            apply_order_points(current_user, original_total, points_used, order.id)
-            if session.get('save_address_to_profile') and delivery_addr:
-                current_user.address = delivery_addr
-                current_user.address_apt_name = delivery_apt or None
-                current_user.address_detail = delivery_addr_detail
-                current_user.entrance_pw = delivery_entrance_pw
-            session.pop('points_used', None)
-            session.pop('quick_extra_fee', None)
-            session.pop('order_address', None)
-            session.pop('order_address_apt', None)
-            session.pop('order_address_detail', None)
-            session.pop('order_entrance_pw', None)
-            session.pop('save_address_to_profile', None)
-            Cart.query.filter_by(user_id=current_user.id).delete()
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            flash("주문 저장 중 오류가 발생했습니다. 결제는 완료되었을 수 있으니 고객센터로 문의해 주세요.")
-            print(f"payment_success DB Error: {e}")
-            return redirect('/cart')
-
-        title, body = get_template_content('order_created', order_id=oid)
-        send_message(current_user.id, title, body, 'order_created', order.id)
-        try:
-            send_alimtalk_order_event('order_created', order.customer_phone or current_user.phone, order.customer_name or current_user.name, order.order_id)
-        except Exception:
-            pass
-        try:
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        # ✅ 세련된 성공 화면 구성 (품목 수·합계 금액 안내 + 앱/알림 안내)
-        item_count = sum(i.quantity for i in items)
-        total_amount = int(amt)
-        success_content = f"""
+    # ✅ 세련된 성공 화면 구성 (품목 수·합계 금액 안내 + 앱/알림 안내)
+    item_count = sum(i.quantity for i in items)
+    total_amount = int(amt)
+    success_content = f"""
         <div class="max-w-md mx-auto py-20 md:py-32 px-6 text-center font-black">
             <div class="w-24 h-24 bg-teal-500 rounded-full flex items-center justify-center text-white text-4xl mx-auto mb-10 shadow-2xl animate-bounce">
                 <i class="fas fa-check"></i>
@@ -8977,7 +8977,7 @@ def payment_success():
             </p>
         </div>
         """
-        return render_template_string(HEADER_HTML + success_content + FOOTER_HTML)
+    return render_template_string(HEADER_HTML + success_content + FOOTER_HTML)
 
     return redirect('/')
 
@@ -18245,7 +18245,23 @@ if (form && form.action && form.action.indexOf('/admin/add') !== -1) {
 def admin_product_edit(pid):
     """개별 상품 수정 (상품 등록폼과 동일한 디자인 및 구성 적용)"""
     p = Product.query.get_or_404(pid)
+    if not check_admin_permission(p.category):
+        flash("해당 카테고리 상품에 대한 권한이 없습니다.")
+        return redirect('/admin')
+    categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
+    my_categories = [c.name for c in categories if c.manager_email == current_user.email]
+    is_master = current_user.is_admin
+    selectable_categories = [c for c in categories if is_master or c.name in my_categories]
     if request.method == 'POST':
+        # 카테고리 변경 허용 (선택 가능한 카테고리 내에서만)
+        new_cat = (request.form.get('category') or '').strip() or p.category
+        if new_cat not in [c.name for c in selectable_categories]:
+            flash("선택한 카테고리에 대한 권한이 없습니다.")
+            return redirect(url_for('admin.admin_product_edit', pid=pid))
+        if not check_admin_permission(new_cat):
+            flash("해당 카테고리에 대한 권한이 없습니다.")
+            return redirect('/admin')
+        p.category = new_cat
         # 데이터 업데이트 로직
         p.name = request.form['name']
         p.description = request.form['description']
@@ -18289,6 +18305,13 @@ def admin_product_edit(pid):
         <p class="text-[11px] text-gray-500 font-bold mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">아래 각 항목은 상품 목록·상세 페이지의 <strong>어느 위치에 어떤 글귀</strong>로 노출되는지 적어 두었습니다. 등록 시 참고하세요.</p>
         
         <form id="admin-product-form-edit" method="POST" enctype="multipart/form-data" class="bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl space-y-7 text-left">
+            <div class="space-y-1">
+                <label class="text-[10px] text-gray-400 font-black ml-4 uppercase tracking-widest">Category (카테고리)</label>
+                <p class="text-[10px] text-gray-500 ml-4 mb-0.5">노출 위치: 상품이 속한 <strong>카테고리 목록·상세 페이지</strong>. 수정 시 다른 카테고리로 이동할 수 있습니다.</p>
+                <select name="category" class="w-full p-5 bg-gray-50 rounded-2xl font-black text-left text-sm outline-none focus:ring-4 focus:ring-teal-50 border border-gray-100">
+                    {% for c in selectable_categories %}<option value="{{ c.name }}" {% if p.category == c.name %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                </select>
+            </div>
             <div class="space-y-1">
                 <label class="text-[10px] text-gray-400 font-black ml-4 uppercase tracking-widest">Product Name (상품명)</label>
                 <p class="text-[10px] text-gray-500 ml-4 mb-0.5">노출 위치: 메인·카테고리 목록 카드의 <strong>상품명 한 줄</strong>, 상세 페이지 제목</p>
@@ -18475,7 +18498,7 @@ def admin_product_edit(pid):
     }
     })();
     </script>
-    """ + FOOTER_HTML, p=p)
+    """ + FOOTER_HTML, p=p, selectable_categories=selectable_categories)
 @login_required
 def admin_delete(pid):
     """상품 삭제"""
