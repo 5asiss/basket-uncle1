@@ -21,15 +21,13 @@
 
 ## 2. 결제창 요청 (requestPayment)
 
-- **SDK**: 토스페이먼츠 **JavaScript SDK v2** (`https://js.tosspayments.com/v2/standard`) 사용. v2는 `tossPayments.payment({ customerKey })` 초기화 후 `payment.requestPayment()` 호출 방식.
+- **SDK**: 토스페이먼츠 **JavaScript v1 결제창** (`https://js.tosspayments.com/v1/payment`) 사용. `TossPayments(clientKey)` 후 `requestPayment('CARD', { ... })` 호출. (v2 standard 스크립트는 결제위젯용이라 결제창 연동 시 미사용.)
 
 | 문서 요구사항 | 우리 구현 (app.py `order_payment` 페이지 내 JS) |
 |---------------|------------------------------------------------|
-| **customerKey** (v2 필수) | 로그인 사용자: `u_` + userId, 2~50자 ✓ |
-| **orderId** 6~64자, 영문·숫자·`-`·`_`·`=` | `order_id_js` 앞 24자 + `_` + 타임스탬프, 64자 초과 시 앞 64자만 사용 ✓ |
-| **amount** (v2: 객체) | `amount: { currency: "KRW", value: paymentAmount }` ✓ |
-| **orderName** 최대 100자 | `(order_name or "주문")[:100]` ✓ |
+| **orderId** 6~64자, 영문·숫자·`-`·`_` | `order_id_js` 앞 24자 + `_` + 타임스탬프, 64자 초과 시 앞 64자만 사용 ✓ |
 | **amount** number, 금액 > 0 | `Math.floor(Number(total))`, 1원 미만이면 요청 전 중단 ✓ |
+| **orderName** 최대 100자 | `(order_name or "주문")[:100]` ✓ |
 | **successUrl / failUrl** | `window.location.origin + '/payment/success'`, `'/payment/fail'` ✓ |
 | customerEmail / customerName | 이스케이프 후 전달, 없으면 `order@customer.local` / `주문고객` ✓ |
 
@@ -93,7 +91,7 @@
 ## 7. 에러 처리
 
 - **결제 승인 실패**: v1 `{ code, message }`, v2 `{ error: { code, message }, traceId }` 모두 파싱 후 `/payment/fail` 로 리다이렉트, traceId는 로그 출력.
-- **결제창 에러**: `COMMON_ERROR` 시 "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." 표시. 화면에 **토스가 반환한 상세 메시지**를 함께 노출해 원인 파악에 활용(개발자 도구 콘솔에도 전체 error 객체 출력).
+- **결제창 에러**: `COMMON_ERROR` 시 "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." 표시. 화면에 **토스가 반환한 상세 메시지**를 함께 노출해 원인 파악에 활용(개발자 도구 콘솔에도 전체 error 객체 출력). **INVALID_ORDER_NAME** 시 주문명(특수문자/길이) 안내, **INVALID_ORDER_ID** 시 주문번호 형식(6~64자, 영문·숫자·-·_) 안내.
 - **COMMON_ERROR 가능 원인**: 파라미터 형식/누락, 결제 기관 일시 오류, **라이브 키 사용 시 결제 허용 URL(도메인) 미등록** 등. 라이브 환경이면 개발자센터에서 **결제 허용 URL**에 현재 접속 중인 도메인(예: `https://yourdomain.com`)이 등록되어 있는지 확인하세요. 지속 시 토스 고객센터(1666-8320) 문의 권장.
 
 이 문서는 토스페이먼츠 개발자센터(API & SDK, 결제 · Payment 객체 · 결제 승인 · 결제 취소) 내용을 기준으로 작성되었습니다.
