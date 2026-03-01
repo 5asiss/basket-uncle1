@@ -8678,9 +8678,14 @@ def order_payment():
     order_id = _make_order_virt_id(effective_addr)
     order_name = f"{items[0].product_name} 외 {len(items)-1}건" if len(items) > 1 else items[0].product_name
     # JS 문자열 내 사용 시 이스케이프 (라이브 결제 시 상품명/고객명 특수문자 대비)
+    order_id_js = re.sub(r'[^a-zA-Z0-9_-]', '_', (order_id or ""))  # 토스 orderId 허용 문자만
     order_name_js = (order_name or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
     customer_name_js = (current_user.name or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
     customer_email_js = (current_user.email or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+
+    if not (TOSS_CLIENT_KEY or "").strip():
+        flash("결제 클라이언트 키가 설정되지 않았습니다. 관리자에게 문의해 주세요.")
+        return redirect('/cart')
 
     content = f"""
     <div class="max-w-md mx-auto py-24 md:py-40 px-6 text-center font-black">
@@ -8741,27 +8746,28 @@ def order_payment():
                 const paymentAmount = Number({ total });
                 const taxFreeAmount = Math.min(paymentAmount, Number({ tax_free }));
                 
-                // ★ 고유한 주문번호 생성을 위해 현재 시간(타임스탬프)을 뒤에 붙여줍니다.
-                var uniqueOrderId = '{ order_id }_' + new Date().getTime();
+                // ★ 고유한 주문번호: 토스 허용 문자만 사용
+                var uniqueOrderId = '{ order_id_js }_' + new Date().getTime();
 
                 tossPayments.requestPayment('CARD', {{
                     amount: paymentAmount,
                     taxFreeAmount: taxFreeAmount,
-                    orderId: uniqueOrderId,  // ← 기존 '{ order_id }' 대신 변수로 교체!
+                    orderId: uniqueOrderId,
                     orderName: '{ order_name_js }',
                     customerEmail: '{ customer_email_js }',
                     customerName: '{ customer_name_js }',
                     successUrl: window.location.origin + '/payment/success',
                     failUrl: window.location.origin + '/payment/fail'
                 }}).catch(function (error) {{
-                    if (error.code === 'USER_CANCEL') {{
-                        // 사용자가 결제창을 닫거나 취소한 경우
+                    var msg = (error && error.message) ? error.message : '처리 중 오류가 발생했습니다.';
+                    var code = (error && error.code) ? error.code : '';
+                    if (error && error.code === 'USER_CANCEL') {{
                         console.log('사용자가 결제를 취소했습니다.');
                     }} else {{
-                        alert("결제 오류: " + error.message);
+                        alert("결제 오류: " + msg + (code ? " (코드: " + code + ")" : ""));
                     }}
-                    // ★ 필수: 취소/에러 시 화면을 강제 새로고침하여 토스 모듈 완전 초기화
-                    window.location.reload(); 
+                    console.error('Toss requestPayment error', error);
+                    window.location.reload();
                 }}).finally(function () {{
                     // 버튼 UI 원래 상태로 복구 (새로고침 되기 전 찰나의 순간)
                     isProcessing = false;
@@ -8788,6 +8794,7 @@ def order_payment():
 @login_required
 def payment_success():
     """결제 성공 및 주문 생성 (세련된 디자인 및 폰트 최적화 버전)"""
+    # 리다이렉트 쿼리 파라미터: Flask가 자동 디코딩. 특수문자 포함 시 토스가 인코딩해 보냄.
     pk, oid, amt = request.args.get('paymentKey'), request.args.get('orderId'), request.args.get('amount')
     if not pk or not oid or not amt:
         flash("결제 정보가 올바르지 않습니다. 결제를 다시 시도해 주세요.")
@@ -8797,18 +8804,33 @@ def payment_success():
     except (TypeError, ValueError):
         flash("결제 금액 정보가 올바르지 않습니다.")
         return redirect('/cart')
+    # 결제 확인 API: JSON 본문 전송 (특수문자 있어도 JSON이므로 URL 인코딩 불필요). 응답은 HTTP 상태 코드 + JSON.
     url, auth_key = "https://api.tosspayments.com/v1/payments/confirm", base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
     res = requests.post(url, json={"paymentKey": pk, "amount": amount_int, "orderId": oid}, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
 
     if res.status_code != 200:
         err_msg = "결제 확인에 실패했습니다."
+        err_code = ""
+        trace_id = ""
         try:
             err_body = res.json()
-            err_msg = err_body.get("message") or err_body.get("code") or err_msg
+            # API v1: { "code", "message" } / API v2: { "error": { "code", "message" }, "traceId" }
+            if isinstance(err_body.get("error"), dict):
+                err_code = err_body["error"].get("code") or ""
+                err_msg = err_body["error"].get("message") or err_msg
+                trace_id = err_body.get("traceId") or ""
+            else:
+                err_code = err_body.get("code") or ""
+                err_msg = err_body.get("message") or err_body.get("code") or err_msg
+                trace_id = err_body.get("traceId") or ""
+            if trace_id:
+                print(f"[Toss confirm] traceId={trace_id} (기술문의 시 첨부)")
         except Exception:
             pass
-        print(f"[Toss confirm error] status={res.status_code} body={res.text}")
-        return redirect(url_for('payment_fail', message=err_msg))
+        print(f"[Toss confirm error] status={res.status_code} code={err_code} body={res.text}")
+        # 리다이렉트 쿼리 파라미터용: 메시지 길이 제한 후 전달 (url_for가 자동 URL 인코딩)
+        msg_safe = (err_msg or "")[:200].strip()
+        return redirect(url_for('payment_fail', message=msg_safe))
 
     # res.status_code == 200 → 주문 생성
     items = Cart.query.filter_by(user_id=current_user.id).all()
