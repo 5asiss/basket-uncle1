@@ -8668,7 +8668,14 @@ def order_payment():
     items = Cart.query.filter_by(user_id=current_user.id).all()
     # 마이페이지와 동일하게: 회원 저장 주소 우선 사용(세션은 이전 결제 시도 값이라 마이페이지 수정 후 불일치 가능)
     effective_addr = _normalize_address_for_zone(current_user.address or "") or _normalize_address_for_zone(session.get('order_address') or "")
-    if not items or not effective_addr or not is_address_in_delivery_zone(effective_addr):
+    if not items:
+        flash("장바구니가 비었습니다. 상품을 담은 뒤 다시 주문해 주세요.")
+        return redirect('/cart')
+    if not effective_addr:
+        flash("배송 주소가 없습니다. 주문 확인 페이지에서 배송지를 입력한 뒤 결제하기를 눌러 주세요.")
+        return redirect('/cart')
+    if not is_address_in_delivery_zone(effective_addr):
+        flash("선택한 주소는 배송 가능 구역이 아닙니다. 배송 가능 지역을 확인해 주세요.")
         return redirect('/cart')
     
     subtotal = sum(i.price * i.quantity for i in items)
@@ -8813,7 +8820,6 @@ def order_payment():
                         else if (code === 'INVALID_ORDER_ID') msg = '주문번호가 올바르지 않습니다. (6~64자)';
                         if (code !== 'USER_CANCEL') alert("결제 오류: " + msg + (code ? " (코드: " + code + ")" : ""));
                         console.error('Toss requestPayment error', error);
-                        window.location.reload();
                     }} finally {{
                         resetButton();
                     }}
