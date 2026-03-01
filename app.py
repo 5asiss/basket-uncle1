@@ -8164,6 +8164,15 @@ def delete_cart(pid):
     """장바구니 항목 삭제"""
     Cart.query.filter_by(user_id=current_user.id, product_id=pid).delete(); db.session.commit(); return redirect('/cart')
 
+@app.route('/cart/clear', methods=['POST'])
+@login_required
+def cart_clear():
+    """장바구니 전체 비우기 (초기화). 오류 시 재시도 전 초기화용."""
+    Cart.query.filter_by(user_id=current_user.id).delete()
+    db.session.commit()
+    flash("장바구니를 비웠습니다.")
+    return redirect('/cart')
+
 @app.route('/cart')
 @login_required
 def cart():
@@ -8185,6 +8194,13 @@ def cart():
     delivery_fee = delivery_fee if items else 0
     subtotal = sum(i.price * i.quantity for i in items)
     total = subtotal + delivery_fee
+    
+    # 최소 주문 금액·포인트 사용 가능 금액 (장바구니 안내용)
+    _, min_order_to_use, max_points_per_order = _get_point_config()
+    user_points = getattr(current_user, 'points', 0) or 0 if items else 0
+    max_use = _effective_max_point_use(current_user, total) if items else 0
+    can_use_points = max_use > 0 and items
+    meets_min_order = (total >= min_order_to_use) if (min_order_to_use and min_order_to_use > 0) else True
     
     # 상단 헤더 및 빈 장바구니 처리
     content = f"""
@@ -8239,6 +8255,25 @@ def cart():
         
         # 결제 요약 영역
         breakdown_text = " · ".join([f"[{c}] {v:,}원" for c, v in (delivery_fee_breakdown or {}).items()]) if delivery_fee_breakdown else ""
+        min_order_msg = ""
+        if min_order_to_use and min_order_to_use > 0:
+            if meets_min_order:
+                min_order_msg = f'<p class="text-[10px] md:text-xs text-teal-600 font-bold mt-2"><i class="fas fa-check-circle mr-1"></i> 최소 주문 금액({min_order_to_use:,}원)을 충족했습니다. 주문 가능합니다.</p>'
+            else:
+                min_order_msg = f'<p class="text-[10px] md:text-xs text-amber-600 font-bold mt-2"><i class="fas fa-exclamation-circle mr-1"></i> 최소 주문 금액은 {min_order_to_use:,}원입니다. 현재 주문 금액 {total:,}원으로는 주문할 수 없습니다. 상품을 더 담아 주세요.</p>'
+        point_info = ""
+        if can_use_points:
+            point_info = f'''<div class="pt-4 mt-4 border-t border-gray-200">
+                <p class="text-[10px] text-gray-500 font-bold uppercase mb-1">포인트 사용</p>
+                <p class="text-sm font-black text-gray-800">보유 포인트 <span class="text-teal-600">{user_points:,}원</span> · 이 주문에서 최대 <span class="text-amber-600">{max_use:,}원</span> 사용 가능</p>
+                <p class="text-[10px] text-gray-500 mt-1">주문하기 버튼 클릭 후 다음 단계(주문 확인)에서 사용할 포인트 금액을 입력할 수 있습니다.</p>
+            </div>'''
+        else:
+            point_info = f'''<div class="pt-4 mt-4 border-t border-gray-200">
+                <p class="text-[10px] text-gray-500 font-bold uppercase mb-1">포인트</p>
+                <p class="text-sm font-black text-gray-800">보유 포인트 <span class="text-teal-600">{user_points:,}원</span></p>
+                <p class="text-[10px] text-gray-500 mt-1">포인트는 주문 금액이 {min_order_to_use:,}원 이상일 때 사용 가능하며, 주문 확인 단계에서 입력합니다.</p>
+            </div>''' if (min_order_to_use and min_order_to_use > 0) else f'<div class="pt-4 mt-4 border-t border-gray-200"><p class="text-[10px] text-gray-500">보유 포인트 {user_points:,}원</p></div>'
         content += f"""
             <div class="bg-gray-50 p-8 md:p-10 rounded-[2rem] md:rounded-[2.5rem] space-y-4 mt-12 border border-gray-100">
                 <div class="flex justify-between text-sm md:text-base text-gray-500 font-bold">
@@ -8256,17 +8291,39 @@ def cart():
                         { "{:,}".format(total) }원
                     </span>
                 </div>
+                {min_order_msg}
+                {point_info}
                 <p class="text-[10px] md:text-xs text-gray-400 mt-6 leading-relaxed font-medium">
                     ※ 배송료: 카테고리별로 금액·건별 설정에 따라 계산됩니다. 각 카테고리 설정은 상품 상세/카테고리 페이지에서 확인할 수 있습니다.
                 </p>
                 <p class="text-[10px] md:text-xs text-teal-600 mt-2 font-bold">💡 다음 단계에서 배송지 확인·변경이 가능하며, 변경 주소를 회원정보에 저장할 수 있습니다.</p>
             </div>
             
-            <a href="/order/confirm" class="block text-center bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 mt-12 hover:bg-teal-700 hover:-translate-y-1 transition active:scale-95">
-                주문하기
-            </a>
+            <div class="flex flex-col sm:flex-row gap-3 mt-12">
+                <a href="/order/confirm" id="cart-order-btn" class="flex-1 text-center bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 hover:bg-teal-700 hover:-translate-y-1 transition active:scale-95">
+                    주문하기
+                </a>
+                <form action="/cart/clear" method="POST" class="sm:w-auto">
+                    <button type="submit" class="w-full sm:w-auto px-6 py-4 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-base border-2 border-gray-200 text-gray-500 hover:bg-gray-50 hover:border-gray-300 transition" onclick="return confirm('장바구니를 모두 비우시겠습니까?');">
+                        <i class="fas fa-undo-alt mr-2"></i>장바구니 비우기
+                    </button>
+                </form>
+            </div>
+            <p class="text-[10px] text-gray-400 mt-3 text-center">오류가 나거나 다시 담으려면 위 <strong>장바구니 비우기</strong> 후 상품을 다시 담아 주세요.</p>
         </div>
         """
+        if not meets_min_order:
+            content += """
+            <script>
+            (function(){
+                var btn = document.getElementById('cart-order-btn');
+                if (btn) {
+                    btn.addEventListener('click', function(e) { e.preventDefault(); alert('최소 주문 금액을 충족하지 않습니다. 상품을 더 담아 주세요.'); });
+                    btn.classList.add('opacity-60', 'cursor-not-allowed', 'pointer-events-none');
+                }
+            })();
+            </script>
+            """
 
     content += "</div>"
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, items=items, subtotal=subtotal, delivery_fee=delivery_fee, total=total, delivery_fee_breakdown=delivery_fee_breakdown if items else {})
@@ -8275,7 +8332,7 @@ def cart():
 def order_confirm():
     """결제 전 확인. 배송지 확인·결제 전 안내 문구를 모두 보여준 뒤 결제하기로 진행. 마이페이지와 동일한 주소 정규화·배송권역 검사 적용."""
     items = Cart.query.filter_by(user_id=current_user.id).all()
-    if not items: return redirect('/')
+    if not items: return redirect('/cart')
     
     addr_for_zone = _normalize_address_for_zone(current_user.address or "")
     zone_type = get_delivery_zone_type(addr_for_zone)
@@ -8289,6 +8346,10 @@ def order_confirm():
     total = sum(i.price * i.quantity for i in items) + delivery_fee
     
     _, min_order_to_use, max_points_per_order = _get_point_config()
+    if min_order_to_use and min_order_to_use > 0 and total < min_order_to_use:
+        flash(f"최소 주문 금액({min_order_to_use:,}원) 이상 주문해 주세요. 현재 주문 금액: {total:,}원")
+        return redirect('/cart')
+    
     user_points = getattr(current_user, 'points', 0) or 0
     max_use = _effective_max_point_use(current_user, total)
     can_use_points = max_use > 0
@@ -8553,7 +8614,7 @@ def order_payment():
         effective_address = order_address if order_address else user_addr
         items = Cart.query.filter_by(user_id=current_user.id).all()
         if not items:
-            return redirect('/order/confirm')
+            return redirect('/cart')
         if not is_address_in_delivery_zone(effective_address):
             # 폼 주소가 배송불가여도, 회원 주소(마이페이지와 동일)로 재검사해 배송가능이면 진행
             if user_addr and is_address_in_delivery_zone(user_addr):
@@ -8599,7 +8660,7 @@ def order_payment():
     # 마이페이지와 동일하게: 회원 저장 주소 우선 사용(세션은 이전 결제 시도 값이라 마이페이지 수정 후 불일치 가능)
     effective_addr = _normalize_address_for_zone(current_user.address or "") or _normalize_address_for_zone(session.get('order_address') or "")
     if not items or not effective_addr or not is_address_in_delivery_zone(effective_addr):
-        return redirect('/order/confirm')
+        return redirect('/cart')
     
     subtotal = sum(i.price * i.quantity for i in items)
     cat_price_sums = {}
@@ -8616,7 +8677,11 @@ def order_payment():
     tax_free = int(sum(i.price * i.quantity for i in items if i.tax_type == '면세'))
     order_id = _make_order_virt_id(effective_addr)
     order_name = f"{items[0].product_name} 외 {len(items)-1}건" if len(items) > 1 else items[0].product_name
-    
+    # JS 문자열 내 사용 시 이스케이프 (라이브 결제 시 상품명/고객명 특수문자 대비)
+    order_name_js = (order_name or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+    customer_name_js = (current_user.name or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+    customer_email_js = (current_user.email or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+
     content = f"""
     <div class="max-w-md mx-auto py-24 md:py-40 px-6 text-center font-black">
         <div class="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center text-5xl mx-auto mb-10 text-blue-600 shadow-inner animate-pulse">
@@ -8683,9 +8748,9 @@ def order_payment():
                     amount: paymentAmount,
                     taxFreeAmount: taxFreeAmount,
                     orderId: uniqueOrderId,  // ← 기존 '{ order_id }' 대신 변수로 교체!
-                    orderName: '{ order_name }',
-                    customerEmail: '{ current_user.email }',
-                    customerName: '{ current_user.name }',
+                    orderName: '{ order_name_js }',
+                    customerEmail: '{ customer_email_js }',
+                    customerName: '{ customer_name_js }',
                     successUrl: window.location.origin + '/payment/success',
                     failUrl: window.location.origin + '/payment/fail'
                 }}).catch(function (error) {{
@@ -8724,12 +8789,30 @@ def order_payment():
 def payment_success():
     """결제 성공 및 주문 생성 (세련된 디자인 및 폰트 최적화 버전)"""
     pk, oid, amt = request.args.get('paymentKey'), request.args.get('orderId'), request.args.get('amount')
+    if not pk or not oid or not amt:
+        flash("결제 정보가 올바르지 않습니다. 결제를 다시 시도해 주세요.")
+        return redirect('/cart')
+    try:
+        amount_int = int(amt)
+    except (TypeError, ValueError):
+        flash("결제 금액 정보가 올바르지 않습니다.")
+        return redirect('/cart')
     url, auth_key = "https://api.tosspayments.com/v1/payments/confirm", base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
-    res = requests.post(url, json={"paymentKey": pk, "amount": amt, "orderId": oid}, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
-    
-    if res.status_code == 200:
+    res = requests.post(url, json={"paymentKey": pk, "amount": amount_int, "orderId": oid}, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"})
+
+    if res.status_code != 200:
+        err_msg = "결제 확인에 실패했습니다."
+        try:
+            err_body = res.json()
+            err_msg = err_body.get("message") or err_body.get("code") or err_msg
+        except Exception:
+            pass
+        print(f"[Toss confirm error] status={res.status_code} body={res.text}")
+        return redirect(url_for('payment_fail', message=err_msg))
+
+    # res.status_code == 200
         items = Cart.query.filter_by(user_id=current_user.id).all()
-        if not items: return redirect('/') # 중복 새로고침 방지
+        if not items: return redirect('/cart') # 중복 새로고침 방지
 
         cat_groups = {i.product_category: [] for i in items}
         for i in items: cat_groups[i.product_category].append(f"{i.product_name}({i.quantity})")
@@ -8745,7 +8828,6 @@ def payment_success():
         points_used = session.get('points_used', 0) or 0
         quick_extra = session.get('quick_extra_fee', 0) or 0
         original_total = int(amt) + points_used  # 결제창에 넘긴 금액(amt) + 사용 포인트 = 주문 원금액
-        # 결제 적용: 현재 보유 포인트/정책 기준 사용 가능 한도로 한 번 더 제한 (다른 탭에서 사용한 경우 등)
         max_allowed_now = _effective_max_point_use(current_user, original_total)
         points_used = min(points_used, max_allowed_now)
 
@@ -8898,6 +8980,30 @@ def payment_success():
         return render_template_string(HEADER_HTML + success_content + FOOTER_HTML)
 
     return redirect('/')
+
+
+@app.route('/payment/fail')
+@login_required
+def payment_fail():
+    """토스 결제 실패/취소 시 안내 페이지 (failUrl 리다이렉트 대상)"""
+    message = (request.args.get('message') or '').strip() or '결제가 취소되었거나 실패했습니다.'
+    message_escaped = message.replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+    content = f"""
+    <div class="max-w-md mx-auto py-24 md:py-32 px-6 text-center font-black">
+        <div class="w-24 h-24 bg-amber-100 rounded-full flex items-center justify-center text-4xl text-amber-600 mx-auto mb-10">
+            <i class="fas fa-exclamation-circle"></i>
+        </div>
+        <h2 class="text-xl md:text-2xl font-black mb-4 text-gray-800">결제 실패</h2>
+        <p class="text-gray-600 font-bold text-sm mb-8">{ message_escaped }</p>
+        <p class="text-gray-400 text-xs mb-10">문제가 계속되면 고객센터(1666-8320)로 문의해 주세요.</p>
+        <div class="flex flex-col gap-4">
+            <a href="/cart" class="bg-teal-600 text-white py-5 rounded-2xl font-black">장바구니로 이동</a>
+            <a href="/" class="text-gray-400 font-bold text-sm hover:text-teal-600">메인으로</a>
+        </div>
+    </div>
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML)
+
 
 # --------------------------------------------------------------------------------
 # 6. 관리자 전용 기능 (Dashboard / Bulk Upload / Excel)
