@@ -43,24 +43,7 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_fallback_key")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 
 # 1. 모든 DB 경로 설정 (단일 DB 사용)
-# - 서버(Render 등): PORT 설정됨 → DATABASE_URL 그대로 사용(PostgreSQL).
-# - 로컬: DATABASE_URL이 Render 내부 호스트(dpg-)이면 DNS 미해석으로 접속 불가 → SQLite 대체.
-def _resolve_database_uri():
-    local_url = (os.getenv("LOCAL_DATABASE_URL") or "").strip()
-    server_url = (os.getenv("DATABASE_URL") or "").strip()
-    default_sqlite = "sqlite:///direct_trade_mall.db"
-    # 명시적 로컬 DB가 있으면 우선 사용
-    if local_url:
-        return local_url
-    if not server_url:
-        return default_sqlite
-    # Render 내부 전용 호스트(dpg-xxx)는 로컬에서 접근 불가 → 서버(PORT 있음)가 아니면 SQLite 사용
-    is_render_internal = "postgres" in server_url and "dpg-" in server_url
-    if is_render_internal and not os.getenv("PORT"):
-        return default_sqlite
-    return server_url
-
-app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri()
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///direct_trade_mall.db")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # 2. DB 연결 (공백 제거 버전)
@@ -5869,17 +5852,6 @@ def product_detail(pid):
                 </div>
             </div>
         </div>
-
-        {% if cat_info and cat_info.id %}
-        <div class="mt-16 md:mt-24 px-4 md:px-0">
-            <a href="/category/seller/{{ cat_info.id }}" class="inline-flex items-center gap-3 py-5 px-8 rounded-2xl bg-gray-50 border-2 border-gray-100 hover:border-teal-200 hover:bg-teal-50/50 text-gray-800 font-black text-base md:text-lg transition-all shadow-sm hover:shadow-md">
-                <span class="w-14 h-14 rounded-xl bg-teal-100 flex items-center justify-center text-teal-600"><i class="fas fa-store text-xl"></i></span>
-                <span>판매자 정보보기</span>
-                <i class="fas fa-chevron-right text-teal-500"></i>
-            </a>
-            <p class="text-[11px] text-gray-500 font-bold mt-3">본 상품의 실제 판매 사업자(상호·대표·사업자번호·연락처)를 확인할 수 있습니다.</p>
-        </div>
-        {% endif %}
 
         <div id="reviews" class="mt-40 px-4 md:px-0">
             <h3 class="text-2xl md:text-4xl font-black text-gray-900 mb-12 flex items-center gap-4 tracking-tighter">
@@ -15415,7 +15387,7 @@ def _bulk_safe_image_filename(filename):
 
 @login_required
 def admin_bulk_upload_images():
-    """대량등록용 이미지 저장. CLOUDINARY_URL 있으면 Cloudinary에 올리고 세션에 URL 저장(Render 등 휘발 디스크 대응). 없으면 static/uploads/에 저장."""
+    """대량등록용 이미지를 static/uploads/에 저장. 엑셀에서 파일명 그대로 참조 가능."""
     if not current_user.is_admin:
         return redirect('/')
     if request.method != 'POST':
@@ -15425,7 +15397,6 @@ def admin_bulk_upload_images():
     os.makedirs(upload_dir, exist_ok=True)
     saved = []
     skipped = 0
-    session_urls = dict(session.get("bulk_upload_urls") or {})
     for f in files:
         if not f or not getattr(f, 'filename', None) or (f.filename or '').strip() == '':
             continue
@@ -15433,6 +15404,10 @@ def admin_bulk_upload_images():
         if not safe_name:
             continue
         try:
+            path = os.path.join(upload_dir, safe_name)
+            if os.path.isfile(path):
+                skipped += 1
+                continue  # 같은 이름 이미 있으면 건너뜀
             if getattr(f, 'stream', None) and hasattr(f.stream, 'seek'):
                 try:
                     f.stream.seek(0)
@@ -15441,30 +15416,13 @@ def admin_bulk_upload_images():
             data = f.read()
             if not data:
                 continue
-            if cloudinary_url:
-                upload_res = cloudinary.uploader.upload(data, folder="basket-uncle/bulk")
-                url = upload_res.get("secure_url") or upload_res.get("url")
-                if url:
-                    session_urls[safe_name] = url
-                    saved.append(safe_name)
-            else:
-                path = os.path.join(upload_dir, safe_name)
-                if os.path.isfile(path):
-                    skipped += 1
-                    continue
-                with open(path, 'wb') as out:
-                    out.write(data)
-                saved.append(safe_name)
+            with open(path, 'wb') as out:
+                out.write(data)
+            saved.append(safe_name)
         except Exception as e:
             flash(f"이미지 저장 실패 ({f.filename}): {str(e)}")
-    if session_urls:
-        session["bulk_upload_urls"] = session_urls
-        session.permanent = True
     if saved:
-        if cloudinary_url:
-            flash(f"{len(saved)}개 이미지가 Cloudinary에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 파일명을 그대로 입력하세요.")
-        else:
-            flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요.")
+        flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요.")
     elif skipped:
         flash(f"같은 이름의 파일이 이미 있어 {skipped}개는 건너뛰었습니다. 새 파일만 선택해 주세요.")
     else:
@@ -15607,31 +15565,28 @@ def admin_product_bulk_upload():
                     for suffix in ("1", "_1"):
                         found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
                         if found:
-                            image_url = _bulk_resolve_image_url(upload_dir, found) or image_url
-                            if image_url:
-                                break
+                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                            break
                     if not image_url:
                         name_no_spaces = name_val.replace(" ", "")
                         if name_no_spaces != name_val:
                             for suffix in ("1", "_1"):
                                 found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
                                 if found:
-                                    image_url = _bulk_resolve_image_url(upload_dir, found) or image_url
-                                    if image_url:
-                                        break
+                                    image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                    break
                     if not image_url:
                         for base in (name_val + "1", name_val + "_1", name_val.replace(" ", "") + "1", name_val.replace(" ", "") + "_1"):
                             found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
                             if found:
-                                image_url = _bulk_resolve_image_url(upload_dir, found) or image_url
-                                if image_url:
-                                    break
+                                image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                break
                 if not image_url:
                     main_img = _bulk_image_filename_only(main_img_raw)
                     if main_img and not _bulk_is_placeholder_image(main_img):
-                        resolved = _bulk_resolve_image_url(upload_dir, main_img)
-                        if resolved:
-                            image_url = resolved
+                        found = _bulk_find_upload_file(upload_dir, main_img)
+                        if found:
+                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
                         else:
                             missing_main = main_img
             path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
@@ -15652,9 +15607,9 @@ def admin_product_bulk_upload():
                         else:
                             fn_img = _bulk_image_filename_only(p)
                             if fn_img:
-                                resolved = _bulk_resolve_image_url(upload_dir, fn_img)
-                                if resolved:
-                                    detail_parts.append(resolved)
+                                found = _bulk_find_upload_file(upload_dir, fn_img)
+                                if found:
+                                    detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                                 else:
                                     missing_details.append(fn_img)
                     if detail_parts:
@@ -15677,9 +15632,7 @@ def admin_product_bulk_upload():
                                 if found:
                                     break
                         if found:
-                            resolved = _bulk_resolve_image_url(upload_dir, found)
-                            if resolved:
-                                detail_parts.append(resolved)
+                            detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                     if detail_parts:
                         detail_image_url = ",".join(detail_parts)
             if missing_main or missing_details:
@@ -15810,19 +15763,6 @@ def _bulk_find_upload_file(upload_dir, filename):
                 return fn
     except OSError:
         pass
-    return None
-
-
-def _bulk_resolve_image_url(upload_dir, filename):
-    """파일명을 실제 이미지 URL로 변환. 대량등록 시 Cloudinary에 올린 경우 세션 URL, 아니면 /static/uploads/ 경로."""
-    if not filename:
-        return None
-    session_urls = session.get("bulk_upload_urls") or {}
-    if isinstance(session_urls, dict) and filename in session_urls:
-        return session_urls[filename]
-    found = _bulk_find_upload_file(upload_dir, filename)
-    if found:
-        return f"/static/uploads/{found.replace(chr(92), '/')}"
     return None
 
 
@@ -19596,23 +19536,22 @@ with app.app_context():
     from models import EventBoardPost, ShareLink, EventPointRequest  # noqa: F401 - 테이블 생성용 로드
     db.create_all()
     from sqlalchemy import text
-    # settlement 구 스키마 마이그레이션: SQLite 전용(PRAGMA). Postgres에서는 실행하지 않음.
     try:
-        if db.engine.dialect.name == "sqlite":
-            rp = db.session.execute(text("PRAGMA table_info(settlement)")).fetchall()
-            cols = [row[1] for row in rp] if rp else []
-            if cols and 'settlement_no' not in cols:
+        rp = db.session.execute(text("PRAGMA table_info(settlement)")).fetchall()
+        cols = [row[1] for row in rp] if rp else []
+        if cols and 'settlement_no' not in cols:
+            # 기존 settlement는 구 스키마 → category_settlement로 이름 변경 후 새 settlement 생성
+            try:
+                db.session.execute(text("ALTER TABLE settlement RENAME TO category_settlement"))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
                 try:
+                    db.session.execute(text("DROP TABLE IF EXISTS category_settlement"))
                     db.session.execute(text("ALTER TABLE settlement RENAME TO category_settlement"))
                     db.session.commit()
                 except Exception:
                     db.session.rollback()
-                    try:
-                        db.session.execute(text("DROP TABLE IF EXISTS category_settlement"))
-                        db.session.execute(text("ALTER TABLE settlement RENAME TO category_settlement"))
-                        db.session.commit()
-                    except Exception:
-                        db.session.rollback()
     except Exception:
         db.session.rollback()
     try:
