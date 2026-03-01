@@ -7952,6 +7952,17 @@ def _recalc_order_from_items(order):
     order.total_price = sum(oi.price * oi.quantity for oi in remaining) + order.delivery_fee
     order.tax_free_amount = sum(oi.price * oi.quantity for oi in remaining if oi.tax_type == '면세')
 
+
+def _toss_cancel_headers(idempotency_key):
+    """결제 취소 API용 헤더 (토스 샘플·문서 기준: Basic 인증 + 멱등키). 중복 취소 방지용."""
+    auth_key = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
+    return {
+        "Authorization": f"Basic {auth_key}",
+        "Content-Type": "application/json",
+        "Idempotency-Key": str(idempotency_key),
+    }
+
+
 @app.route('/order/cancel_item/<int:order_id>/<int:item_id>', methods=['POST'])
 @login_required
 def order_cancel_item(order_id, item_id):
@@ -7978,11 +7989,10 @@ def order_cancel_item(order_id, item_id):
     # 토스페이먼츠 부분 취소 API
     if order.payment_key:
         url = f"https://api.tosspayments.com/v1/payments/{order.payment_key}/cancel"
-        auth_key = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
         body = {"cancelAmount": cancel_amount, "cancelReason": "품목 부분 취소"}
         if tax_free_cancel:
             body["taxFreeAmount"] = tax_free_cancel
-        res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"}, timeout=30)
+        res = requests.post(url, json=body, headers=_toss_cancel_headers(f"cancel-{order.id}-item-{oi.id}"), timeout=30)
         if res.status_code not in (200, 201):
             try:
                 err = res.json()
@@ -8015,12 +8025,11 @@ def _do_full_order_cancel(order):
     # 토스페이먼츠 전액 취소
     if order.payment_key and order.total_price and order.total_price > 0:
         url = f"https://api.tosspayments.com/v1/payments/{order.payment_key}/cancel"
-        auth_key = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
         body = {"cancelReason": "주문 전액 취소"}
         tax_free = getattr(order, 'tax_free_amount', None) or 0
         if tax_free and int(tax_free) > 0:
             body["taxFreeAmount"] = int(tax_free)
-        res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"}, timeout=30)
+        res = requests.post(url, json=body, headers=_toss_cancel_headers(f"cancel-{order.id}-full"), timeout=30)
         if res.status_code not in (200, 201):
             try:
                 err = res.json()
@@ -8768,7 +8777,7 @@ def order_payment():
                 var uniqueOrderId = orderIdPrefix + '_' + new Date().getTime();
                 if (uniqueOrderId.length > 64) uniqueOrderId = uniqueOrderId.slice(0, 64);
 
-                // v1: requestPayment('CARD', { amount: 숫자, ... })
+                // v1: requestPayment('CARD', {{ amount: 숫자, ... }})
                 tossPayments.requestPayment('CARD', {{
                     amount: paymentAmount,
                     taxFreeAmount: taxFreeAmount,
@@ -9288,11 +9297,10 @@ def admin_order_item_status():
         tax_free_cancel = (oi.price * oi.quantity) if (oi.tax_type == '면세') else 0
         if order.payment_key and cancel_amount > 0:
             url = f"https://api.tosspayments.com/v1/payments/{order.payment_key}/cancel"
-            auth_key = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode()).decode()
             body = {"cancelAmount": cancel_amount, "cancelReason": "품절로 인한 부분 취소"}
             if tax_free_cancel:
                 body["taxFreeAmount"] = tax_free_cancel
-            res = requests.post(url, json=body, headers={"Authorization": f"Basic {auth_key}", "Content-Type": "application/json"}, timeout=30)
+            res = requests.post(url, json=body, headers=_toss_cancel_headers(f"cancel-{order.id}-item-{oi.id}-out"), timeout=30)
             if res.status_code not in (200, 201):
                 try:
                     err = res.json()

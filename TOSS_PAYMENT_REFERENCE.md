@@ -37,15 +37,19 @@
 
 ## 3. 결제 취소 (POST /v1/payments/{paymentKey}/cancel)
 
+- **참고**: [결제 취소 API 연동 샘플](https://github.com/tosspayments/payment-samples/tree/main/payment-cancel-api), [결제 취소 연동 가이드](https://docs.tosspayments.com/guides/apis/cancel-payment), [결제 취소 API 레퍼런스](https://docs.tosspayments.com/reference#%EA%B2%B0%EC%A0%9C-%EC%B7%A8%EC%86%8C)
+
 | 문서 요구사항 | 우리 구현 |
 |---------------|-----------|
 | **Path** paymentKey | `order.payment_key` (승인 시 저장한 값) ✓ |
-| **cancelReason** 필수, string, 최대 200자 | 부분: `"품목 부분 취소"`, 전액: `"주문 전액 취소"` ✓ |
+| **인증** | `Authorization: Basic {시크릿키}:` (base64) ✓ |
+| **cancelReason** 필수, string, 최대 200자 | 부분: `"품목 부분 취소"` / `"품절로 인한 부분 취소"`, 전액: `"주문 전액 취소"` ✓ |
 | **cancelAmount** (부분 취소 시) | 부분 취소 시 `cancel_amount` 전달 ✓ |
 | **taxFreeAmount** (면세 취소액) | 부분/전액 시 해당 있으면 `taxFreeAmount` 포함 ✓ |
 | 전액 취소 시 cancelAmount 생략 | body에 `cancelReason` 만 전달 ✓ |
+| **멱등키** | `Idempotency-Key` 헤더 추가 (같은 취소 요청 재시도 시 중복 취소 방지). `_toss_cancel_headers(idempotency_key)` 사용 ✓ |
 
-- 위치: 품목 부분 취소 `order_cancel_item` → `_do_partial_cancel`, 전액 취소 `_do_full_order_cancel`.
+- 위치: 품목 부분 취소 `order_cancel_item` → `_do_partial_cancel`, 전액 취소 `_do_full_order_cancel`, 품절 취소(관리자) `order_item_status` API.
 
 ---
 
