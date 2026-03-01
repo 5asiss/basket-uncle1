@@ -1,113 +1,48 @@
+/**
+ * Service Worker - PWA 캐시
+ * - 캐시 버전: v4 (변경 시 기존 캐시 무효화)
+ * - 성공한 응답(res.ok)만 캐시
+ * - /static/uploads/ 이미지는 네트워크 우선 (캐시하지 않음)
+ */
 const CACHE_NAME = 'basket-uncle-v4';
 
-// 설치: 정적 자원 + 오프라인 페이지 캐시
-self.addEventListener('install', (event) => {
+self.addEventListener('install', function (event) {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function (event) {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll([
-        '/',
-        '/static/logo/sede1roding.png',
-        '/static/offline.html'
-      ]).catch(() => {});
-    }).then(() => self.skipWaiting())
+    caches.keys().then(function (names) {
+      return Promise.all(
+        names
+          .filter(function (name) { return name !== CACHE_NAME; })
+          .map(function (name) { return caches.delete(name); })
+      );
+    }).then(function () { return self.clients.claim(); })
   );
 });
 
-// 활성화: 이전 캐시 정리
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
-});
+self.addEventListener('fetch', function (event) {
+  var url = event.request.url;
+  if (event.request.method !== 'GET') return;
 
-// 푸시 알림: 서버에서 보낸 payload로 알림 표시
-self.addEventListener('push', (event) => {
-  var data = { title: '바구니삼촌', body: '', url: '/mypage/messages' };
-  if (event.data) {
-    try {
-      var j = event.data.json();
-      if (j.title) data.title = j.title;
-      if (j.body) data.body = j.body;
-      if (j.url) data.url = j.url;
-    } catch (e) {}
-  }
-  var opts = {
-    body: data.body,
-    icon: '/static/logo/sede1roding.png',
-    badge: '/static/logo/sede1roding.png',
-    tag: 'basket-uncle-msg',
-    requireInteraction: false,
-    data: { url: data.url }
-  };
-  event.waitUntil(
-    self.registration.showNotification(data.title, opts)
-  );
-});
-
-// 알림 클릭 시 해당 URL로 열기
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  var url = (event.notification.data && event.notification.data.url) || '/mypage/messages';
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      for (var i = 0; i < clientList.length; i++) {
-        if (clientList[i].url.indexOf(self.location.origin) === 0 && 'focus' in clientList[i]) {
-          clientList[i].navigate(url);
-          return clientList[i].focus();
-        }
-      }
-      if (self.clients.openWindow) return self.clients.openWindow(self.location.origin + url);
-    })
-  );
-});
-
-// fetch: 네트워크 우선, 실패 시 캐시 → 오프라인 페이지
-// 상품 이미지(/static/uploads/): 네트워크 우선, 실패 응답(404 등)은 캐시하지 않음 → 모바일에서 이미지 안 나오는 현상 방지
-self.addEventListener('fetch', (event) => {
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((res) => res)
-        .catch(() =>
-          caches.match(event.request)
-            .then((r) => r || caches.match('/'))
-            .then((r) => r || caches.match('/static/offline.html'))
-        )
-    );
+  if (url.indexOf('/static/uploads/') !== -1) {
+    event.respondWith(fetch(event.request));
     return;
   }
-  var url = event.request.url;
-  var isUpload = url.indexOf('/static/uploads/') !== -1 || url.indexOf('uploads/') !== -1;
 
-  if (/\.(js|css|jpg|jpeg|png|gif|ico|woff2?|svg)(\?.*)?$/i.test(url)) {
-    if (isUpload) {
-      // 상품/업로드 이미지: 네트워크 우선, 성공한 응답만 캐시 (404 등 실패 응답 캐시 금지)
-      event.respondWith(
-        fetch(event.request).then(function(res) {
-          if (res.ok) {
-            var clone = res.clone();
-            caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
-          }
-          return res;
-        }).catch(function() {
-          return caches.match(event.request);
-        })
-      );
-      return;
-    }
-    // 일반 정적 자원: 캐시 우선, 단 성공한 응답만 캐시
-    event.respondWith(
-      caches.match(event.request).then(function(cached) {
-        if (cached) return cached;
-        return fetch(event.request).then(function(res) {
-          if (!res.ok) return res;
-          var clone = res.clone();
-          caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
-          return res;
+  event.respondWith(
+    fetch(event.request)
+      .then(function (res) {
+        if (!res || !res.ok || res.type !== 'basic') return res;
+        var clone = res.clone();
+        caches.open(CACHE_NAME).then(function (cache) {
+          cache.put(event.request, clone);
         });
+        return res;
       })
-    );
-  }
+      .catch(function () {
+        return caches.match(event.request);
+      })
+  );
 });

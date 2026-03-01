@@ -43,24 +43,7 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "default_fallback_key")
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
 
 # 1. 모든 DB 경로 설정 (단일 DB 사용)
-# - 서버(Render 등): PORT 설정됨 → DATABASE_URL 그대로 사용(PostgreSQL).
-# - 로컬: DATABASE_URL이 Render 내부 호스트(dpg-)이면 DNS 미해석으로 접속 불가 → SQLite 대체.
-def _resolve_database_uri():
-    local_url = (os.getenv("LOCAL_DATABASE_URL") or "").strip()
-    server_url = (os.getenv("DATABASE_URL") or "").strip()
-    default_sqlite = "sqlite:///direct_trade_mall.db"
-    # 명시적 로컬 DB가 있으면 우선 사용
-    if local_url:
-        return local_url
-    if not server_url:
-        return default_sqlite
-    # Render 내부 전용 호스트(dpg-xxx)는 로컬에서 접근 불가 → 서버(PORT 있음)가 아니면 SQLite 사용
-    is_render_internal = "postgres" in server_url and "dpg-" in server_url
-    if is_render_internal and not os.getenv("PORT"):
-        return default_sqlite
-    return server_url
-
-app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_uri()
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///direct_trade_mall.db")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # 2. DB 연결 (공백 제거 버전)
@@ -140,7 +123,7 @@ def pwa_manifest():
     return jsonify({
         'name': name,
         'short_name': short_name,
-        'description': '농산물·식자재 배송 신개념 6PL 생활서비스',
+        'description': '송도 지역 산지직송 및 로컬 푸드마켓',
         'start_url': start_url,
         'scope': base + '/',
         'id': base + '/',
@@ -231,7 +214,7 @@ def send_push_for_user(user_id, title, body, url='/mypage/messages'):
 
 # 푸시 발송용 기본 문구 (DB 없을 때 폴백)
 _DEFAULT_MESSAGES = {
-    'welcome': ('환영합니다 🙂', '가입해 주셔서 감사합니다. 첫 구매 시 배송 문의는 고객센터로 연락 주세요. 문의: 1666-8320'),
+    'welcome': ('환영합니다 🙂', '가입해 주셔서 감사합니다. 신선식품 주문·배송 문의는 고객센터로 연락 주세요. 문의: 1666-8320'),
     'order_created': ('주문이 접수되었습니다', '주문번호 {order_id}로 결제가 완료되었습니다. 배송 진행 시 알림 드리겠습니다. 문의: 1666-8320'),
     'order_cancelled': ('주문이 취소되었습니다', '주문번호 {order_id}가 전액 취소·환불 처리되었습니다. 환불은 카드사 사정상 3~7일 소요될 수 있습니다.'),
     'part_cancelled': ('일부 품목이 취소되었습니다', '주문번호 {order_id}에서 해당 품목이 취소·환불 처리되었습니다. 환불은 카드사 사정상 3~7일 소요될 수 있습니다.'),
@@ -1211,7 +1194,7 @@ HEADER_HTML = """
     <meta charset="UTF-8">
     <meta name="naver-site-verification" content="11c3f5256fbdca16c2d7008b7cf7d0feff9b056b" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="description" content="바구니 삼촌은 농산물·식자재를 중간 유통 없이 직접 연결하고 최소 배송비만 받는 신개념 물류·구매대행 서비스입니다.">
+    <meta name="description" content="송도 지역 산지직송 및 로컬 푸드마켓">
     <link rel="manifest" id="pwa-manifest-link" href="/manifest.json">
     <script>(function(){var p=window.location.pathname,l=document.getElementById('pwa-manifest-link');if(l){var app='consumer';if(p.indexOf('/admin')===0)app='admin';else if(p.indexOf('/logi')===0)app='driver';l.href='/manifest.json?app='+app;}})();</script>
     <meta name="theme-color" content="#0d9488">
@@ -1221,9 +1204,9 @@ HEADER_HTML = """
     <link rel="apple-touch-icon" sizes="180x180" href="/static/logo/sede1roding.png">
     <link rel="apple-touch-icon" sizes="152x152" href="/static/logo/sede1roding.png">
     <link rel="apple-touch-icon" sizes="120x120" href="/static/logo/sede1roding.png">
-<title>바구니 삼촌 |  basam</title>
+<title>바구니 삼촌 | basam 로컬 신선마켓</title>
 
-    <title>바구니삼촌 - 농산물·식자재 배송 신개념 6PL 생활서비스 basam </title>
+    <title>바구니삼촌 - 송도 로컬 신선마켓 basam</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -1441,6 +1424,7 @@ HEADER_HTML = """
                     <a href="/" id="admin-shortcut-header" class="flex items-center gap-2.5 group">
                         <img src="/static/logo/side1.jpg" alt="바구니삼촌" class="h-8 md:h-9 w-auto rounded-lg shadow-sm group-hover:opacity-90 transition" onerror="this.style.display='none'">
                         <span class="font-extrabold text-teal-600 text-base md:text-lg tracking-tight group-hover:text-teal-700 transition">바구니삼촌</span>
+                        <span class="text-[10px] md:text-xs text-stone-500 font-semibold hidden sm:inline ml-0.5">송도 신선식품 직송 서비스</span>
                     </a>
                 </div>
 
@@ -1681,7 +1665,7 @@ FOOTER_HTML = """
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-10 pb-12 mb-12 border-b border-stone-700/50">
                 <div class="text-left">
                     <p id="admin-shortcut-footer" class="text-teal-400 font-extrabold text-2xl tracking-tight mb-2 cursor-pointer select-none">바구니삼촌</p>
-                    <p id="admin-shortcut-tagline" class="text-xs text-amber-400/90 font-semibold tracking-wide cursor-pointer select-none">인천 연수구 송도동 전용 구매대행 및 배송 서비스</p>
+                    <p id="admin-shortcut-tagline" class="text-xs text-amber-400/90 font-semibold tracking-wide cursor-pointer select-none">송도동 로컬 신선식품 직송 마켓</p>
                 </div>
                 <div class="flex flex-col md:items-end gap-4 w-full md:w-auto">
                     <p class="text-stone-300 font-bold text-sm tracking-wide">Customer Center</p>
@@ -1864,16 +1848,16 @@ FOOTER_HTML = """
         'title': '바구니삼촌 서비스 이용약관',
         'content': `
             <b>제1조 (목적)</b><br>
-            본 약관은 바구니삼촌(이하 “회사”)이 제공하는 구매대행 및 물류·배송 관리 서비스의 이용과 관련하여 회사와 이용자 간의 권리, 의무 및 책임사항을 규정함을 목적으로 합니다.<br><br>
+            본 약관은 바구니삼촌(이하 “회사”)이 제공하는 전자상거래 및 로컬 유통 서비스의 이용과 관련하여 회사와 이용자 간의 권리, 의무 및 책임사항을 규정함을 목적으로 합니다.<br><br>
             <b>제2조 (서비스의 성격 및 정의)</b><br>
-            ① 회사는 이용자의 요청에 따라 상품을 대신 구매하고, 결제, 배송 관리, 고객 응대, 환불 처리 등 거래 전반을 회사가 직접 관리·운영하는 구매대행 서비스를 제공합니다.<br>
+            ① 바구니삼촌은 상품의 소싱부터 배송까지 전 과정을 직접 운영/관리하며, 결제, 배송 관리, 고객 응대, 환불 처리 등 거래 전반을 회사가 직접 관리·운영하는 로컬 신선식품 직송 서비스를 제공합니다.<br>
             ② 본 서비스는 <b>통신판매중개업(오픈마켓)이 아니며</b>, 회사가 거래 및 운영의 주체로서 서비스를 제공합니다.<br><br>
             <b>제4조 (회사의 역할 및 책임)</b><br>
-            회사는 구매대행 과정에서 발생하는 주문, 결제, 배송, 환불 등 거래 전반에 대해 관계 법령에 따라 책임을 부담합니다.`
+            회사는 거래 과정에서 발생하는 주문, 결제, 배송, 환불 등 거래 전반에 대해 관계 법령에 따라 책임을 부담합니다.`
     },
     'privacy': {
         'title': '개인정보처리방침',
-        'content': '<b>개인정보 수집 및 이용</b><br>수집항목: 이름, 연락처, 주소, 결제정보<br>이용목적: 상품 구매대행 및 송도 지역 직영 배송 서비스 제공<br>보관기간: 관련 법령에 따른 보존 기간 종료 후 즉시 파기'
+        'content': '<b>개인정보 수집 및 이용</b><br>수집항목: 이름, 연락처, 주소, 결제정보<br>이용목적: 신선식품 직송 및 송도 지역 직영 배송 서비스 제공<br>보관기간: 관련 법령에 따른 보존 기간 종료 후 즉시 파기'
     },
             'privacy': {
                 'title': '개인정보처리방침',
@@ -1995,24 +1979,23 @@ function openUncleModal(type) {
       title: '이용약관',
       content: `
       <p><strong>제1조 (목적)</strong><br>
-      본 약관은 바구니삼촌(이하 "회사")이 제공하는 구매대행 및 배송 중개 서비스의 이용과 관련하여
+      본 약관은 바구니삼촌(이하 "회사")이 제공하는 전자상거래 및 로컬 유통 서비스의 이용과 관련하여
       회사와 이용자 간의 권리, 의무 및 책임사항을 규정함을 목적으로 합니다.</p>
 
       <p><strong>제2조 (서비스의 정의)</strong><br>
-      회사는 상품을 직접 판매하지 않으며,
-      소비자의 요청에 따라 판매자(산지, 도매처 등)와 소비자를 연결하는
-      구매대행 및 배송 중개 서비스를 제공합니다.</p>
+      바구니삼촌은 상품의 소싱부터 배송까지 전 과정을 직접 운영/관리하며,
+      로컬 신선식품 직송 서비스를 제공합니다.</p>
 
       <p><strong>제3조 (서비스 이용 계약)</strong><br>
       이용자는 본 약관에 동의함으로써 서비스 이용 계약이 성립되며,
-      결제 완료 시 구매대행 서비스 이용에 동의한 것으로 간주합니다.</p>
+      결제 완료 시 서비스 이용에 동의한 것으로 간주합니다.</p>
 
       <p><strong>제4조 (책임의 구분)</strong><br>
-      상품의 품질, 원산지, 유통기한, 하자에 대한 책임은 판매자에게 있으며,
-      회사는 주문 접수, 결제 처리, 배송 중개 및 고객 응대에 대한 책임을 집니다.</p>
+      상품의 품질, 원산지, 유통기한, 하자에 대한 책임은 관계 법령에 따르며,
+      회사는 주문 접수, 결제 처리, 배송 및 고객 응대에 대한 책임을 집니다.</p>
 
       <p><strong>제5조 (면책 조항)</strong><br>
-      천재지변, 배송사 사정, 판매자 사정 등 회사의 합리적인 통제 범위를 벗어난 사유로
+      천재지변, 배송사 사정 등 회사의 합리적인 통제 범위를 벗어난 사유로
       발생한 손해에 대하여 회사는 책임을 지지 않습니다.</p>
       `
     },
@@ -2047,22 +2030,21 @@ function openUncleModal(type) {
       title: '이용안내',
       content: `
       <p><strong>서비스 안내</strong><br>
-      바구니삼촌은 상품을 직접 보유하거나 판매하지 않는
-      구매대행 및 배송 중개 플랫폼입니다.</p>
+      바구니삼촌은 송도 지역 로컬 신선식품 직송 마켓으로
+      엄선한 상품을 직접 소싱·판매하며 배송합니다.</p>
 
       <p><strong>주문 절차</strong><br>
       ① 이용자가 상품 선택 및 결제<br>
-      ② 회사가 판매자에게 구매 요청<br>
-      ③ 판매자가 상품 준비<br>
-      ④ 배송을 통해 고객에게 전달</p>
+      ② 회사가 상품 준비 및 검수<br>
+      ③ 배송을 통해 고객에게 전달</p>
 
       <p><strong>결제 안내</strong><br>
       결제 금액은 상품 대금과 배송비로 구성되며,
-      구매대행 수수료는 별도로 청구되지 않습니다.</p>
+      추가 수수료는 별도로 청구되지 않습니다.</p>
 
       <p><strong>유의사항</strong><br>
-      상품 정보는 판매자가 제공하며,
-      실제 상품은 이미지와 다소 차이가 있을 수 있습니다.</p>
+      상품 정보는 실제와 다소 차이가 있을 수 있으며,
+      신선식품 특성상 환불 조건이 제한될 수 있습니다.</p>
       `
     },
 
@@ -3280,19 +3262,17 @@ def index():
 <div class="page-main">
 <div class="hero-wrap">
     <div class="hero-inner">
-        <span class="hero-label">Direct Delivery & Agency Service</span>
+        <span class="hero-label">Direct Delivery & Local Fresh Market</span>
         <h1 class="hero-title">
-            판매가 아닌 <span class="accent">배송 서비스</span> 입니다.<br>
-            <span class="accent">Premium 6PL Service</span>
+            당일 경매된 신선한 농산물을 당일 배송해드립니다.
         </h1>
         <div class="hero-divider"></div>
         <p class="hero-desc">
-            바구니삼촌은 재고를 쌓아두는 판매처가 아닌, <br class="hidden md:block">
-            이용자의 요청에 따라 <span class="highlight">구매와 배송을 책임 대행</span>하는 물류 인프라입니다.
+            <span class="highlight">엄선된 신선식품을 직접 소싱하여 당일 배송하는 로컬 편집샵</span>입니다.
         </p>
         <div class="flex flex-col md:flex-row justify-center items-center gap-4 md:gap-6">
-            <a href="#products" class="hero-cta">대행 서비스 이용하기</a>
-            <a href="/about" class="hero-link py-2 min-h-[44px] inline-flex items-center justify-center md:min-h-0 md:py-0">6PL 구매대행이란? <i class="fas fa-arrow-right ml-2"></i></a>
+            <a href="#products" class="hero-cta">오늘의 신선상품 보기</a>
+            <a href="/about" class="hero-link py-2 min-h-[44px] inline-flex items-center justify-center md:min-h-0 md:py-0">바구니삼촌이란? <i class="fas fa-arrow-right ml-2"></i></a>
         </div>
     </div>
 </div>
@@ -3935,16 +3915,16 @@ def about_page():
         <div class="about-container">
     <h1>바구니 삼촌몰</h1>
     <p>
-        바구니 삼촌몰은 <span class="about-highlight">물류 인프라를 직접 운영하며 주문 전 과정을 책임지는 구매대행 서비스</span>입니다.
+        바구니 삼촌몰은 <span class="about-highlight">엄선된 신선식품을 직접 소싱하여 송도 지역 당일 배송하는 로컬 편집샵</span>입니다.
     </p>
     <p>
-        우리는 기존 유통의 불필요한 단계를 제거하기 위해 <b>상품 대리 구매 · 직영 물류 · 라스트마일 배송</b>을 하나의 시스템으로 통합했습니다.
+        우리는 기존 유통의 불필요한 단계를 제거하기 위해 <b>직접 소싱 · 검수 · 당일 배송</b>을 하나의 시스템으로 통합했습니다.
     </p>
     <p>
-        단순히 판매자와 구매자를 연결하는 중개 플랫폼이 아니라, 이용자의 요청을 받아 <span class="about-highlight">삼촌이 직접 검수하고 구매하여 문 앞까지 배송</span>하는 책임 대행 모델을 지향합니다.
+        단순히 판매자와 구매자를 연결하는 중개 플랫폼이 아니라, <span class="about-highlight">직접 검수한 신선식품을 문 앞까지 배송하는 로컬 직송 모델</span>을 지향합니다.
     </p>
     <p>
-        직구/구매대행 방식의 효율적인 물류 시스템을 통해 광고비와 유통 거품을 뺐으며, 그 혜택을 <b>상품의 실제 조달 원가와 합리적인 배송비</b>에 그대로 반영합니다.
+        로컬 직송 방식의 효율적인 유통 시스템을 통해 광고비와 유통 거품을 뺐으며, 그 혜택을 <b>상품의 실제 조달 원가와 합리적인 배송비</b>에 그대로 반영합니다.
     </p>
 
     <h2>Our Core Value</h2>
@@ -3961,7 +3941,7 @@ def about_page():
 
     <p style="margin-top: 60px; font-size: 19px; font-weight: 700; border-left: 4px solid #10b981; padding-left: 20px;">
         바구니 삼촌은 중개만 하는 장터가 아니라, <br>
-        <span class="about-highlight">‘구매부터 배송까지 당사가 직접 책임지고 완료하는 대행 플랫폼’</span>입니다.
+        <span class="about-highlight">‘소싱부터 배송까지 당사가 직접 책임지고 완료하는 로컬 직송 플랫폼’</span>입니다.
     </p>
 
             <div class="premium-section">
@@ -3992,7 +3972,7 @@ GUIDE_HTML = """
     <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-8">🛒 바구니삼촌몰 이용안내</h1>
     <div class="border border-gray-200 rounded-2xl p-6 md:p-8 bg-gray-50/80 text-gray-700 text-sm md:text-base leading-relaxed">
         <p class="mb-4">
-            바구니삼촌몰은 <b class="text-gray-900">6PL 구매대행 기반 공동구매 플랫폼</b>으로 운영됩니다.<br>
+            바구니삼촌몰은 <b class="text-gray-900">로컬 신선식품 직송 편집샵</b>으로 운영됩니다.<br>
             재고 보관과 오프라인 매장을 없애고, 고객 주문 후 도매처에 직접 발주하는 방식으로
             <b class="text-gray-900">유통 거품을 최소화</b>하여 합리적인 가격을 제공합니다.
         </p>
@@ -5742,7 +5722,7 @@ def product_detail(pid):
 
                 <div class="bg-gray-50 p-4 rounded-2xl mb-6 border border-gray-100">
                     <p class="text-[11px] text-gray-500 leading-relaxed font-bold">
-                        <i class="fas fa-info-circle mr-1"></i> 바구니삼촌은 구매대행형 서비스로서 본 상품의 실제 판매처와 고객을 연결하고 결제 및 배송 전반을 책임 관리합니다.
+                        <i class="fas fa-info-circle mr-1"></i> 바구니삼촌은 직접 검수하고 소싱한 정품만을 판매하며, 송도 전 지역 직접 배송을 책임집니다.
                     </p>
                 </div>
                 {% if p.stock > 0 and not is_expired %}
@@ -5869,17 +5849,6 @@ def product_detail(pid):
                 </div>
             </div>
         </div>
-
-        {% if cat_info and cat_info.id %}
-        <div class="mt-16 md:mt-24 px-4 md:px-0">
-            <a href="/category/seller/{{ cat_info.id }}" class="inline-flex items-center gap-3 py-5 px-8 rounded-2xl bg-gray-50 border-2 border-gray-100 hover:border-teal-200 hover:bg-teal-50/50 text-gray-800 font-black text-base md:text-lg transition-all shadow-sm hover:shadow-md">
-                <span class="w-14 h-14 rounded-xl bg-teal-100 flex items-center justify-center text-teal-600"><i class="fas fa-store text-xl"></i></span>
-                <span>판매자 정보보기</span>
-                <i class="fas fa-chevron-right text-teal-500"></i>
-            </a>
-            <p class="text-[11px] text-gray-500 font-bold mt-3">본 상품의 실제 판매 사업자(상호·대표·사업자번호·연락처)를 확인할 수 있습니다.</p>
-        </div>
-        {% endif %}
 
         <div id="reviews" class="mt-40 px-4 md:px-0">
             <h3 class="text-2xl md:text-4xl font-black text-gray-900 mb-12 flex items-center gap-4 tracking-tighter">
@@ -6706,8 +6675,8 @@ def register():
 
         <script>
         var consentContents = {
-            terms: { title: '이용약관', body: '제1조 (목적)\n이 약관은 바구니삼촌(이하 "당사")이 제공하는 구매대행·물류 서비스(이하 "서비스")의 이용 조건 및 절차, 당사와 이용자의 권리·의무를 정합니다.\n\n제2조 (정의)\n① "서비스"란 이용자의 주문 요청에 따라 당사가 상품을 구매·배송 대행하는 통합 물류 서비스를 말합니다.\n② "이용자"란 당사에 회원가입하여 서비스를 이용하는 자를 말합니다.\n\n제3조 (약관의 효력)\n① 약관은 서비스 화면에 게시하거나 기타의 방법으로 공지함으로써 효력이 발생합니다.\n② 당사는 필요한 경우 관련 법령을 위배하지 않는 범위에서 약관을 개정할 수 있으며, 변경된 약관은 적용일자 및 변경 내용을 명시하여 공지합니다.\n\n제4조 (서비스 이용)\n이용자는 회원가입 시 입력한 정보가 사실과 일치하도록 유지해야 하며, 부정 이용 시 서비스 이용이 제한될 수 있습니다.\n\n(이하 생략 — 실제 서비스 운영 시 법인·변호사 검토 후 보완하세요.)' },
-            ecommerce: { title: '전자상거래 이용 약관 및 유의사항', body: '[필수 동의 사항]\n\n본 서비스는 전자상거래법상 통신판매중개가 아닌 구매대행·물류 서비스입니다.\n\n① 이용자의 주문·결제는 당사에 대한 "구매 및 배송 대행 요청"으로 간주됩니다.\n② 당사는 이용자의 요청에 따라 상품을 대신 구매·수령 후 배송하며, 상품의 하자·분쟁 등은 공급자(판매자)와 이용자 간에 해결됩니다.\n③ 배송 불가 지역·품목은 주문 단계에서 안내되며, 회원가입은 배송 가능 여부와 무관하게 가능합니다.\n④ 전자상거래법 등 관련 법령이 정한 청약 철회·환불 등은 당사 정책 및 공급자 약관에 따릅니다.\n\n위 내용을 확인하였으며 이에 동의합니다.' },
+            terms: { title: '이용약관', body: '제1조 (목적)\n이 약관은 바구니삼촌(이하 "당사")이 제공하는 전자상거래 및 로컬 유통 서비스(이하 "서비스")의 이용 조건 및 절차, 당사와 이용자의 권리·의무를 정합니다.\n\n제2조 (정의)\n① "서비스"란 당사가 상품을 직접 소싱·판매하고 배송하는 로컬 신선식품 직송 서비스를 말합니다.\n② "이용자"란 당사에 회원가입하여 서비스를 이용하는 자를 말합니다.\n\n제3조 (약관의 효력)\n① 약관은 서비스 화면에 게시하거나 기타의 방법으로 공지함으로써 효력이 발생합니다.\n② 당사는 필요한 경우 관련 법령을 위배하지 않는 범위에서 약관을 개정할 수 있으며, 변경된 약관은 적용일자 및 변경 내용을 명시하여 공지합니다.\n\n제4조 (서비스 이용)\n이용자는 회원가입 시 입력한 정보가 사실과 일치하도록 유지해야 하며, 부정 이용 시 서비스 이용이 제한될 수 있습니다.\n\n(이하 생략 — 실제 서비스 운영 시 법인·변호사 검토 후 보완하세요.)' },
+            ecommerce: { title: '전자상거래 이용 약관 및 유의사항', body: '[필수 동의 사항]\n\n본 서비스는 전자상거래법상 통신판매중개가 아닌 전자상거래·로컬 유통 서비스입니다.\n\n① 이용자의 주문·결제는 당사에 대한 주문 및 배송 요청으로 간주됩니다.\n② 당사는 상품을 직접 소싱·판매하며 배송하고, 상품의 하자·분쟁 등은 관계 법령에 따라 처리합니다.\n③ 배송 불가 지역·품목은 주문 단계에서 안내되며, 회원가입은 배송 가능 여부와 무관하게 가능합니다.\n④ 전자상거래법 등 관련 법령이 정한 청약 철회·환불 등은 당사 정책에 따릅니다.\n\n위 내용을 확인하였으며 이에 동의합니다.' },
             privacy: { title: '개인정보처리방침', body: '1. 수집하는 개인정보 항목\n회원가입·주문 시 이름, 이메일, 휴대폰 번호, 주소, 공동현관 비밀번호 등 서비스 이용에 필요한 최소한의 정보를 수집합니다.\n\n2. 수집 목적\n서비스 제공, 주문·배송 처리, 고객 상담, 부정 이용 방지, 법령에 따른 의무 이행입니다.\n\n3. 보유 및 이용 기간\n회원 탈퇴 또는 동의 철회 시까지 보유하며, 전자상거래법 등 법령에 따라 보존할 필요가 있는 경우 해당 기간 동안 보관합니다.\n\n4. 제3자 제공\n이용자의 동의 없이 개인정보를 제3자에게 제공하지 않습니다. 단, 배송·결제 등 서비스 수행을 위해 필요한 제휴사에는 최소 정보가 제공될 수 있습니다.\n\n5. 이용자 권리\n이용자는 개인정보 열람·정정·삭제·처리 정지를 요청할 수 있으며, 요청 시 지체 없이 조치합니다.\n\n(실제 운영 시 전문가 검토 후 보완하세요.)' },
             marketing: { title: '마케팅 수신 동의', body: '[선택] 마케팅 정보 수신 동의\n\n동의 시 당사 및 제휴사가 제공하는 다음 내용의 정보를 이메일·문자·알림 등으로 수신할 수 있습니다.\n\n· 이벤트·프로모션·할인 정보\n· 신규 서비스·상품 안내\n· 맞춤 추천 및 이용 유도 메시지\n\n수신 동의는 회원가입 후 마이페이지 등에서 언제든지 거부·철회할 수 있으며, 거부해도 서비스 이용에는 제한이 없습니다.' }
         };
@@ -8339,15 +8308,15 @@ def order_confirm():
             <details class="bg-gray-50 rounded-xl border border-gray-100 text-[10px] text-gray-600">
                 <summary class="p-3 cursor-pointer font-black text-gray-700">결제 전 안내 (필수 확인)</summary>
                 <div class="px-3 pb-3 pt-0 space-y-4 text-left">
-                    <p class="font-black text-gray-700">· 품절/부분취소 가능 · 구매대행 서비스 동의 · 개인정보 제3자 제공 동의</p>
+                    <p class="font-black text-gray-700">· 품절/부분취소 가능 · 서비스 이용 동의 · 개인정보 제3자 제공 동의</p>
                     <div class="border-t border-gray-200 pt-3 space-y-4">
                         <div>
                             <p class="font-black text-gray-800 mb-1">1. 취소 안내 동의</p>
                             <p class="leading-relaxed">주문 후 상품 품절 시 해당 품목만 취소되며, 결제 금액은 카드사 정책에 따라 3~7일 내 환불됩니다. 일부 품목만 취소(부분 취소)할 수 있으며, 배송 요청·배송 중·배송 완료된 품목은 취소할 수 없습니다. 위 내용을 확인하였으며 동의합니다.</p>
                         </div>
                         <div>
-                            <p class="font-black text-gray-800 mb-1">2. 구매대행 서비스 동의</p>
-                            <p class="leading-relaxed">바구니삼촌은 구매대행형 서비스로, 고객님과 판매자(카테고리별 입점업체) 간 거래를 중개하고 결제·배송 전반을 관리합니다. 상품의 실제 판매자는 각 카테고리별 판매자이며, 바구니삼촌은 대금 결제·정산·배송 조율 등을 수행합니다. 위 서비스 이용 방식에 동의합니다.</p>
+                            <p class="font-black text-gray-800 mb-1">2. 서비스 이용 동의</p>
+                            <p class="leading-relaxed">바구니삼촌은 직접 소싱한 신선식품을 판매하며, 결제·배송 전반을 직접 관리합니다. 위 서비스 이용 방식에 동의합니다.</p>
                         </div>
                         <div>
                             <p class="font-black text-gray-800 mb-1">3. 개인정보 제3자 제공 동의</p>
@@ -8362,7 +8331,7 @@ def order_confirm():
                     <span>전체 동의하기</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="consent-item rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="consent-item rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="consent-item rounded border-gray-300 text-teal-600" required><span>서비스 이용 동의</span></label>
                 <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="consent-item rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
@@ -8395,7 +8364,7 @@ def order_confirm():
     }})();
     function startPayment() {{
         if(!document.getElementById('consent_partial_cancel').checked) {{ alert("취소 안내에 동의해 주세요."); return; }}
-        if(!document.getElementById('consent_agency').checked) {{ alert("구매대행 서비스 동의가 필요합니다."); return; }}
+        if(!document.getElementById('consent_agency').checked) {{ alert("서비스 이용 동의가 필요합니다."); return; }}
         if(!document.getElementById('consent_third_party_order').checked) {{ alert("개인정보 제공 동의가 필요합니다."); return; }}
         var ptsInput = document.getElementById('points_used_input');
         var pts = ptsInput ? parseInt(ptsInput.value, 10) || 0 : 0;
@@ -8460,15 +8429,15 @@ def order_confirm():
             <details class="bg-gray-50 rounded-xl border border-gray-100 text-[10px] text-gray-600">
                 <summary class="p-3 cursor-pointer font-black text-gray-700">결제 전 안내 (필수 확인)</summary>
                 <div class="px-3 pb-3 pt-0 space-y-4 text-left">
-                    <p class="font-black text-gray-700">· 품절/부분취소 가능 · 구매대행 서비스 동의 · 개인정보 제3자 제공 동의</p>
+                    <p class="font-black text-gray-700">· 품절/부분취소 가능 · 서비스 이용 동의 · 개인정보 제3자 제공 동의</p>
                     <div class="border-t border-gray-200 pt-3 space-y-4">
                         <div>
                             <p class="font-black text-gray-800 mb-1">1. 취소 안내 동의</p>
                             <p class="leading-relaxed">주문 후 상품 품절 시 해당 품목만 취소되며, 결제 금액은 카드사 정책에 따라 3~7일 내 환불됩니다. 일부 품목만 취소(부분 취소)할 수 있으며, 배송 요청·배송 중·배송 완료된 품목은 취소할 수 없습니다. 위 내용을 확인하였으며 동의합니다.</p>
                         </div>
                         <div>
-                            <p class="font-black text-gray-800 mb-1">2. 구매대행 서비스 동의</p>
-                            <p class="leading-relaxed">바구니삼촌은 구매대행형 서비스로, 고객님과 판매자(카테고리별 입점업체) 간 거래를 중개하고 결제·배송 전반을 관리합니다. 상품의 실제 판매자는 각 카테고리별 판매자이며, 바구니삼촌은 대금 결제·정산·배송 조율 등을 수행합니다. 위 서비스 이용 방식에 동의합니다.</p>
+                            <p class="font-black text-gray-800 mb-1">2. 서비스 이용 동의</p>
+                            <p class="leading-relaxed">바구니삼촌은 직접 소싱한 신선식품을 판매하며, 결제·배송 전반을 직접 관리합니다. 위 서비스 이용 방식에 동의합니다.</p>
                         </div>
                         <div>
                             <p class="font-black text-gray-800 mb-1">3. 개인정보 제3자 제공 동의</p>
@@ -8483,7 +8452,7 @@ def order_confirm():
                     <span>전체 동의하기</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>구매대행 서비스 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>서비스 이용 동의</span></label>
                 <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
@@ -8519,7 +8488,7 @@ def order_confirm():
     }})();
     function startPayment() {{
         if(!document.getElementById('consent_partial_cancel').checked) {{ alert("취소 안내에 동의해 주세요."); return; }}
-        if(!document.getElementById('consent_agency').checked) {{ alert("구매대행 서비스 동의가 필요합니다."); return; }}
+        if(!document.getElementById('consent_agency').checked) {{ alert("서비스 이용 동의가 필요합니다."); return; }}
         if(!document.getElementById('consent_third_party_order').checked) {{ alert("개인정보 제공 동의가 필요합니다."); return; }}
         if (isQuickZone) {{ var q = document.getElementById('quick_agree'); if (!q || !q.checked) {{ alert("퀵 추가료에 동의해 주세요."); return; }} document.getElementById('quick_agree_hidden').value = '1'; }}
         var ptsInput = document.getElementById('points_used_input');
@@ -15415,7 +15384,7 @@ def _bulk_safe_image_filename(filename):
 
 @login_required
 def admin_bulk_upload_images():
-    """대량등록용 이미지 저장. CLOUDINARY_URL 있으면 Cloudinary에 올리고 세션에 URL 저장(Render 등 휘발 디스크 대응). 없으면 static/uploads/에 저장."""
+    """대량등록용 이미지를 static/uploads/에 저장. 엑셀에서 파일명 그대로 참조 가능."""
     if not current_user.is_admin:
         return redirect('/')
     if request.method != 'POST':
@@ -15425,7 +15394,6 @@ def admin_bulk_upload_images():
     os.makedirs(upload_dir, exist_ok=True)
     saved = []
     skipped = 0
-    session_urls = dict(session.get("bulk_upload_urls") or {})
     for f in files:
         if not f or not getattr(f, 'filename', None) or (f.filename or '').strip() == '':
             continue
@@ -15433,6 +15401,10 @@ def admin_bulk_upload_images():
         if not safe_name:
             continue
         try:
+            path = os.path.join(upload_dir, safe_name)
+            if os.path.isfile(path):
+                skipped += 1
+                continue  # 같은 이름 이미 있으면 건너뜀
             if getattr(f, 'stream', None) and hasattr(f.stream, 'seek'):
                 try:
                     f.stream.seek(0)
@@ -15441,30 +15413,13 @@ def admin_bulk_upload_images():
             data = f.read()
             if not data:
                 continue
-            if cloudinary_url:
-                upload_res = cloudinary.uploader.upload(data, folder="basket-uncle/bulk")
-                url = upload_res.get("secure_url") or upload_res.get("url")
-                if url:
-                    session_urls[safe_name] = url
-                    saved.append(safe_name)
-            else:
-                path = os.path.join(upload_dir, safe_name)
-                if os.path.isfile(path):
-                    skipped += 1
-                    continue
-                with open(path, 'wb') as out:
-                    out.write(data)
-                saved.append(safe_name)
+            with open(path, 'wb') as out:
+                out.write(data)
+            saved.append(safe_name)
         except Exception as e:
             flash(f"이미지 저장 실패 ({f.filename}): {str(e)}")
-    if session_urls:
-        session["bulk_upload_urls"] = session_urls
-        session.permanent = True
     if saved:
-        if cloudinary_url:
-            flash(f"{len(saved)}개 이미지가 Cloudinary에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 파일명을 그대로 입력하세요.")
-        else:
-            flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요.")
+        flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요.")
     elif skipped:
         flash(f"같은 이름의 파일이 이미 있어 {skipped}개는 건너뛰었습니다. 새 파일만 선택해 주세요.")
     else:
@@ -15607,31 +15562,28 @@ def admin_product_bulk_upload():
                     for suffix in ("1", "_1"):
                         found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
                         if found:
-                            image_url = _bulk_resolve_image_url(upload_dir, found) or image_url
-                            if image_url:
-                                break
+                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                            break
                     if not image_url:
                         name_no_spaces = name_val.replace(" ", "")
                         if name_no_spaces != name_val:
                             for suffix in ("1", "_1"):
                                 found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
                                 if found:
-                                    image_url = _bulk_resolve_image_url(upload_dir, found) or image_url
-                                    if image_url:
-                                        break
+                                    image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                    break
                     if not image_url:
                         for base in (name_val + "1", name_val + "_1", name_val.replace(" ", "") + "1", name_val.replace(" ", "") + "_1"):
                             found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
                             if found:
-                                image_url = _bulk_resolve_image_url(upload_dir, found) or image_url
-                                if image_url:
-                                    break
+                                image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                break
                 if not image_url:
                     main_img = _bulk_image_filename_only(main_img_raw)
                     if main_img and not _bulk_is_placeholder_image(main_img):
-                        resolved = _bulk_resolve_image_url(upload_dir, main_img)
-                        if resolved:
-                            image_url = resolved
+                        found = _bulk_find_upload_file(upload_dir, main_img)
+                        if found:
+                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
                         else:
                             missing_main = main_img
             path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
@@ -15652,9 +15604,9 @@ def admin_product_bulk_upload():
                         else:
                             fn_img = _bulk_image_filename_only(p)
                             if fn_img:
-                                resolved = _bulk_resolve_image_url(upload_dir, fn_img)
-                                if resolved:
-                                    detail_parts.append(resolved)
+                                found = _bulk_find_upload_file(upload_dir, fn_img)
+                                if found:
+                                    detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                                 else:
                                     missing_details.append(fn_img)
                     if detail_parts:
@@ -15677,9 +15629,7 @@ def admin_product_bulk_upload():
                                 if found:
                                     break
                         if found:
-                            resolved = _bulk_resolve_image_url(upload_dir, found)
-                            if resolved:
-                                detail_parts.append(resolved)
+                            detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
                     if detail_parts:
                         detail_image_url = ",".join(detail_parts)
             if missing_main or missing_details:
@@ -15810,19 +15760,6 @@ def _bulk_find_upload_file(upload_dir, filename):
                 return fn
     except OSError:
         pass
-    return None
-
-
-def _bulk_resolve_image_url(upload_dir, filename):
-    """파일명을 실제 이미지 URL로 변환. 대량등록 시 Cloudinary에 올린 경우 세션 URL, 아니면 /static/uploads/ 경로."""
-    if not filename:
-        return None
-    session_urls = session.get("bulk_upload_urls") or {}
-    if isinstance(session_urls, dict) and filename in session_urls:
-        return session_urls[filename]
-    found = _bulk_find_upload_file(upload_dir, filename)
-    if found:
-        return f"/static/uploads/{found.replace(chr(92), '/')}"
     return None
 
 
@@ -19596,23 +19533,22 @@ with app.app_context():
     from models import EventBoardPost, ShareLink, EventPointRequest  # noqa: F401 - 테이블 생성용 로드
     db.create_all()
     from sqlalchemy import text
-    # settlement 구 스키마 마이그레이션: SQLite 전용(PRAGMA). Postgres에서는 실행하지 않음.
     try:
-        if db.engine.dialect.name == "sqlite":
-            rp = db.session.execute(text("PRAGMA table_info(settlement)")).fetchall()
-            cols = [row[1] for row in rp] if rp else []
-            if cols and 'settlement_no' not in cols:
+        rp = db.session.execute(text("PRAGMA table_info(settlement)")).fetchall()
+        cols = [row[1] for row in rp] if rp else []
+        if cols and 'settlement_no' not in cols:
+            # 기존 settlement는 구 스키마 → category_settlement로 이름 변경 후 새 settlement 생성
+            try:
+                db.session.execute(text("ALTER TABLE settlement RENAME TO category_settlement"))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
                 try:
+                    db.session.execute(text("DROP TABLE IF EXISTS category_settlement"))
                     db.session.execute(text("ALTER TABLE settlement RENAME TO category_settlement"))
                     db.session.commit()
                 except Exception:
                     db.session.rollback()
-                    try:
-                        db.session.execute(text("DROP TABLE IF EXISTS category_settlement"))
-                        db.session.execute(text("ALTER TABLE settlement RENAME TO category_settlement"))
-                        db.session.commit()
-                    except Exception:
-                        db.session.rollback()
     except Exception:
         db.session.rollback()
     try:

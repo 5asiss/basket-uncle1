@@ -69,17 +69,3 @@ gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app
 - [ ] 설정 **저장** 후 **재배포**
 
 이렇게 맞춘 뒤 재배포하면 "포트 미감지" 메시지가 사라지고 접속이 됩니다.
-
----
-
-## 6. 업로드 이미지가 서버에서 안 나올 때 (Render 등)
-
-Render는 **디스크가 휘발성**이라 `static/uploads/`에 저장한 파일은 재시작·재배포 시 사라집니다.  
-**상품/리뷰/팝업 이미지가 계속 보이게 하려면** 환경 변수 **`CLOUDINARY_URL`**을 설정하세요.
-
-| 이름 | 값 | 비고 |
-|------|-----|------|
-| `CLOUDINARY_URL` | `cloudinary://API_KEY:API_SECRET@CLOUD_NAME` | [Cloudinary](https://cloudinary.com) 가입 후 대시보드에서 확인 |
-
-- 설정 후 **이미지 올리기·상품 등록·대량등록** 시 자동으로 Cloudinary에 저장되어 서버 재시작 후에도 이미지가 유지됩니다.
-- 설정하지 않으면 로컬 `static/uploads/`만 사용하므로, Render에서는 배포 후 이미지가 사라질 수 있습니다.

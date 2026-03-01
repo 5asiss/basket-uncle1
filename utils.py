@@ -666,6 +666,7 @@ def run_backup():
     binds = app.config.get("SQLALCHEMY_BINDS") or {}
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")  # 초 포함해 동일 분 내 중복 태그 방지
     tmp_dir = tempfile.mkdtemp(prefix="basket_backup_")
+    files_to_backup = []
 
     # 1) 메인 DB: SQLite 파일 또는 PostgreSQL pg_dump
     if main_uri and _is_postgres_uri(main_uri):
