@@ -8684,6 +8684,10 @@ def order_payment():
     customer_email_js = (current_user.email or "").strip().replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
     if not customer_email_js or "@" not in customer_email_js:
         customer_email_js = "order@customer.local"
+    # v2 결제창: customerKey 필수 (2~50자, 영문/숫자/-,_,=,.,@ 포함)
+    customer_key_js = ("u_" + str(getattr(current_user, "id", 0)))[:50]
+    # v2 amount 객체 문자열 (JS 변수 paymentAmount 사용)
+    amount_js = '{ "currency": "KRW", "value": paymentAmount }'
 
     if not (TOSS_CLIENT_KEY or "").strip():
         flash("결제 클라이언트 키가 설정되지 않았습니다. 관리자에게 문의해 주세요.")
@@ -8723,10 +8727,11 @@ def order_payment():
         </p>
     </div>
 
-   <script src="https://js.tosspayments.com/v1/payment"></script>
+   <script src="https://js.tosspayments.com/v2/standard"></script>
     <script>
-    // 1. 토스페이먼츠 초기화
+    // v2 SDK: 결제창 초기화 (customerKey 필수)
     const tossPayments = TossPayments("{TOSS_CLIENT_KEY}");
+    const payment = tossPayments.payment({{ customerKey: '{ customer_key_js }' }});
     let isProcessing = false;
     const paymentButton = document.getElementById('payment-button');
 
@@ -8756,12 +8761,15 @@ def order_payment():
                     return;
                 }}
                 
-                // orderId: 6~64자, 영문/숫자/-/_ 만 사용
-                var uniqueOrderId = '{ order_id_js }_' + new Date().getTime();
-                if (uniqueOrderId.length > 64) uniqueOrderId = uniqueOrderId.slice(-64);
+                // orderId: 6~64자, 영문/숫자/-/_ 만 사용 (길이 여유 있게 생성)
+                var orderIdPrefix = '{ order_id_js }'.slice(0, 24);
+                var uniqueOrderId = orderIdPrefix + '_' + new Date().getTime();
+                if (uniqueOrderId.length > 64) uniqueOrderId = uniqueOrderId.slice(0, 64);
 
-                tossPayments.requestPayment('CARD', {{
-                    amount: paymentAmount,
+                // v2: amount는 객체(currency, value), method "CARD"
+                payment.requestPayment({{
+                    method: "CARD",
+                    amount: { amount_js },
                     taxFreeAmount: taxFreeAmount,
                     orderId: uniqueOrderId,
                     orderName: '{ order_name_js }',
@@ -8774,6 +8782,7 @@ def order_payment():
                     var msg = (error && error.message) ? error.message : '처리 중 오류가 발생했습니다.';
                     if (code === 'COMMON_ERROR') {{
                         msg = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+                        if (error && error.message) msg += ' (상세: ' + error.message + ')';
                     }}
                     if (error && error.code === 'USER_CANCEL') {{
                         console.log('사용자가 결제를 취소했습니다.');
