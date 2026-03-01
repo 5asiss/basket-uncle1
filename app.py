@@ -8677,11 +8677,13 @@ def order_payment():
     tax_free = int(sum(i.price * i.quantity for i in items if i.tax_type == '면세'))
     order_id = _make_order_virt_id(effective_addr)
     order_name = f"{items[0].product_name} 외 {len(items)-1}건" if len(items) > 1 else items[0].product_name
-    # JS 문자열 내 사용 시 이스케이프 (라이브 결제 시 상품명/고객명 특수문자 대비)
-    order_id_js = re.sub(r'[^a-zA-Z0-9_-]', '_', (order_id or ""))  # 토스 orderId 허용 문자만
-    order_name_js = (order_name or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
-    customer_name_js = (current_user.name or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
-    customer_email_js = (current_user.email or "").replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+    # JS 문자열 내 사용 시 이스케이프 (라이브 결제 시 상품명/고객명 특수문자 대비). orderName 최대 100자.
+    order_id_js = re.sub(r'[^a-zA-Z0-9_-]', '_', (order_id or ""))  # 토스 orderId 허용 문자만 (6~64자)
+    order_name_js = (order_name or "주문")[:100].replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+    customer_name_js = (current_user.name or "주문고객").strip().replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")[:50]
+    customer_email_js = (current_user.email or "").strip().replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+    if not customer_email_js or "@" not in customer_email_js:
+        customer_email_js = "order@customer.local"
 
     if not (TOSS_CLIENT_KEY or "").strip():
         flash("결제 클라이언트 키가 설정되지 않았습니다. 관리자에게 문의해 주세요.")
@@ -8743,11 +8745,20 @@ def order_payment():
                 paymentButton.classList.add('opacity-60', 'cursor-not-allowed');
                 paymentButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 결제창 준비 중...';
 
-                const paymentAmount = Number({ total });
-                const taxFreeAmount = Math.min(paymentAmount, Number({ tax_free }));
+                const paymentAmount = Math.floor(Number({ total }));
+                const taxFreeAmount = Math.min(paymentAmount, Math.floor(Number({ tax_free })));
+                if (paymentAmount < 1) {{
+                    alert("결제 금액이 올바르지 않습니다.");
+                    isProcessing = false;
+                    paymentButton.disabled = false;
+                    paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
+                    paymentButton.innerHTML = defaultLabel;
+                    return;
+                }}
                 
-                // ★ 고유한 주문번호: 토스 허용 문자만 사용
+                // orderId: 6~64자, 영문/숫자/-/_ 만 사용
                 var uniqueOrderId = '{ order_id_js }_' + new Date().getTime();
+                if (uniqueOrderId.length > 64) uniqueOrderId = uniqueOrderId.slice(-64);
 
                 tossPayments.requestPayment('CARD', {{
                     amount: paymentAmount,
@@ -8759,8 +8770,11 @@ def order_payment():
                     successUrl: window.location.origin + '/payment/success',
                     failUrl: window.location.origin + '/payment/fail'
                 }}).catch(function (error) {{
-                    var msg = (error && error.message) ? error.message : '처리 중 오류가 발생했습니다.';
                     var code = (error && error.code) ? error.code : '';
+                    var msg = (error && error.message) ? error.message : '처리 중 오류가 발생했습니다.';
+                    if (code === 'COMMON_ERROR') {{
+                        msg = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+                    }}
                     if (error && error.code === 'USER_CANCEL') {{
                         console.log('사용자가 결제를 취소했습니다.');
                     }} else {{
