@@ -8693,6 +8693,8 @@ def order_payment():
     customer_email_js = (current_user.email or "").strip().replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
     if not customer_email_js or "@" not in customer_email_js:
         customer_email_js = "order@customer.local"
+    # v2 결제창: customerKey (샘플과 동일, 2~50자)
+    customer_key_js = ("u_" + str(getattr(current_user, "id", 0)))[:50]
 
     if not (TOSS_CLIENT_KEY or "").strip():
         flash("결제 클라이언트 키가 설정되지 않았습니다. 관리자에게 문의해 주세요.")
@@ -8732,96 +8734,76 @@ def order_payment():
         </p>
     </div>
 
-   <script src="https://js.tosspayments.com/v1/payment"></script>
-    <script>
-    // v1 결제창 SDK (버튼 클릭 시 결제창 호출)
-    if (typeof TossPayments === 'undefined') {{
-        console.error('토스페이먼츠 스크립트를 불러오지 못했습니다.');
-    }}
-    const tossPayments = typeof TossPayments !== 'undefined' ? TossPayments("{TOSS_CLIENT_KEY}") : null;
-    let isProcessing = false;
-    const paymentButton = document.getElementById('payment-button');
-
-    if (paymentButton) {{
-        const defaultLabel = paymentButton.innerHTML;
-
-        paymentButton.addEventListener('click', function () {{
-            if (isProcessing) {{
-                alert("결제창을 불러오는 중입니다. 잠시만 기다려 주세요.");
+   <script>
+    // 토스페이먼츠 샘플(tosspayments-sample) 방식: v2 스크립트 로드 후 초기화
+    (function() {{
+        var s = document.createElement('script');
+        s.src = 'https://js.tosspayments.com/v2/standard';
+        s.async = false;
+        s.onload = function() {{
+            if (typeof TossPayments === 'undefined') {{
+                console.error('토스페이먼츠 스크립트를 불러오지 못했습니다.');
                 return;
             }}
-            if (!tossPayments) {{
-                alert("결제 모듈을 불러올 수 없습니다. 페이지를 새로 고친 후 다시 시도해 주세요.");
-                return;
-            }}
+            var clientKey = "{TOSS_CLIENT_KEY}";
+            var customerKey = '{ customer_key_js }';
+            var tossPayments = TossPayments(clientKey);
+            var payment = tossPayments.payment({{ customerKey: customerKey }});
+            var paymentButton = document.getElementById('payment-button');
+            var defaultLabel = paymentButton ? paymentButton.innerHTML : '';
 
-            try {{
-                isProcessing = true;
-                paymentButton.disabled = true;
-                paymentButton.classList.add('opacity-60', 'cursor-not-allowed');
-                paymentButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 결제창 준비 중...';
-
-                const paymentAmount = Math.floor(Number({ total }));
-                const taxFreeAmount = Math.min(paymentAmount, Math.floor(Number({ tax_free })));
-                if (paymentAmount < 1) {{
-                    alert("결제 금액이 올바르지 않습니다.");
-                    isProcessing = false;
+            function resetButton() {{
+                if (paymentButton) {{
                     paymentButton.disabled = false;
                     paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
                     paymentButton.innerHTML = defaultLabel;
-                    return;
                 }}
-                
-                // orderId: 6~64자, 영문/숫자/-/_ 만 사용 (길이 여유 있게 생성)
-                var orderIdPrefix = '{ order_id_js }'.slice(0, 24);
-                var uniqueOrderId = orderIdPrefix + '_' + new Date().getTime();
-                if (uniqueOrderId.length > 64) uniqueOrderId = uniqueOrderId.slice(0, 64);
-
-                // v1: requestPayment('CARD', {{ amount: 숫자, ... }})
-                tossPayments.requestPayment('CARD', {{
-                    amount: paymentAmount,
-                    taxFreeAmount: taxFreeAmount,
-                    orderId: uniqueOrderId,
-                    orderName: '{ order_name_js }',
-                    customerEmail: '{ customer_email_js }',
-                    customerName: '{ customer_name_js }',
-                    successUrl: window.location.origin + '/payment/success',
-                    failUrl: window.location.origin + '/payment/fail'
-                }}).catch(function (error) {{
-                    var code = (error && error.code) ? error.code : '';
-                    var msg = (error && error.message) ? error.message : '처리 중 오류가 발생했습니다.';
-                    if (code === 'COMMON_ERROR') {{
-                        msg = '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
-                        if (error && error.message) msg += ' (상세: ' + error.message + ')';
-                    }} else if (code === 'INVALID_ORDER_NAME') {{
-                        msg = '주문명(orderName)이 올바르지 않습니다. 특수문자나 길이를 확인해 주세요.';
-                    }} else if (code === 'INVALID_ORDER_ID') {{
-                        msg = '주문번호(orderId)가 올바르지 않습니다. (6~64자, 영문/숫자/-/_)';
-                    }}
-                    if (error && error.code === 'USER_CANCEL') {{
-                        console.log('사용자가 결제를 취소했습니다.');
-                    }} else {{
-                        alert("결제 오류: " + msg + (code ? " (코드: " + code + ")" : ""));
-                    }}
-                    console.error('Toss requestPayment error', error);
-                    window.location.reload();
-                }}).finally(function () {{
-                    // 버튼 UI 원래 상태로 복구 (새로고침 되기 전 찰나의 순간)
-                    isProcessing = false;
-                    paymentButton.disabled = false;
-                    paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
-                    paymentButton.innerHTML = defaultLabel;
-                }});
-
-            }} catch (err) {{
-                alert('시스템 오류가 발생했습니다: ' + err.message);
-                isProcessing = false;
-                paymentButton.disabled = false;
-                paymentButton.classList.remove('opacity-60', 'cursor-not-allowed');
-                paymentButton.innerHTML = defaultLabel;
             }}
-        }});
-    }}
+
+            if (paymentButton) {{
+                paymentButton.addEventListener('click', async function() {{
+                    if (paymentButton.disabled) {{ alert("결제창을 불러오는 중입니다."); return; }}
+                    var paymentAmount = Math.floor(Number({ total }));
+                    var taxFreeAmount = Math.min(paymentAmount, Math.floor(Number({ tax_free })));
+                    if (paymentAmount < 1) {{ alert("결제 금액이 올바르지 않습니다."); return; }}
+                    var orderIdPrefix = '{ order_id_js }'.slice(0, 24);
+                    var uniqueOrderId = orderIdPrefix + '_' + new Date().getTime();
+                    if (uniqueOrderId.length > 64) uniqueOrderId = uniqueOrderId.slice(0, 64);
+
+                    paymentButton.disabled = true;
+                    paymentButton.classList.add('opacity-60', 'cursor-not-allowed');
+                    paymentButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 결제창 준비 중...';
+
+                    try {{
+                        await payment.requestPayment({{
+                            method: "CARD",
+                            amount: {{ currency: "KRW", value: paymentAmount }},
+                            taxFreeAmount: taxFreeAmount,
+                            orderId: uniqueOrderId,
+                            orderName: '{ order_name_js }',
+                            customerEmail: '{ customer_email_js }',
+                            customerName: '{ customer_name_js }',
+                            successUrl: window.location.origin + '/payment/success',
+                            failUrl: window.location.origin + '/payment/fail'
+                        }});
+                    }} catch (error) {{
+                        var code = (error && error.code) ? error.code : '';
+                        var msg = (error && error.message) ? error.message : '처리 중 오류가 발생했습니다.';
+                        if (code === 'COMMON_ERROR' && error && error.message) msg += ' (상세: ' + error.message + ')';
+                        else if (code === 'INVALID_ORDER_NAME') msg = '주문명이 올바르지 않습니다.';
+                        else if (code === 'INVALID_ORDER_ID') msg = '주문번호가 올바르지 않습니다. (6~64자)';
+                        if (code !== 'USER_CANCEL') alert("결제 오류: " + msg + (code ? " (코드: " + code + ")" : ""));
+                        console.error('Toss requestPayment error', error);
+                        window.location.reload();
+                    }} finally {{
+                        resetButton();
+                    }}
+                }});
+            }}
+        }};
+        s.onerror = function() {{ console.error('토스페이먼츠 스크립트 로드 실패'); }};
+        document.head.appendChild(s);
+    }})();
     </script>
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)

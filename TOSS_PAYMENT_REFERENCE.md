@@ -21,15 +21,18 @@
 
 ## 2. 결제창 요청 (requestPayment)
 
-- **SDK**: 토스페이먼츠 **JavaScript v1 결제창** (`https://js.tosspayments.com/v1/payment`) 사용. `TossPayments(clientKey)` 후 `requestPayment('CARD', { ... })` 호출. (v2 standard 스크립트는 결제위젯용이라 결제창 연동 시 미사용.)
+- **참고**: [토스페이먼츠 샘플 프로젝트](https://github.com/tosspayments/tosspayments-sample)(express-javascript `payment/checkout.html`) 방식을 따릅니다.
+- **SDK**: **v2** `https://js.tosspayments.com/v2/standard` — 스크립트를 **동적 로드**(`script.onload`) 후 초기화해 로드 완료 후에만 `TossPayments`·`payment()` 호출.
+- **초기화**: `TossPayments(clientKey)` → `tossPayments.payment({{ customerKey }})` (customerKey: 로그인 사용자 `u_` + userId, 2~50자).
+- **결제 요청**: `await payment.requestPayment({{ method: "CARD", amount: {{ currency: "KRW", value }}, orderId, orderName, successUrl, failUrl, customerEmail, customerName, taxFreeAmount }})` (async/await).
 
 | 문서 요구사항 | 우리 구현 (app.py `order_payment` 페이지 내 JS) |
 |---------------|------------------------------------------------|
-| **orderId** 6~64자, 영문·숫자·`-`·`_` | `order_id_js` 앞 24자 + `_` + 타임스탬프, 64자 초과 시 앞 64자만 사용 ✓ |
-| **amount** number, 금액 > 0 | `Math.floor(Number(total))`, 1원 미만이면 요청 전 중단 ✓ |
-| **orderName** 최대 100자 | `(order_name or "주문")[:100]` ✓ |
+| **orderId** 6~64자 | order_id_js 앞 24자 + `_` + 타임스탬프 ✓ |
+| **amount** 객체 | `{{ currency: "KRW", value: paymentAmount }}` ✓ |
+| **orderName** 최대 100자 | 이스케이프 후 전달 ✓ |
 | **successUrl / failUrl** | `window.location.origin + '/payment/success'`, `'/payment/fail'` ✓ |
-| customerEmail / customerName | 이스케이프 후 전달, 없으면 `order@customer.local` / `주문고객` ✓ |
+| customerEmail / customerName | 이스케이프 후 전달 ✓ |
 
 - 결제 허용 URL은 **successUrl·failUrl 파라미터로 설정** (별도 개발자센터 등록 아님).
 
