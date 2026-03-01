@@ -72,6 +72,21 @@ gunicorn --bind 0.0.0.0:$PORT --timeout 300 app:app
 
 ---
 
+## 5.5 상품 이미지가 재배포 후 사라질 때 (Render 등)
+
+Render처럼 **재배포 시 컨테이너가 새로 만들어지는** 환경에서는, 서버 디스크(`static/uploads`)에 올린 파일은 **재배포 시 전부 삭제**됩니다. DB에는 이미지 경로(`/static/uploads/...`)만 남고 실제 파일은 없어져서 상품 이미지가 안 보입니다.
+
+**해결:** **Cloudinary**를 쓰면 이미지가 클라우드에 저장되어 재배포와 무관하게 유지됩니다.
+
+1. [cloudinary.com](https://cloudinary.com)에서 무료 계정 생성 후 대시보드에서 **CLOUDINARY_URL** 확인 (형식: `cloudinary://API_KEY:API_SECRET@CLOUD_NAME`).
+2. Render **Environment**에 변수 추가: `CLOUDINARY_URL` = 위에서 복사한 값.
+3. **저장 후 재배포.** 이후부터 업로드하는 이미지는 Cloudinary에 저장됩니다.
+4. **이미 재배포로 사라진 이미지**는 DB 경로만 있고 파일이 없으므로, 해당 상품은 **관리자에서 이미지를 다시 올리거나** URL을 수정해야 합니다.
+
+`.env.example`의 `CLOUDINARY_URL=` 항목을 채우면 로컬에서도 동일하게 Cloudinary로 업로드됩니다.
+
+---
+
 ## 6. 토스페이먼츠 방화벽 (링크 복사 · IP 허용)
 
 토스페이먼츠는 **HTTPS·TLS 1.2 이상**만 지원합니다.  

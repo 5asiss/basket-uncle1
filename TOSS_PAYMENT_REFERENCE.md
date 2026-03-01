@@ -24,7 +24,7 @@
 - **참고**: [토스페이먼츠 샘플 프로젝트](https://github.com/tosspayments/tosspayments-sample)(express-javascript `payment/checkout.html`) 방식을 따릅니다.
 - **SDK**: **v2** `https://js.tosspayments.com/v2/standard` — 스크립트를 **동적 로드**(`script.onload`) 후 초기화해 로드 완료 후에만 `TossPayments`·`payment()` 호출.
 - **초기화**: `TossPayments(clientKey)` → `tossPayments.payment({{ customerKey }})` (customerKey: 로그인 사용자 `u_` + userId, 2~50자).
-- **결제 요청**: `await payment.requestPayment({{ method: "CARD", amount: {{ currency: "KRW", value }}, orderId, orderName, successUrl, failUrl, customerEmail, customerName, taxFreeAmount }})` (async/await).
+- **결제 요청**: `await payment.requestPayment({{ method: "CARD", amount: {{ currency: "KRW", value }}, orderId, orderName, successUrl, failUrl, customerEmail, customerName, taxFreeAmount, card: {{ flowMode: "DEFAULT" }} }})` (async/await). **card.flowMode: "DEFAULT"** 로 통합결제창(카드 + 카카오페이·네이버페이 등 간편결제 선택) 표시.
 
 | 문서 요구사항 | 우리 구현 (app.py `order_payment` 페이지 내 JS) |
 |---------------|------------------------------------------------|
@@ -33,6 +33,7 @@
 | **orderName** 최대 100자 | 이스케이프 후 전달 ✓ |
 | **successUrl / failUrl** | `window.location.origin + '/payment/success'`, `'/payment/fail'` ✓ |
 | customerEmail / customerName | 이스케이프 후 전달 ✓ |
+| **통합결제창(간편결제 포함)** | `card: {{ flowMode: "DEFAULT", useCardPoint: false, useAppCardOnly: false }}` ✓ |
 
 - 결제 허용 URL은 **successUrl·failUrl 파라미터로 설정** (별도 개발자센터 등록 아님).
 
@@ -92,6 +93,12 @@
 
 4. **API 키 확인**
    - 개발자센터 → **API 키** 메뉴에서 라이브 키(클라이언트 키·시크릿 키) 확인.
+
+5. **라이브 키 넣었는데 또 안 될 때 체크**
+   - **키 종류**: 개발자센터에서 **일반결제(결제창)** 용 MID를 선택했을 때 나오는 **클라이언트 키**가 `live_ck_`로 시작하는지 확인. `live_gck_`(결제위젯)만 있다면 결제창은 사용할 수 없고, 일반결제 계약/키 발급 여부를 토스에 문의해야 함.
+   - **한 세트**: Render에 넣는 `TOSS_CLIENT_KEY`와 `TOSS_SECRET_KEY`가 **같은 MID**에서 나온 한 쌍인지 확인 (클라이언트 키 ↔ 시크릿 키 매칭).
+   - **도메인**: 라이브에서 특정 도메인(basam.co.kr 등)만 차단된다면, 토스 고객센터(1544-7772)에 "일반 결제창 사용 도메인 허용" 문의.
+   - **진행 순서**: 장바구니 → 주문 확인(주소 입력) → 결제하기 → 결제 페이지 → 결제창 열기. 주소 없이 결제 페이지만 직접 열면 장바구니로 리다이렉트됨.
 
 ---
 

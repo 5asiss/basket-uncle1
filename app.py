@@ -8810,7 +8810,8 @@ def order_payment():
                             customerEmail: '{ customer_email_js }',
                             customerName: '{ customer_name_js }',
                             successUrl: window.location.origin + '/payment/success',
-                            failUrl: window.location.origin + '/payment/fail'
+                            failUrl: window.location.origin + '/payment/fail',
+                            card: {{ flowMode: "DEFAULT", useCardPoint: false, useAppCardOnly: false }}
                         }});
                     }} catch (error) {{
                         var code = (error && error.code) ? error.code : '';
