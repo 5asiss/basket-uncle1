@@ -13,7 +13,7 @@ import unicodedata
 from urllib.parse import quote
 
 import pandas as pd
-from flask import Flask, render_template_string, request, redirect, url_for, session, send_file, flash, jsonify, abort, Response
+from flask import Flask, render_template_string, request, redirect, url_for, session, send_file, flash, jsonify, abort, Response, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -91,6 +91,46 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 cloudinary_url = os.getenv("CLOUDINARY_URL", "").strip()
 if cloudinary_url:
     cloudinary.config(cloudinary_url=cloudinary_url)
+
+# 대량 업로드 제한 (배포 서버 메모리·타임아웃·다운 방지)
+BULK_IMAGE_MAX_FILES = int(os.getenv("BULK_IMAGE_MAX_FILES", "30"))
+BULK_IMAGE_MAX_BYTES_PER_FILE = int(os.getenv("BULK_IMAGE_MAX_BYTES", str(5 * 1024 * 1024)))  # 5MB
+BULK_EXCEL_MAX_ROWS = int(os.getenv("BULK_EXCEL_MAX_ROWS", "200"))
+BULK_EXCEL_MAX_BYTES = int(os.getenv("BULK_EXCEL_MAX_BYTES", str(10 * 1024 * 1024)))  # 10MB
+BULK_EXCEL_COMMIT_CHUNK = 50
+
+
+@app.route("/static/uploads/<path:filename>")
+def serve_upload_or_bulk_redirect(filename):
+    """업로드 파일 서빙. 로컬에 없으면 BulkImageMap(Cloudinary URL)로 리다이렉트해 배포 환경 404 방지."""
+    from urllib.parse import unquote
+    safe = unquote(filename)
+    safe = os.path.basename(safe).replace("\\", "/").lstrip("/")
+    if ".." in safe or not safe:
+        abort(404)
+    upload_dir = app.config["UPLOAD_FOLDER"]
+    # 하위 폴더(reviews, board 등)는 로컬만 시도
+    if "/" in filename:
+        subpath = unquote(filename).replace("\\", "/").lstrip("/")
+        if ".." in subpath:
+            abort(404)
+        full = os.path.join(upload_dir, subpath)
+        if os.path.isfile(full) and os.path.realpath(full).startswith(os.path.realpath(upload_dir)):
+            return send_from_directory(upload_dir, subpath)
+        abort(404)
+    # 루트 파일: 로컬 있으면 서빙, 없으면 BulkImageMap 조회 후 리다이렉트
+    local_path = os.path.join(upload_dir, safe)
+    if os.path.isfile(local_path):
+        return send_from_directory(upload_dir, safe)
+    row = BulkImageMap.query.filter_by(file_name=safe).first()
+    if not row:
+        for c in (safe, unicodedata.normalize("NFC", safe), unicodedata.normalize("NFD", safe)):
+            row = BulkImageMap.query.filter_by(file_name=c).first()
+            if row:
+                break
+    if row and row.url:
+        return redirect(row.url, code=302)
+    abort(404)
 
 from utils import send_mail, send_mail_with_attachment, run_backup, run_product_stock_reset, send_alimtalk_order_event, send_alimtalk_welcome
 
@@ -11675,7 +11715,7 @@ def admin_dashboard():
         {% if tab == 'bulk_register' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-teal-200 bg-teal-50/80 text-left">
                 <p class="font-black text-teal-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📦</span> 상품 대량등록</p>
-                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 채운 뒤 <b>엑셀 파일(.xlsx/.xls)만</b> 업로드하세요. 이미지는 아래 <b>「이미지 올리기」</b>로 먼저 올리거나, 서버 <code class="bg-white px-1 rounded">static/uploads/</code>에 넣고, 엑셀의 대표이미지파일명·상세이미지파일명에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=_1, 상세=_2~_10.</p>
+                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 채운 뒤 <b>엑셀 파일(.xlsx/.xls)만</b> 업로드하세요. 이미지는 아래 <b>「이미지 올리기」</b>로 먼저 올리거나, 서버 <code class="bg-white px-1 rounded">static/uploads/</code>에 넣고, 엑셀의 대표이미지파일명·상세이미지파일명에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=_1, 상세=_2~_10. <span class="text-amber-700 font-bold">한 번에 이미지 30개·파일당 5MB, 엑셀 200건·10MB 이하로 올리면 서버가 안정적입니다.</span></p>
                 <div class="flex flex-wrap items-center gap-3 mb-4">
                     <a href="/admin/product/bulk_upload_template" class="bg-white text-teal-600 border-2 border-teal-300 px-5 py-3 rounded-xl font-black text-xs shadow-sm hover:bg-teal-50 transition">📥 엑셀 업로드 양식 다운로드</a>
                 </div>
@@ -16149,68 +16189,84 @@ def admin_bulk_upload_images():
         return redirect('/')
     if request.method != 'POST':
         return redirect('/admin?tab=bulk_register')
-    files = request.files.getlist('images') or request.files.getlist('images[]')
-    upload_dir = os.path.join(app.root_path, 'static', 'uploads')
-    os.makedirs(upload_dir, exist_ok=True)
-    saved = []
-    skipped = 0
-    bulk_map_updated = 0
-    for f in files:
-        if not f or not getattr(f, 'filename', None) or (f.filename or '').strip() == '':
-            continue
-        safe_name = _bulk_safe_image_filename(f.filename)
-        if not safe_name:
-            continue
-        try:
-            path = os.path.join(upload_dir, safe_name)
-            if getattr(f, 'stream', None) and hasattr(f.stream, 'seek'):
-                try:
-                    f.stream.seek(0)
-                except Exception:
-                    pass
-            data = f.read()
-            if not data:
+    try:
+        files = request.files.getlist('images') or request.files.getlist('images[]')
+        if not files:
+            flash("저장된 이미지가 없습니다. jpg, png, gif, webp 파일을 선택해 주세요.")
+            return redirect('/admin?tab=bulk_register')
+        if len(files) > BULK_IMAGE_MAX_FILES:
+            flash(f"한 번에 최대 {BULK_IMAGE_MAX_FILES}개까지 업로드 가능합니다. {len(files)}개 대신 {BULK_IMAGE_MAX_FILES}개 이하로 나눠 올려 주세요.")
+            return redirect('/admin?tab=bulk_register')
+        upload_dir = os.path.join(app.root_path, 'static', 'uploads')
+        os.makedirs(upload_dir, exist_ok=True)
+        saved = []
+        skipped = 0
+        bulk_map_updated = 0
+        for f in files:
+            if not f or not getattr(f, 'filename', None) or (f.filename or '').strip() == '':
                 continue
-            if os.path.isfile(path):
-                skipped += 1
-                continue  # 같은 이름 이미 있으면 건너뜀
-            with open(path, 'wb') as out:
-                out.write(data)
-            saved.append(safe_name)
-            # Cloudinary 설정 시 동일 이미지를 Cloudinary에 올리고 파일명→URL 매핑 저장 (배포 환경에서 노출용)
-            if cloudinary_url:
-                try:
-                    upload_res = cloudinary.uploader.upload(
-                        data,
-                        folder="basket-uncle/bulk",
-                        public_id=None,
-                    )
-                    url = upload_res.get("secure_url") or upload_res.get("url")
-                    if url and "/upload/" in url:
-                        url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
-                    if url:
-                        existing = BulkImageMap.query.filter_by(file_name=safe_name).first()
-                        if existing:
-                            existing.url = url
-                        else:
-                            db.session.add(BulkImageMap(file_name=safe_name, url=url))
-                        bulk_map_updated += 1
-                except Exception as ce:
-                    print(f"[admin_bulk_upload_images] Cloudinary upload failed for {safe_name}: {ce}")
-        except Exception as e:
-            flash(f"이미지 저장 실패 ({f.filename}): {str(e)}")
-    if bulk_map_updated:
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            print(f"[admin_bulk_upload_images] BulkImageMap commit failed: {e}")
-    if saved:
-        flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요." + (" Cloudinary에도 반영되어 배포 서버에서도 노출됩니다." if bulk_map_updated else ""))
-    elif skipped:
-        flash(f"같은 이름의 파일이 이미 있어 {skipped}개는 건너뛰었습니다. 새 파일만 선택해 주세요.")
-    else:
-        flash("저장된 이미지가 없습니다. jpg, png, gif, webp 파일을 선택해 주세요.")
+            safe_name = _bulk_safe_image_filename(f.filename)
+            if not safe_name:
+                continue
+            try:
+                path = os.path.join(upload_dir, safe_name)
+                if getattr(f, 'stream', None) and hasattr(f.stream, 'seek'):
+                    try:
+                        f.stream.seek(0)
+                    except Exception:
+                        pass
+                data = f.read()
+                if not data:
+                    continue
+                if len(data) > BULK_IMAGE_MAX_BYTES_PER_FILE:
+                    flash(f"파일 크기 제한 초과({safe_name}). 한 파일당 최대 {BULK_IMAGE_MAX_BYTES_PER_FILE // (1024*1024)}MB까지 가능합니다.")
+                    continue
+                if os.path.isfile(path):
+                    skipped += 1
+                    continue  # 같은 이름 이미 있으면 건너뜀
+                with open(path, 'wb') as out:
+                    out.write(data)
+                saved.append(safe_name)
+                # Cloudinary 설정 시 동일 이미지를 Cloudinary에 올리고 파일명→URL 매핑 저장 (배포 환경에서 노출용)
+                if cloudinary_url:
+                    try:
+                        upload_res = cloudinary.uploader.upload(
+                            data,
+                            folder="basket-uncle/bulk",
+                            public_id=None,
+                        )
+                        url = upload_res.get("secure_url") or upload_res.get("url")
+                        if url and "/upload/" in url:
+                            url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
+                        if url:
+                            existing = BulkImageMap.query.filter_by(file_name=safe_name).first()
+                            if existing:
+                                existing.url = url
+                            else:
+                                db.session.add(BulkImageMap(file_name=safe_name, url=url))
+                            bulk_map_updated += 1
+                    except Exception as ce:
+                        print(f"[admin_bulk_upload_images] Cloudinary upload failed for {safe_name}: {ce}")
+            except Exception as e:
+                flash(f"이미지 저장 실패 ({f.filename}): {str(e)}")
+        if bulk_map_updated:
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"[admin_bulk_upload_images] BulkImageMap commit failed: {e}")
+        if saved:
+            flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요." + (" Cloudinary에도 반영되어 배포 서버에서도 노출됩니다." if bulk_map_updated else ""))
+        elif skipped:
+            flash(f"같은 이름의 파일이 이미 있어 {skipped}개는 건너뛰었습니다. 새 파일만 선택해 주세요.")
+        else:
+            flash("저장된 이미지가 없습니다. jpg, png, gif, webp 파일을 선택해 주세요.")
+    except Exception as e:
+        db.session.rollback()
+        print(f"[admin_bulk_upload_images] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        flash(f"대량 이미지 업로드 중 오류가 발생했습니다. 한 번에 {BULK_IMAGE_MAX_FILES}개 이하, 파일당 {BULK_IMAGE_MAX_BYTES_PER_FILE // (1024*1024)}MB 이하로 올려 주세요.")
     return redirect('/admin?tab=bulk_register')
 
 
@@ -16283,6 +16339,10 @@ def admin_product_bulk_upload():
     if not (fn.endswith('.xlsx') or fn.endswith('.xls')):
         flash("엑셀 파일(.xlsx 또는 .xls)만 업로드 가능합니다.")
         return redirect('/admin?tab=bulk_register')
+    # 요청 본문 크기 제한 (배포 서버 메모리·다운 방지). 대략 10MB 초과 시 거부
+    if request.content_length and request.content_length > BULK_EXCEL_MAX_BYTES:
+        flash(f"엑셀 파일이 너무 큽니다. 최대 {BULK_EXCEL_MAX_BYTES // (1024*1024)}MB까지 업로드 가능합니다.")
+        return redirect('/admin?tab=bulk_register')
     try:
         df = pd.read_excel(file)
         df.columns = df.columns.astype(str).str.strip()
@@ -16295,6 +16355,9 @@ def admin_product_bulk_upload():
         if not Category.query.first():
             flash("등록된 카테고리가 없습니다. 먼저 [카테고리] 탭에서 카테고리를 추가한 뒤 대량등록을 진행해 주세요.")
             return redirect('/admin?tab=bulk_register')
+        if len(df) > BULK_EXCEL_MAX_ROWS:
+            flash(f"한 번에 최대 {BULK_EXCEL_MAX_ROWS}건까지 처리합니다. 처음 {BULK_EXCEL_MAX_ROWS}건만 등록됩니다. 나머지는 엑셀을 나눠 올려 주세요.")
+            df = df.head(BULK_EXCEL_MAX_ROWS)
         count = 0
         missing_images = []  # (상품명, 대표파일명, [상세파일명...]) 서버에 없어서 매칭 안 된 경우
         for idx, row in df.iterrows():
@@ -16445,6 +16508,12 @@ def admin_product_bulk_upload():
             )
             db.session.add(new_p)
             count += 1
+            if count % BULK_EXCEL_COMMIT_CHUNK == 0:
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    raise
         db.session.commit()
         flash(f"{count}개 상품이 등록되었습니다.")
         if missing_images:
