@@ -64,6 +64,7 @@ def register_admin_routes(app):
         admin_event_notice_write,
         admin_event_notice_edit,
         admin_event_notice_toggle,
+        admin_event_post_delete,
         admin_email_setup,
         admin_seller_order_preview,
         admin_seller_send_manual_email,
@@ -80,6 +81,7 @@ def register_admin_routes(app):
         admin_seed_test_data,
         admin_delete_test_data,
         admin_orders_delete_all,
+        admin_orders_delete_selected,
         admin_db_reset_all,
         admin_seed_virtual_reviews,
         admin_seed_virtual_orders,
@@ -187,6 +189,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/board/event/notice/write', view_func=login_required(admin_event_notice_write), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/board/event/notice/<int:eid>/edit', view_func=login_required(admin_event_notice_edit), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/board/event/<int:eid>/notice', view_func=login_required(admin_event_notice_toggle), methods=['POST'])
+    admin_bp.add_url_rule('/admin/board/event/<int:eid>/delete', view_func=login_required(admin_event_post_delete), methods=['POST'])
     # email / seller
     admin_bp.add_url_rule('/admin/email_setup', view_func=login_required(admin_email_setup))
     admin_bp.add_url_rule('/admin/seller/order_preview', view_func=login_required(admin_seller_order_preview))
@@ -207,6 +210,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/seed_test_data', view_func=login_required(admin_seed_test_data))
     admin_bp.add_url_rule('/admin/delete_test_data', view_func=login_required(admin_delete_test_data))
     admin_bp.add_url_rule('/admin/orders/delete_all', view_func=login_required(admin_orders_delete_all), methods=['POST'])
+    admin_bp.add_url_rule('/admin/orders/delete_selected', view_func=login_required(admin_orders_delete_selected), methods=['POST'])
     admin_bp.add_url_rule('/admin/db/reset_all', view_func=login_required(admin_db_reset_all), methods=['POST'])
     admin_bp.add_url_rule('/admin/seed_virtual_reviews', view_func=login_required(admin_seed_virtual_reviews))
     admin_bp.add_url_rule('/admin/seed_virtual_orders', view_func=login_required(admin_seed_virtual_orders))

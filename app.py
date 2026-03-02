@@ -180,7 +180,7 @@ def internal_error(e):
 from models import (
     CategorySettlement, User, Category, Product, Cart, Order, OrderItem, OrderItemLog,
     UserMessage, MessageTemplate, PushSubscription, RestaurantRequest, RestaurantRecommend,
-    RestaurantVote, PartnershipInquiry, FreeBoard, DeliveryRequest, DeliveryRequestVote,
+    RestaurantVote, PartnershipInquiry, FreeBoard, FreeBoardAttachment, DeliveryRequest, DeliveryRequestVote,
     BoardComment, DailyStat, SellerOrderConfirmation, EmailOrderLineStatus, OrderViewLink, SitePopup, DeliveryZone,
     MainDisplayConfig,
     MemberGradeConfig, PointConfig, SignupWelcomeConfig, PointLog, MarketingCost, Review, ReviewVote, UserConsent, Settlement,
@@ -1204,6 +1204,63 @@ def save_board_image(file):
         return None
 
 
+ALLOWED_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".avi")
+MAX_VIDEO_SIZE_MB = 100
+
+
+def _is_allowed_video_filename(filename):
+    if not filename or not filename.strip():
+        return False
+    ext = os.path.splitext(secure_filename(filename))[1].lower()
+    return ext in ALLOWED_VIDEO_EXTENSIONS
+
+
+def save_free_board_video(file):
+    """자유게시판 동영상 저장. 로컬: static/uploads/board, Cloudinary 설정 시 resource_type=video."""
+    if not file or not getattr(file, 'filename', None) or file.filename == '':
+        return None
+    if not _is_allowed_video_filename(file.filename):
+        return None
+    try:
+        if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
+            try:
+                file.stream.seek(0)
+            except Exception:
+                pass
+        file_bytes = file.read()
+        if not file_bytes:
+            return None
+        size_mb = len(file_bytes) / (1024 * 1024)
+        if size_mb > MAX_VIDEO_SIZE_MB:
+            return None
+        fn = (file.filename or '').strip()
+        ext = os.path.splitext(secure_filename(fn))[1].lower() or '.mp4'
+        if ext not in ALLOWED_VIDEO_EXTENSIONS:
+            ext = '.mp4'
+        new_filename = f"free_video_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        if cloudinary_url:
+            try:
+                upload_res = cloudinary.uploader.upload(
+                    file_bytes,
+                    folder="basket-uncle/board",
+                    resource_type="video",
+                )
+                url = upload_res.get("secure_url") or upload_res.get("url")
+                if url:
+                    return url
+            except Exception as ce:
+                print(f"[save_free_board_video] Cloudinary video upload failed: {ce}")
+        board_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'board')
+        os.makedirs(board_folder, exist_ok=True)
+        save_path = os.path.join(board_folder, new_filename)
+        with open(save_path, 'wb') as f:
+            f.write(file_bytes)
+        return f"/static/uploads/board/{new_filename}"
+    except Exception as e:
+        print(f"[save_free_board_video] ERROR: {e}")
+        return None
+
+
 def check_admin_permission(category_name=None):
     """관리자 권한 체크"""
     if not current_user.is_authenticated: return False
@@ -1702,28 +1759,35 @@ FOOTER_HTML = """
                     <p id="admin-shortcut-tagline" class="text-xs text-amber-400/90 font-semibold tracking-wide cursor-pointer select-none">송도동 로컬 신선식품 직송 마켓</p>
                 </div>
                 <div class="flex flex-col md:items-end gap-4 w-full md:w-auto">
-                    <p class="text-stone-300 font-bold text-sm tracking-wide">Customer Center</p>
-                    <div class="flex flex-wrap md:justify-end gap-3 items-center">
-                        <a href="http://pf.kakao.com/_AIuxkn" target="_blank" class="bg-[#FEE500] text-stone-900 px-5 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-[1.02] transition">
-                            <i class="fas fa-comment"></i> 카카오톡 문의
-                        </a>
-                        <span class="text-lg font-extrabold text-white">1666-8320</span>
-                    </div>
-                    <p class="text-[11px] text-stone-500 font-medium">평일 09:00 ~ 18:00 (점심 12:00 ~ 13:00)</p>
-                    <div class="flex flex-col sm:flex-row sm:items-center gap-3 pt-2 border-t border-stone-700/50 mt-2 w-full md:w-auto">
-                        <button type="button" id="pwa-footer-add-home-btn" class="touch-target inline-flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-500 text-white px-4 py-2.5 rounded-xl font-bold text-xs transition shrink-0">
-                            <i class="fas fa-plus-square"></i> 홈화면에 바로가기 추가
-                        </button>
-                        <p class="text-[11px] text-stone-500 font-medium max-w-xs leading-relaxed">
-                            <span class="text-stone-300 font-semibold">알림 설정 안내</span><br>
-                            홈 화면에 추가 후 마이페이지에서 <strong>알림 켜기</strong>를 누르면 배송정보와 이벤트 소식을 푸시 알림으로 받아보실 수 있어요.<br>
-                            <span class="text-stone-400 font-semibold">설치방법</span> Android: Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong> / iOS: Safari <strong>공유</strong> → <strong>홈 화면에 추가</strong>
-                        </p>
+                    <div class="grid grid-cols-1 md:grid-cols-[auto,1fr] gap-4 md:gap-8 w-full md:w-auto items-start">
+                        <div class="space-y-2">
+                            <p class="text-stone-300 font-bold text-sm tracking-wide">Customer Center</p>
+                            <div class="flex flex-col sm:flex-row sm:flex-wrap md:flex-col md:items-end gap-2">
+                                <a href="https://open.kakao.com/o/gzDYTNZh" target="_blank" rel="noopener" class="bg-[#FEE500] text-stone-900 px-5 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-[1.02] transition">
+                                    <i class="fas fa-comments"></i> 오픈채팅
+                                </a>
+                                <a href="http://pf.kakao.com/_AIuxkn" target="_blank" class="bg-[#FEE500] text-stone-900 px-5 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg hover:shadow-xl hover:scale-[1.02] transition">
+                                    <i class="fas fa-comment"></i> 고객센터
+                                </a>
+                                <span class="text-lg font-extrabold text-white mt-1 md:text-right">1666-8320</span>
+                                <p class="text-[11px] text-stone-500 font-medium md:text-right">평일 09:00 ~ 18:00 (점심 12:00 ~ 13:00)</p>
+                            </div>
+                        </div>
+                        <div class="border-t border-stone-700/50 pt-3 md:pt-0 md:border-t-0 md:border-l md:border-stone-700/50 md:pl-6">
+                            <button type="button" id="pwa-footer-add-home-btn" class="touch-target inline-flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-500 text-white px-4 py-2.5 rounded-xl font-bold text-xs transition shrink-0 mb-2">
+                                <i class="fas fa-plus-square"></i> 홈화면에 바로가기 추가
+                            </button>
+                            <p class="text-[11px] text-stone-500 font-medium max-w-xs leading-relaxed md:text-right md:max-w-sm">
+                                <span class="text-stone-300 font-semibold">알림 설정 안내</span><br>
+                                홈 화면에 추가 후 마이페이지에서 <strong>알림 켜기</strong>를 누르면 배송정보와 이벤트 소식을 푸시 알림으로 받아보실 수 있어요.<br>
+                                <span class="text-stone-400 font-semibold">설치방법</span> Android: Chrome <strong>메뉴(⋮)</strong> → <strong>홈 화면에 추가</strong> / iOS: Safari <strong>공유</strong> → <strong>홈 화면에 추가</strong>
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <div class="flex flex-wrap gap-x-8 gap-y-2 mb-10 text-xs font-semibold">
+            <div class="flex flex-wrap gap-x-8 gap-y-2 mb-10 text-xs font-semibold items-center">
                 <a href="javascript:void(0)" onclick="openUncleModal('terms')" class="text-stone-500 hover:text-white transition">이용약관</a>
                 <a href="javascript:void(0)" onclick="openUncleModal('privacy')" class="text-stone-500 hover:text-white transition">개인정보처리방침</a>
                 <a href="javascript:void(0)" onclick="openUncleModal('agency')" class="text-stone-500 hover:text-white transition">이용 안내</a>
@@ -3186,14 +3250,27 @@ def index():
     border-radius: 2px;
 }
 .page-main .hero-desc {
-    font-size: clamp(0.8rem, 1.8vw, 1.15rem);
-    color: rgba(226, 232, 240, 0.85);
-    line-height: 1.6;
-    max-width: 36rem;
+    font-size: clamp(0.8rem, 1.7vw, 1.1rem);
+    color: rgba(226, 232, 240, 0.9);
+    line-height: 1.7;
+    max-width: 34rem;
     margin: 0 auto 1.5rem;
-    font-weight: 600;
+    font-weight: 500;
 }
 @media (min-width: 768px) { .page-main .hero-desc { margin-bottom: 2.5rem; } }
+@media (max-width: 640px) {
+    .page-main .hero-wrap {
+        padding: 3.5rem 1.5rem 4.5rem;
+        min-height: auto;
+    }
+    .page-main .hero-inner h1 {
+        font-size: 1.5rem;
+        line-height: 1.5;
+    }
+    .page-main .hero-inner p {
+        font-size: 0.8rem;
+    }
+}
 .page-main .hero-desc .highlight { color: #e2e8f0; text-decoration: underline; text-underline-offset: 6px; text-decoration-color: rgba(45, 212, 191, 0.8); }
 .page-main .hero-cta {
     display: inline-flex;
@@ -3224,17 +3301,27 @@ def index():
 }
 .page-main .hero-link:hover { color: #fff; border-color: rgba(255,255,255,0.5); }
 .page-main #products {
-    max-width: 100%;
+    max-width: 1120px;
     margin: 0 auto;
-    padding: 1rem 0.75rem clamp(3rem, 8vw, 5rem);
+    padding: clamp(3.5rem, 7vw, 5rem) 1.5rem clamp(5rem, 9vw, 6rem);
     box-sizing: border-box;
 }
-@media (min-width: 640px) { .page-main #products { padding-left: 1rem; padding-right: 1rem; } }
+@media (min-width: 640px) {
+    .page-main #products {
+        padding-left: 2rem;
+        padding-right: 2rem;
+    }
+}
 @media (min-width: 1024px) {
-    .page-main #products { max-width: 80rem; padding: 3rem 2rem 5rem; padding-left: 2.5rem; padding-right: 2.5rem; }
+    .page-main #products {
+        max-width: 1180px;
+        padding: clamp(4rem, 7vw, 5.5rem) 3rem clamp(5.5rem, 8vw, 6.5rem);
+    }
 }
 @media (min-width: 1280px) {
-    .page-main #products { padding: clamp(3rem, 8vw, 5rem) 3rem; padding-left: 3rem; padding-right: 3rem; }
+    .page-main #products {
+        max-width: 1240px;
+    }
 }
 .page-main .product-card .p-3 { }
 @media (max-width: 767px) {
@@ -3252,14 +3339,14 @@ def index():
     .page-main .product-card .price { font-size: 1.25rem; }
 }
 .page-main .section-title {
-    font-size: clamp(1.15rem, 2.2vw, 1.6rem);
-    font-weight: 900;
-    color: #1c1917;
-    letter-spacing: -0.02em;
+    font-size: clamp(1.1rem, 2vw, 1.5rem);
+    font-weight: 700;
+    color: #111827;
+    letter-spacing: -0.01em;
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-bottom: 1rem;
+    margin-bottom: 1.25rem;
 }
 .page-main .section-title .bar { width: 4px; height: 1.5rem; border-radius: 2px; flex-shrink: 0; }
 .page-main .section-title.bar-orange .bar { background: linear-gradient(180deg, #fb923c, #ea580c); }
@@ -3278,14 +3365,22 @@ def index():
 .page-main .review-card .review-meta { font-size: 0.5rem; }
 .page-main .review-card .review-content { font-size: 0.6rem; line-height: 1.3; }
 .page-main .product-card {
-    background: #fff;
-    border-radius: 1.75rem;
-    border: 1px solid #f1f5f9;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.35s ease, border-color 0.25s;
+    background: #ffffff;
+    border-radius: 1.5rem;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 14px 35px rgba(15, 23, 42, 0.04);
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease, border-color 0.25s;
 }
-.page-main .product-card:hover { transform: translateY(-6px); box-shadow: 0 20px 50px rgba(0,0,0,0.08); border-color: #d6d3d1; }
-.page-main .product-card .price { font-weight: 900; color: #0f766e; letter-spacing: -0.02em; }
+.page-main .product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 22px 50px rgba(15, 23, 42, 0.07);
+    border-color: #d1d5db;
+}
+.page-main .product-card .price {
+    font-weight: 700;
+    color: #111827;
+    letter-spacing: -0.02em;
+}
 .page-main .product-card .add-btn {
     min-width: 44px;
     min-height: 44px;
@@ -3310,48 +3405,51 @@ def index():
 <div class="page-main">
 <div class="hero-wrap">
     <div class="hero-inner">
-        <span class="hero-label">Direct Delivery & Local Fresh Market</span>
-        <h1 class="hero-title">
-            당일 경매된 신선한 농산물을 당일 배송해드립니다.
+        <span class="text-[11px] md:text-xs tracking-[.16em] uppercase text-slate-100 block mb-2">Bright Local Fresh Delivery</span>
+        <h1 class="text-2xl md:text-3xl lg:text-4xl font-semibold text-white leading-snug md:leading-snug mb-3">
+            엄선된 제철 농산물,<br class="hidden md:block">당일 배송으로 가장 신선하게 전해드립니다.
         </h1>
-        <div class="hero-divider"></div>
-        <p class="hero-desc">
-            <span class="highlight">엄선된 신선식품을 직접 소싱하여 당일 배송하는 로컬 편집샵</span>입니다.
+        <p class="text-[13px] md:text-sm text-slate-300 mt-1 mb-6 max-w-2xl">
+            송도 지역을 위한 맞춤형 서비스, 효율적인 유통시스템으로 비용을 최소화하고, 최상의 품질을 유지합니다.
         </p>
-        <div class="flex flex-col md:flex-row justify-center items-center gap-4 md:gap-6">
-            <a href="#products" class="hero-cta">오늘의 신선상품 보기</a>
-            <a href="/about" class="hero-link py-2 min-h-[44px] inline-flex items-center justify-center md:min-h-0 md:py-0">바구니삼촌이란? <i class="fas fa-arrow-right ml-2"></i></a>
+        <div class="flex flex-col md:flex-row justify-center items-center gap-3 md:gap-4">
+            <a href="#products" class="inline-flex items-center justify-center px-5 md:px-6 py-3 rounded-full bg-gray-900 text-white text-sm md:text-base font-medium hover:bg-black transition">
+                오늘의 신선상품 보기
+            </a>
+            <a href="/about" class="inline-flex items-center justify-center px-4 py-2 text-[13px] md:text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-full transition">
+                바구니삼촌이란?
+            </a>
         </div>
     </div>
 </div>
 
 <div id="products">
-    <!-- 카테고리 바로가기 (기능별/카테고리별) - 표시 크기 축소 -->
+    <!-- 카테고리 바로가기 (기능별/카테고리별) -->
     <section class="mb-6">
         <div class="flex justify-between items-end border-b border-slate-100 pb-2 mb-3">
-            <h2 class="section-title bar-green text-base md:text-lg"><span class="bar"></span> 카테고리</h2>
+            <h2 class="text-sm md:text-base font-semibold text-gray-900">카테고리</h2>
         </div>
         <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2 md:gap-3">
             {% for cat, prods in grouped_products.items() %}
-            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-md active:scale-[0.98] transition-all text-center touch-manipulation">
-                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-teal-50 flex items-center justify-center text-teal-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-large"></i></span>
-                <span class="text-[10px] md:text-xs font-black text-slate-700 leading-tight line-clamp-2">{{ cat.name }}</span>
-                <span class="text-[9px] text-slate-400 font-bold mt-0.5">{{ prods|length }}종</span>
+            <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-slate-100 bg-white hover:border-gray-900 hover:border-opacity-20 hover:shadow-sm active:scale-[0.99] transition-all text-center touch-manipulation">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-gray-50 flex items-center justify-center text-gray-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-large"></i></span>
+                <span class="text-[10px] md:text-xs font-medium text-slate-800 leading-tight line-clamp-2">{{ cat.name }}</span>
+                <span class="text-[9px] text-slate-400 font-normal mt-0.5">{{ prods|length }}종</span>
             </a>
             {% endfor %}
-            <a href="/category/오늘마감" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-red-100 bg-red-50/50 hover:shadow-md active:scale-[0.98] transition-all text-center touch-manipulation">
-                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-600 text-base md:text-lg mb-1.5"><i class="fas fa-clock"></i></span>
-                <span class="text-[10px] md:text-xs font-black text-red-800">오늘 마감</span>
+            <a href="/category/오늘마감" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-slate-200 bg-slate-50 hover:border-gray-900 hover:border-opacity-20 hover:bg-slate-100 active:scale-[0.99] transition-all text-center touch-manipulation">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-base md:text-lg mb-1.5"><i class="fas fa-clock"></i></span>
+                <span class="text-[10px] md:text-xs font-medium text-slate-800">오늘 마감</span>
             </a>
-            <a href="/category/최신상품" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-blue-100 bg-blue-50/50 hover:shadow-md active:scale-[0.98] transition-all text-center touch-manipulation">
-                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 text-base md:text-lg mb-1.5"><i class="fas fa-star"></i></span>
-                <span class="text-[10px] md:text-xs font-black text-blue-800">최신 상품</span>
+            <a href="/category/최신상품" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-slate-200 bg-slate-50 hover:border-gray-900 hover:border-opacity-20 hover:bg-slate-100 active:scale-[0.99] transition-all text-center touch-manipulation">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-base md:text-lg mb-1.5"><i class="fas fa-star"></i></span>
+                <span class="text-[10px] md:text-xs font-medium text-slate-800">최신 상품</span>
             </a>
             {% if has_more_categories %}
-            <a href="/categories" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 hover:border-teal-300 hover:bg-teal-50/50 active:scale-[0.98] transition-all text-center col-span-2 sm:col-span-2 md:col-span-2 touch-manipulation">
-                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-teal-100 flex items-center justify-center text-teal-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-list"></i></span>
-                <span class="text-[10px] md:text-xs font-black text-slate-700">카테고리 전체보기</span>
-                <span class="text-[9px] text-slate-400 font-bold mt-0.5">총 {{ total_categories_count }}개</span>
+            <a href="/categories" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 hover:border-gray-900 hover:border-opacity-20 hover:bg-slate-100 active:scale-[0.99] transition-all text-center col-span-2 sm:col-span-2 md:col-span-2 touch-manipulation">
+                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-base md:text-lg mb-1.5"><i class="fas fa-th-list"></i></span>
+                <span class="text-[10px] md:text-xs font-medium text-slate-800">카테고리 전체보기</span>
+                <span class="text-[9px] text-slate-400 font-normal mt-0.5">총 {{ total_categories_count }}개</span>
             </a>
             {% endif %}
         </div>
@@ -3360,27 +3458,27 @@ def index():
     {% if closing_today %}
     <section class="mb-10">
         <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4 gap-2 flex-wrap">
-            <h2 class="section-title bar-orange"><span class="bar"></span> 🔥 오늘 마감 임박</h2>
-            <a href="/category/오늘마감" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition min-h-[44px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
+            <h2 class="text-sm md:text-base font-semibold text-gray-900">오늘 마감 임박</h2>
+            <a href="/category/오늘마감" class="text-xs md:text-sm font-medium text-stone-400 hover:text-gray-900 flex items-center gap-1 transition min-h-[32px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
             {% for p in closing_today %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
-            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-red-50 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
-                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-full font-medium">판매마감</div>{% endif %}
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                     <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-1" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}</h3>
-                    <p class="text-[9px] text-slate-400 font-bold mb-1">
+                    <p class="countdown-timer text-[9px] md:text-[11px] font-medium text-red-500 mb-1" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
+                    <h3 class="font-semibold text-slate-900 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}</h3>
+                    <p class="text-[9px] text-slate-400 font-normal mb-1">
                         {{ p.spec or '일반' }}
                         {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
                     </p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
                     <div class="mt-auto flex justify-between items-end gap-2">
-                        <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                        <span class="price text-[12px] md:text-lg font-semibold text-gray-900">{{ "{:,}".format(p.price) }}원</span>
                         {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                     </div>
                 </div>
@@ -3393,32 +3491,32 @@ def index():
     {% if random_latest %}
     <section class="mb-10">
         <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4 gap-2 flex-wrap">
-            <h2 class="section-title bar-green"><span class="bar"></span> ✨ 최신 상품</h2>
-            <a href="/category/최신상품" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition min-h-[44px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
+            <h2 class="text-sm md:text-base font-semibold text-gray-900">최신 상품</h2>
+            <a href="/category/최신상품" class="text-xs md:text-sm font-medium text-stone-400 hover:text-gray-900 flex items-center gap-1 transition min-h-[32px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
             {% for p in random_latest %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
-            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
-                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-full font-medium">판매마감</div>{% endif %}
                 {% if p.description %}
                 <div class="absolute top-2 left-0 z-20">
-                    <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
+                    <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-medium text-white shadow-sm rounded-r-full bg-gray-900"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
                 </div>
                 {% endif %}
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                     <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
-                    <p class="text-[9px] text-slate-400 font-bold mb-1">
+                    <p class="countdown-timer text-[9px] md:text-[11px] font-medium text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
+                    <h3 class="font-semibold text-slate-900 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-gray-500 font-medium">· {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-normal mb-1">
                         {{ p.spec or '일반' }}
                         {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
                     </p>
                     {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
                     <div class="mt-auto flex justify-between items-end gap-2">
-                        <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                        <span class="price text-[12px] md:text-lg font-semibold text-gray-900">{{ "{:,}".format(p.price) }}원</span>
                         {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                     </div>
                 </div>
@@ -3803,40 +3901,40 @@ def about_page():
     """제공된 HTML 형식을 반영한 바구니삼촌 브랜드 소개 페이지"""
     content = """
     <style>
-        /* 소개 페이지 전용 스타일 */
+        /* 소개 페이지 전용 스타일 (Apple-style, 심플 & 타이포 중심) */
         .about-body {
             margin: 0;
-            background-color: #f9fafb;
+            background-color: #ffffff;
             color: #111827;
             line-height: 1.7;
-            font-family: "Pretendard", "Noto Sans KR", sans-serif;
+            font-family: "Pretendard", "Noto Sans KR", system-ui, -apple-system, BlinkMacSystemFont, "Noto Sans KR", sans-serif;
         }
 
         .about-container {
-            max-width: 1100px;
+            max-width: 960px;
             margin: 0 auto;
-            padding: 80px 20px;
-            text-align: left; /* 왼쪽 정렬 유지 */
+            padding: 88px 20px 96px;
+            text-align: left;
         }
 
         .about-container h1 {
-            font-size: 42px;
+            font-size: 44px;
             font-weight: 800;
             margin-bottom: 24px;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.03em;
         }
 
         .about-container h2 {
-            font-size: 28px;
-            font-weight: 800;
-            margin: 80px 0 24px;
+            font-size: 26px;
+            font-weight: 700;
+            margin: 72px 0 20px;
             color: #111827;
         }
 
         .about-container p {
-            font-size: 17px;
-            margin-bottom: 20px;
-            color: #374151;
+            font-size: 16px;
+            margin-bottom: 18px;
+            color: #4b5563;
         }
 
         .about-container b {
@@ -3844,118 +3942,122 @@ def about_page():
         }
 
         .about-highlight {
-            font-weight: 700;
+            font-weight: 600;
             color: #059669;
         }
 
         /* Core Value Boxes */
         .core-values {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-            margin-top: 40px;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+            margin-top: 32px;
         }
 
         .value-box {
-            background: #ffffff;
-            border-radius: 20px;
-            padding: 40px;
+            background: #f9fafb;
+            border-radius: 18px;
+            padding: 32px 28px;
             text-align: center;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-            border: 1px solid #f3f4f6;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.04);
+            border: 1px solid #e5e7eb;
         }
 
         .value-box span {
             display: block;
-            font-size: 14px;
-            font-weight: 700;
+            font-size: 13px;
+            font-weight: 600;
             color: #6b7280;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             text-transform: uppercase;
-            letter-spacing: 0.1em;
+            letter-spacing: 0.12em;
         }
 
         .value-box strong {
-            font-size: 48px;
-            color: #059669;
-            font-weight: 900;
-            font-style: italic;
+            font-size: 40px;
+            color: #111827;
+            font-weight: 800;
+            letter-spacing: -0.05em;
         }
 
         /* Premium 6PL Model Section */
         .premium-section {
-            margin-top: 100px;
-            background: #111827;
-            color: #ffffff;
-            border-radius: 32px;
-            padding: 60px 50px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin-top: 88px;
+            background: radial-gradient(circle at top left, #111827 0, #020617 55%, #020617 100%);
+            color: #f9fafb;
+            border-radius: 28px;
+            padding: 56px 40px;
+            box-shadow: 0 30px 80px rgba(15, 23, 42, 0.6);
         }
 
         .premium-section h2 {
-            color: #ffffff;
+            color: #f9fafb;
             margin-top: 0;
-            font-size: 32px;
+            font-size: 30px;
+            letter-spacing: -0.02em;
         }
 
         .premium-list {
-            margin-top: 32px;
+            margin-top: 28px;
             padding: 0;
         }
 
         .premium-list li {
             list-style: none;
-            font-size: 19px;
-            margin-bottom: 18px;
+            font-size: 18px;
+            margin-bottom: 16px;
             position: relative;
-            padding-left: 32px;
+            padding-left: 30px;
             font-weight: 500;
-            color: #d1d5db;
+            color: #e5e7eb;
         }
 
         .premium-list li::before {
-            content: "✔";
+            content: "";
             position: absolute;
             left: 0;
-            color: #10b981;
-            font-weight: 900;
+            top: 0;
+            color: #22c55e;
+            font-weight: 700;
+            font-size: 16px;
         }
 
         .premium-list li b {
-            color: #ffffff;
+            color: #f9fafb;
         }
 
         /* Call To Action Button */
         .about-cta {
             text-align: center;
-            margin-top: 100px;
-            padding-bottom: 40px;
+            margin-top: 80px;
+            padding-bottom: 32px;
         }
 
         .about-cta a {
             display: inline-block;
-            padding: 20px 48px;
-            font-size: 20px;
-            font-weight: 800;
-            background: #059669;
+            padding: 18px 44px;
+            font-size: 18px;
+            font-weight: 700;
+            background: #111827;
             color: #ffffff;
             border-radius: 999px;
             text-decoration: none;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 20px rgba(5, 150, 105, 0.2);
+            transition: transform 0.22s ease, box-shadow 0.22s ease, background-color 0.22s ease;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
         }
 
         .about-cta a:hover {
-            background: #047857;
-            transform: translateY(-3px);
-            box-shadow: 0 15px 30px rgba(5, 150, 105, 0.3);
+            background: #020617;
+            transform: translateY(-2px);
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.55);
         }
 
         @media (max-width: 640px) {
-            .about-container { padding: 60px 24px; }
+            .about-container { padding: 60px 20px 72px; }
             .about-container h1 { font-size: 32px; }
-            .premium-section { padding: 40px 30px; }
-            .value-box strong { font-size: 38px; }
+            .premium-section { padding: 40px 24px; border-radius: 24px; }
+            .value-box { padding: 28px 22px; }
+            .value-box strong { font-size: 34px; }
         }
     </style>
 
@@ -3963,7 +4065,7 @@ def about_page():
         <div class="about-container">
     <h1>바구니 삼촌몰</h1>
     <p>
-        바구니 삼촌몰은 <span class="about-highlight">엄선된 신선식품을 직접 소싱하여 송도 지역 당일 배송하는 로컬 편집샵</span>입니다.
+        바구니 삼촌몰은 엄선된 신선식품을 직접 소싱하여 당일 배송해 드립니다.
     </p>
     <p>
         우리는 기존 유통의 불필요한 단계를 제거하기 위해 <b>직접 소싱 · 검수 · 당일 배송</b>을 하나의 시스템으로 통합했습니다.
@@ -4823,7 +4925,7 @@ def board_partnership_detail(pid):
 # ---------- 자유게시판 ----------
 @app.route('/board/free', methods=['GET', 'POST'])
 def board_free():
-    """자유게시판 목록 및 글쓰기 (아이디어·제안 등 자유 입력)"""
+    """자유게시판 목록 및 글쓰기 (아이디어·제안 등 자유 입력). 사진 여러 장·동영상 첨부 가능."""
     if request.method == 'POST':
         if not current_user.is_authenticated:
             flash("로그인 후 작성할 수 있습니다.")
@@ -4833,13 +4935,42 @@ def board_free():
         if not title:
             flash("제목을 입력해 주세요.")
             return redirect(url_for('board_free'))
-        db.session.add(FreeBoard(
+        post = FreeBoard(
             user_id=current_user.id,
             user_name=current_user.name or current_user.email or '회원',
             title=title[:200],
             content=content or None
-        ))
+        )
+        db.session.add(post)
         db.session.commit()
+        db.session.refresh(post)
+        sort_order = 0
+        for f in request.files.getlist('images') or []:
+            if not f or not f.filename:
+                continue
+            url = save_board_image(f)
+            if url:
+                db.session.add(FreeBoardAttachment(
+                    free_board_id=post.id,
+                    file_url=url,
+                    file_type='image',
+                    sort_order=sort_order
+                ))
+                sort_order += 1
+        for f in request.files.getlist('videos') or []:
+            if not f or not f.filename:
+                continue
+            url = save_free_board_video(f)
+            if url:
+                db.session.add(FreeBoardAttachment(
+                    free_board_id=post.id,
+                    file_url=url,
+                    file_type='video',
+                    sort_order=sort_order
+                ))
+                sort_order += 1
+        if sort_order > 0:
+            db.session.commit()
         flash("글이 등록되었습니다.")
         return redirect(url_for('board_free'))
     notice_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=True).order_by(FreeBoard.id.desc()).all()
@@ -4857,9 +4988,17 @@ def board_free():
             <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">자유게시판 <span class="text-sm font-bold text-gray-500">전체 {{ total }}건</span></h1>
             <p class="text-gray-500 text-sm mb-6">아이디어, 제안, 하고 싶은 말 등을 자유롭게 남겨 주세요.</p>
             <div class="flex flex-col sm:flex-row gap-4 mb-8">
-                <form method="POST" action="/board/free" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm flex-1">
+                <form method="POST" action="/board/free" enctype="multipart/form-data" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm flex-1">
                     <div class="mb-4"><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="제목을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
                     <div class="mb-4"><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="4" placeholder="아이디어, 제안, 하고 싶은 말 등 자유롭게 작성해 주세요." class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></textarea></div>
+                    <div class="mb-4">
+                        <label class="block text-[10px] text-gray-500 uppercase mb-1">사진 (여러 장 선택 가능)</label>
+                        <input type="file" name="images" multiple accept="image/*" class="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-[10px] text-gray-500 uppercase mb-1">동영상 (여러 개 선택 가능, mp4/webm 권장, 최대 {{ max_video_mb }}MB)</label>
+                        <input type="file" name="videos" multiple accept="video/*" class="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm">
+                    </div>
                     <button type="submit" class="w-full py-3 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">글쓰기</button>
                 </form>
             </div>
@@ -4888,7 +5027,7 @@ def board_free():
             {% endif %}
         </div>
         """ + FOOTER_HTML,
-        posts=posts, total=total, page=page, total_pages=total_pages
+        posts=posts, total=total, page=page, total_pages=total_pages, max_video_mb=MAX_VIDEO_SIZE_MB
     )
 
 
@@ -4901,6 +5040,7 @@ def board_free_detail(fid):
     prev_id = ids[idx - 1] if idx > 0 else None
     next_id = ids[idx + 1] if idx >= 0 and idx + 1 < len(ids) else None
     board_comments = BoardComment.query.filter_by(board_type='free', post_id=p.id).order_by(BoardComment.id.asc()).all()
+    attachments = FreeBoardAttachment.query.filter_by(free_board_id=p.id).order_by(FreeBoardAttachment.sort_order.asc(), FreeBoardAttachment.id.asc()).all()
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-3xl mx-auto px-4 py-12">
@@ -4915,6 +5055,26 @@ def board_free_detail(fid):
                 <h1 class="text-xl md:text-2xl font-black text-gray-900 mb-2">{{ p.title }}</h1>
                 <p class="text-[10px] text-gray-400 mb-4">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '익명' }}</p>
                 <div class="text-gray-700 text-sm whitespace-pre-wrap">{{ p.content or '' }}</div>
+                {% if attachments %}
+                <div class="mt-6 pt-6 border-t border-gray-100">
+                    <p class="text-[10px] text-gray-500 uppercase mb-3 font-black">첨부 (사진 · 동영상)</p>
+                    <div class="space-y-4">
+                        {% for att in attachments %}
+                        {% if att.file_type == 'image' %}
+                        <div class="rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
+                            <a href="{{ att.file_url }}" target="_blank" rel="noopener" class="block">
+                                <img src="{{ att.file_url }}" alt="첨부 사진" class="w-full h-auto max-h-[70vh] object-contain">
+                            </a>
+                        </div>
+                        {% elif att.file_type == 'video' %}
+                        <div class="rounded-xl overflow-hidden border border-gray-100 bg-black">
+                            <video src="{{ att.file_url }}" controls class="w-full" preload="metadata">지원되지 않는 동영상 형식입니다.</video>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
                 <div class="mt-8 pt-6 border-t border-gray-200">
                     <p class="text-[10px] text-gray-500 uppercase mb-3 font-black">댓글 ({{ board_comments|length }})</p>
                     {% for c in board_comments %}
@@ -4937,7 +5097,7 @@ def board_free_detail(fid):
             </div>
         </div>
         """ + FOOTER_HTML,
-        p=p, prev_id=prev_id, next_id=next_id, board_comments=board_comments
+        p=p, prev_id=prev_id, next_id=next_id, board_comments=board_comments, attachments=attachments
     )
 
 
@@ -4961,6 +5121,37 @@ def board_event_post_add():
     db.session.commit()
     flash('글이 등록되었습니다.')
     return redirect(url_for('board_event'))
+
+
+@app.route('/board/event/<int:eid>')
+def board_event_detail(eid):
+    """이벤트 게시판 글 상세 보기."""
+    p = EventBoardPost.query.get_or_404(eid)
+    ids = [x.id for x in EventBoardPost.query.order_by(EventBoardPost.id.desc()).all()]
+    idx = ids.index(eid) if eid in ids else -1
+    prev_id = ids[idx - 1] if idx > 0 else None
+    next_id = ids[idx + 1] if idx >= 0 and idx + 1 < len(ids) else None
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-3xl mx-auto px-4 py-12">
+            <a href="/board/event" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 목록</a>
+            {% if prev_id or next_id %}
+            <div class="flex justify-between gap-4 mb-4 py-3 border-y border-gray-100 text-sm">
+                {% if prev_id %}<a href="/board/event/{{ prev_id }}" class="text-teal-600 hover:underline font-bold">← 이전글</a>{% else %}<span class="text-gray-300">← 이전글</span>{% endif %}
+                {% if next_id %}<a href="/board/event/{{ next_id }}" class="text-teal-600 hover:underline font-bold">다음글 →</a>{% else %}<span class="text-gray-300">다음글 →</span>{% endif %}
+            </div>
+            {% endif %}
+            <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                <h1 class="text-xl md:text-2xl font-black text-gray-900 mb-2">{% if post.is_notice %}<span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{% endif %}{{ post.title }}</h1>
+                <p class="text-[10px] text-gray-400 mb-4">{{ post.created_at.strftime('%Y.%m.%d %H:%M') if post.created_at else '' }} · {{ post.user_name or '익명' }}</p>
+                <div class="text-gray-700 text-sm whitespace-pre-wrap">{{ post.content or '' }}</div>
+            </div>
+        </div>
+        """ + FOOTER_HTML,
+        post=p,
+        prev_id=prev_id,
+        next_id=next_id
+    )
 
 
 @app.route('/board/event', methods=['GET', 'POST'])
@@ -4999,95 +5190,91 @@ def board_event():
         <div class="max-w-3xl mx-auto px-4 py-12">
             <a href="/" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 메인</a>
             <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">이벤트 게시판</h1>
-            <p class="text-gray-500 text-sm mb-6">SNS에 공유한 링크와 신청 이메일을 입력하고 포인트 지급을 요청해 주세요. 검토 후 포인트가 지급됩니다.</p>
+            <p class="text-gray-500 text-sm mb-2">이벤트 참여 방법: ① 공유 링크를 생성해 SNS에 올린 뒤 ② 아래 포인트 지급 요청에 URL과 이메일을 입력하면 검토 후 포인트가 지급됩니다. 이벤트에 대한 이야기는 게시판에 자유롭게 남겨 주세요.</p>
+            <p class="text-[11px] text-gray-400 mb-6">공지글은 목록 상단에, 일반글은 최신순으로 보입니다. 제목을 누르면 본문을 볼 수 있습니다.</p>
+
             <div class="bg-teal-50 border border-teal-200 rounded-2xl p-6 mb-8">
-                <p class="font-black text-teal-800 text-xs mb-3">바구니삼촌 공유할 URL</p>
-                <p class="text-[10px] text-teal-700 mb-3">아래 버튼을 누르면 추적 가능한 공유 링크가 발행되고 클립보드에 복사됩니다. SNS에 붙여 넣어 공유하세요. (복사할 때마다 새 링크가 발행됩니다)</p>
+                <p class="font-black text-teal-800 text-sm mb-1">📤 공유 링크 만들기</p>
+                <p class="text-[11px] text-teal-700 mb-3">버튼을 누르면 추적용 링크가 발행되고 클립보드에 복사됩니다. SNS에 붙여 넣어 공유하세요. (한 번 누를 때마다 새 링크가 만들어집니다)</p>
                 <div class="flex flex-wrap items-center gap-3">
                     <button type="button" id="event_share_link_btn" class="px-5 py-3 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">공유 링크 생성 및 복사</button>
                     <span id="event_share_link_msg" class="text-xs font-bold text-teal-600 hidden"></span>
                 </div>
                 <p id="event_share_link_url" class="mt-3 text-[11px] text-gray-600 break-all font-mono hidden"></p>
             </div>
-            <div class="bg-amber-50 border border-amber-200 rounded-2xl p-6 mb-8">
-                <p class="font-black text-amber-800 text-xs mb-3">게시판</p>
-                <p class="text-[10px] text-amber-700 mb-3">이벤트에 대한 이야기를 나눠 보세요.</p>
+
+            <div class="mb-8">
+                <h2 class="text-lg font-black text-gray-800 mb-3">게시글</h2>
+                <p class="text-[11px] text-gray-500 mb-4">이벤트 관련 이야기·질문을 남기거나 공지를 확인할 수 있습니다.</p>
                 {% if current_user.is_authenticated and current_user.is_admin %}
-                <div class="mb-6 p-4 bg-amber-100/80 border border-amber-300 rounded-xl">
-                    <p class="font-black text-amber-800 text-[11px] mb-3">📌 공지글 등록/수정</p>
+                <div class="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                    <p class="font-black text-amber-800 text-[11px] mb-3">📌 공지글 등록 (관리자 전용)</p>
                     <form method="POST" action="/admin/board/event/notice/write" class="space-y-3 mb-4">
-                        <div><label class="block text-[10px] text-gray-600 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="공지 제목" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></div>
-                        <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용</label><textarea name="content" rows="3" placeholder="공지 내용" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></textarea></div>
+                        <div><label class="block text-[10px] text-gray-600 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="공지 제목" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+                        <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용</label><textarea name="content" rows="3" placeholder="공지 내용" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></textarea></div>
                         <button type="submit" class="px-5 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-black hover:bg-amber-700 transition">공지 등록</button>
                     </form>
-                    {% if event_notices %}
-                    <div class="space-y-2 mt-4">
-                        {% for ep in event_notices %}
-                        <div class="flex items-center justify-between gap-2 py-2 border-b border-amber-200/50 last:border-0">
-                            <span class="font-bold text-gray-800 text-sm truncate flex-1">{{ ep.title }}</span>
-                            <a href="/admin/board/event/notice/{{ ep.id }}/edit" class="px-2 py-1 bg-teal-600 text-white rounded text-[10px] font-black shrink-0">수정</a>
-                            <form action="/admin/board/event/{{ ep.id }}/notice" method="POST" class="inline shrink-0" onsubmit="return confirm('공지를 해제하시겠습니까?');"><button type="submit" class="px-2 py-1 bg-gray-500 text-white rounded text-[10px] font-black">공지 해제</button></form>
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
                 </div>
                 {% endif %}
-                <form method="POST" action="/board/event/post" class="space-y-3 mb-6">
-                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="제목을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></div>
-                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용</label><textarea name="content" rows="3" placeholder="내용을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-amber-200 text-sm font-bold"></textarea></div>
-                    {% if not current_user.is_authenticated %}<div><label class="block text-[10px] text-gray-600 uppercase mb-1">이름 (선택)</label><input type="text" name="user_name" maxlength="50" placeholder="익명" class="w-full px-4 py-2 rounded-xl border border-amber-200 text-sm"></div>{% endif %}
-                    <button type="submit" class="px-5 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-black hover:bg-amber-700 transition">글쓰기</button>
+                <form method="POST" action="/board/event/post" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm mb-6">
+                    <p class="font-black text-gray-800 text-xs mb-3">새 글 쓰기</p>
+                    <div class="mb-3"><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="제목을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+                    <div class="mb-4"><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="3" placeholder="내용을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></textarea></div>
+                    {% if not current_user.is_authenticated %}<div class="mb-4"><label class="block text-[10px] text-gray-500 uppercase mb-1">이름 (선택)</label><input type="text" name="user_name" maxlength="50" placeholder="익명" class="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm"></div>{% endif %}
+                    <button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">글쓰기</button>
                 </form>
-                <div class="space-y-2">
+                <div class="space-y-3">
                     {% for ep in event_notices %}
-                    <div class="bg-amber-100/70 rounded-xl border border-amber-200 p-3 text-left">
-                        <p class="font-black text-gray-800 text-sm"><span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{{ ep.title }}</p>
-                        <p class="text-[10px] text-gray-500">{{ ep.created_at.strftime('%Y.%m.%d %H:%M') if ep.created_at else '' }} · {{ ep.user_name or '관리자' }}</p>
-                        {% if ep.content %}<p class="text-gray-600 text-xs mt-1">{{ ep.content[:120] }}{% if ep.content|length > 120 %}...{% endif %}</p>{% endif %}
-                    </div>
+                    <a href="/board/event/{{ ep.id }}" class="block bg-white rounded-2xl border border-gray-100 p-4 shadow-sm hover:shadow-md transition text-left border-amber-200 bg-amber-50/50">
+                        <p class="font-black text-gray-800"><span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{{ ep.title }}</p>
+                        <p class="text-[10px] text-gray-400 mt-1">{{ ep.created_at.strftime('%Y.%m.%d %H:%M') if ep.created_at else '' }} · {{ ep.user_name or '관리자' }}</p>
+                        {% if ep.content %}<p class="text-gray-500 text-sm mt-2 line-clamp-2">{{ ep.content[:120] }}{% if ep.content|length > 120 %}...{% endif %}</p>{% endif %}
+                    </a>
                     {% endfor %}
                     {% for ep in event_posts %}
-                    <div class="bg-white rounded-xl border border-amber-100 p-3 text-left">
-                        <p class="font-black text-gray-800 text-sm">{{ ep.title }}</p>
-                        <p class="text-[10px] text-gray-400">{{ ep.created_at.strftime('%Y.%m.%d %H:%M') if ep.created_at else '' }} · {{ ep.user_name or '익명' }}</p>
-                        {% if ep.content %}<p class="text-gray-600 text-xs mt-1">{{ ep.content[:120] }}{% if ep.content|length > 120 %}...{% endif %}</p>{% endif %}
-                    </div>
+                    <a href="/board/event/{{ ep.id }}" class="block bg-white rounded-2xl border border-gray-100 p-4 shadow-sm hover:shadow-md transition text-left">
+                        <p class="font-black text-gray-800">{{ ep.title }}</p>
+                        <p class="text-[10px] text-gray-400 mt-1">{{ ep.created_at.strftime('%Y.%m.%d %H:%M') if ep.created_at else '' }} · {{ ep.user_name or '익명' }}</p>
+                        {% if ep.content %}<p class="text-gray-500 text-sm mt-2 line-clamp-2">{{ ep.content[:120] }}{% if ep.content|length > 120 %}...{% endif %}</p>{% endif %}
+                    </a>
                     {% endfor %}
                     {% if not event_notices and not event_posts %}
-                    <p class="text-gray-400 text-xs py-4 text-center">아직 글이 없습니다.</p>
+                    <p class="text-gray-400 text-sm py-8 text-center">아직 글이 없습니다. 첫 글을 남겨 보세요!</p>
                     {% endif %}
                 </div>
             </div>
+
             <div class="bg-violet-50 border border-violet-200 rounded-2xl p-6 mb-8">
-                <p class="font-black text-violet-800 text-xs mb-3">포인트 지급 요청</p>
+                <p class="font-black text-violet-800 text-sm mb-1">🎁 포인트 지급 요청</p>
+                <p class="text-[11px] text-violet-700 mb-4">SNS에 공유한 URL과 포인트를 받을 이메일을 입력하면, 검토 후 해당 이메일로 포인트가 지급됩니다.</p>
                 <form method="POST" action="/board/event" class="space-y-4">
-                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">공유 URL *</label><input type="url" name="shared_url" required maxlength="500" placeholder="https://..." class="w-full px-4 py-3 rounded-xl border border-violet-200 text-sm font-bold"></div>
-                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">신청 이메일 *</label><input type="email" name="applicant_email" required maxlength="120" placeholder="포인트 수령할 이메일" class="w-full px-4 py-3 rounded-xl border border-violet-200 text-sm font-bold"></div>
-                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용 (선택)</label><textarea name="content" rows="4" placeholder="하고 싶은 말, 공유한 SNS 설명 등" class="w-full px-4 py-3 rounded-xl border border-violet-200 text-sm font-bold"></textarea></div>
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">공유 URL *</label><input type="url" name="shared_url" required maxlength="500" placeholder="https://..." class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">신청 이메일 *</label><input type="email" name="applicant_email" required maxlength="120" placeholder="포인트 수령할 이메일" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+                    <div><label class="block text-[10px] text-gray-600 uppercase mb-1">내용 (선택)</label><textarea name="content" rows="4" placeholder="하고 싶은 말, 공유한 SNS 설명 등" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></textarea></div>
                     <button type="submit" class="w-full py-3 bg-violet-600 text-white rounded-xl text-sm font-black hover:bg-violet-700 transition">포인트 지급 요청</button>
                 </form>
             </div>
+
             <div class="mb-4">
-                <p class="font-black text-gray-800 text-sm mb-2">신청 내역</p>
-                <p class="text-[10px] text-gray-500 mb-2">포인트 지급 요청 목록입니다. 내 신청만 보려면 이메일을 입력한 뒤 조회하세요.</p>
+                <p class="font-black text-gray-800 text-sm mb-1">내 신청 내역</p>
+                <p class="text-[11px] text-gray-500 mb-3">포인트 지급 요청 목록입니다. 이메일을 입력하면 해당 이메일로 신청한 건만 볼 수 있습니다.</p>
                 <form method="GET" action="/board/event" class="flex flex-wrap items-center gap-2 mb-3">
-                    <input type="email" name="my_email" value="{{ filter_email }}" placeholder="이메일 입력 시 해당 이메일 신청만 표시" class="px-3 py-2 rounded-xl border border-gray-200 text-xs w-64">
+                    <input type="email" name="my_email" value="{{ filter_email }}" placeholder="이메일 입력 시 내 신청만 표시" class="px-3 py-2 rounded-xl border border-gray-200 text-xs w-64">
                     <button type="submit" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl text-xs font-black hover:bg-gray-300">조회</button>
                     {% if filter_email %}<a href="/board/event" class="px-4 py-2 text-gray-500 text-xs font-bold hover:text-teal-600">전체 보기</a>{% endif %}
                 </form>
-            </div>
-            <div class="space-y-3">
-                {% for p in requests_list %}
-                <div class="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-left">
-                    <p class="text-[10px] text-gray-400">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.applicant_email }}</p>
-                    <p class="font-bold text-gray-800 mt-1 break-all">{{ p.shared_url[:80] }}{% if p.shared_url|length > 80 %}...{% endif %}</p>
-                    {% if p.content %}<p class="text-gray-500 text-sm mt-2">{{ p.content[:150] }}{% if p.content|length > 150 %}...{% endif %}</p>{% endif %}
-                    <p class="text-[10px] mt-2 text-right font-bold {% if p.status == 'approved' %}text-teal-600{% elif p.status == 'rejected' %}text-red-600{% else %}text-amber-600{% endif %}">{{ '지급완료' if p.status == 'approved' else ('반려' if p.status == 'rejected' else '검토중') }}</p>
+                <div class="space-y-3">
+                    {% for p in requests_list %}
+                    <div class="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-left">
+                        <p class="text-[10px] text-gray-400">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.applicant_email }}</p>
+                        <p class="font-bold text-gray-800 mt-1 break-all">{{ p.shared_url[:80] }}{% if p.shared_url|length > 80 %}...{% endif %}</p>
+                        {% if p.content %}<p class="text-gray-500 text-sm mt-2">{{ p.content[:150] }}{% if p.content|length > 150 %}...{% endif %}</p>{% endif %}
+                        <p class="text-[10px] mt-2 text-right font-bold {% if p.status == 'approved' %}text-teal-600{% elif p.status == 'rejected' %}text-red-600{% else %}text-amber-600{% endif %}">{{ '지급완료' if p.status == 'approved' else ('반려' if p.status == 'rejected' else '검토중') }}</p>
+                    </div>
+                    {% else %}
+                    <p class="text-gray-400 text-sm py-8 text-center">{% if filter_email %}해당 이메일로 신청한 내역이 없습니다.{% else %}아직 요청이 없습니다.{% endif %}</p>
+                    {% endfor %}
                 </div>
-                {% else %}
-                <p class="text-gray-400 text-sm py-8 text-center">{% if filter_email %}해당 이메일로 신청한 내역이 없습니다.{% else %}아직 요청이 없습니다.{% endif %}</p>
-                {% endfor %}
             </div>
             <script>
             (function(){
@@ -5825,11 +6012,39 @@ def product_detail(pid):
                     </div>
                 </div>
                 {% if seller_category %}
-                <div class="mt-4">
-                    <a href="/category/seller/{{ seller_category.id }}" class="w-full py-4 md:py-5 rounded-2xl bg-gray-50 border-2 border-gray-100 text-gray-700 font-black text-base md:text-lg hover:bg-gray-100 hover:border-gray-200 transition-all flex items-center justify-center gap-3">
+                <div class="mt-6 bg-gray-50 border border-gray-100 rounded-2xl p-5 md:p-6 text-left">
+                    <div class="flex items-center gap-2 mb-3">
                         <i class="fas fa-store text-gray-500"></i>
-                        <span>판매자 정보 보기</span>
-                    </a>
+                        <p class="text-[10px] md:text-xs text-gray-500 font-bold tracking-[0.15em] uppercase">Seller Business Profile</p>
+                    </div>
+                    <div class="space-y-1.5 text-[11px] md:text-xs text-gray-700">
+                        {% if seller_category.biz_name %}
+                        <p><span class="text-gray-400">상호</span> · <span class="font-semibold">{{ seller_category.biz_name }}</span></p>
+                        {% endif %}
+                        {% if seller_category.biz_representative %}
+                        <p><span class="text-gray-400">대표자</span> · <span class="font-semibold">{{ seller_category.biz_representative }}</span></p>
+                        {% endif %}
+                        {% if seller_category.biz_reg_number %}
+                        <p><span class="text-gray-400">사업자등록번호</span> · <span class="font-mono">{{ seller_category.biz_reg_number }}</span></p>
+                        {% endif %}
+                        {% if getattr(seller_category, 'biz_online_sales_number', None) %}
+                        <p><span class="text-gray-400">통신판매업번호</span> · <span class="font-mono">{{ seller_category.biz_online_sales_number }}</span></p>
+                        {% endif %}
+                        {% if seller_category.biz_address %}
+                        <p><span class="text-gray-400">소재지</span> · <span>{{ seller_category.biz_address }}</span></p>
+                        {% endif %}
+                        {% if seller_category.biz_contact %}
+                        <p><span class="text-gray-400">고객센터</span> · <span class="font-semibold">{{ seller_category.biz_contact }}</span></p>
+                        {% endif %}
+                        {% if seller_category.seller_inquiry_link %}
+                        <p class="pt-1">
+                            <a href="{{ seller_category.seller_inquiry_link }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-teal-600 hover:text-teal-700 font-semibold">
+                                문의하기 링크 바로가기
+                                <i class="fas fa-external-link-alt text-[9px]"></i>
+                            </a>
+                        </p>
+                        {% endif %}
+                    </div>
                 </div>
                 {% endif %}
                 {% if kakao_js_key %}
@@ -7404,28 +7619,28 @@ def mypage():
         </div>
         {% endif %}
         <header class="border-b border-gray-100 pb-6 md:pb-8 mb-6 md:mb-8">
-            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 lg:gap-6">
+            <div class="flex flex-col gap-4 md:gap-5">
                 <nav class="flex flex-wrap items-center gap-2 md:gap-3 text-left">
-                    <a href="/" class="text-gray-400 hover:text-teal-600 transition flex items-center gap-1.5 text-xs md:text-sm font-bold py-2 px-3 rounded-lg hover:bg-gray-50 touch-target">
+                    <a href="/" class="text-gray-400 hover:text-gray-900 transition flex items-center gap-1.5 text-xs md:text-sm font-medium py-1.5 px-2.5 rounded-md hover:bg-gray-50 touch-target">
                         <i class="fas fa-home"></i> 홈으로
                     </a>
-                    <a href="/mypage/messages" class="text-gray-400 hover:text-teal-600 transition flex items-center gap-1.5 text-xs md:text-sm font-bold py-2 px-3 rounded-lg hover:bg-gray-50 touch-target">
+                    <a href="/mypage/messages" class="text-gray-400 hover:text-gray-900 transition flex items-center gap-1.5 text-xs md:text-sm font-medium py-1.5 px-2.5 rounded-md hover:bg-gray-50 touch-target">
                         <i class="fas fa-envelope"></i> 내 메시지
                         {% if unread_message_count and unread_message_count > 0 %}<span class="bg-teal-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{{ unread_message_count }}</span>{% endif %}
                     </a>
                     {% if unread_message_count and unread_message_count > 0 %}
-                    <button type="button" id="mypage-read-all-btn" class="touch-target px-3 py-2 bg-teal-600 text-white rounded-xl text-[10px] md:text-xs font-black hover:bg-teal-700 transition shrink-0">안 읽은 알림 모두 읽음 처리</button>
+                    <button type="button" id="mypage-read-all-btn" class="touch-target px-3 py-2 bg-gray-900 text-white rounded-lg text-[10px] md:text-xs font-medium hover:bg-black transition shrink-0">안 읽은 알림 모두 읽음 처리</button>
                     {% endif %}
-                    <a href="/mypage/activity" class="text-gray-400 hover:text-teal-600 transition flex items-center gap-1.5 text-xs md:text-sm font-bold py-2 px-3 rounded-lg hover:bg-gray-50 touch-target">
+                    <a href="/mypage/activity" class="text-gray-400 hover:text-gray-900 transition flex items-center gap-1.5 text-xs md:text-sm font-medium py-1.5 px-2.5 rounded-md hover:bg-gray-50 touch-target">
                         <i class="fas fa-history"></i> 내 활동내역
                     </a>
-                    <a href="/mypage/reviews" class="text-gray-400 hover:text-teal-600 transition flex items-center gap-1.5 text-xs md:text-sm font-bold py-2 px-3 rounded-lg hover:bg-gray-50 touch-target">
+                    <a href="/mypage/reviews" class="text-gray-400 hover:text-gray-900 transition flex items-center gap-1.5 text-xs md:text-sm font-medium py-1.5 px-2.5 rounded-md hover:bg-gray-50 touch-target">
                         <i class="fas fa-star"></i> 리뷰관리
                     </a>
-                    <a href="/mypage/points" class="text-gray-400 hover:text-teal-600 transition flex items-center gap-1.5 text-xs md:text-sm font-bold py-2 px-3 rounded-lg hover:bg-gray-50 touch-target">
+                    <a href="/mypage/points" class="text-gray-400 hover:text-gray-900 transition flex items-center gap-1.5 text-xs md:text-sm font-medium py-1.5 px-2.5 rounded-md hover:bg-gray-50 touch-target">
                         <i class="fas fa-coins"></i> 포인트 내역
                     </a>
-                    <a href="/logout" class="text-gray-400 hover:text-red-500 transition flex items-center gap-1.5 text-xs md:text-sm font-black py-2 px-3 rounded-lg hover:bg-red-50 touch-target ml-0 lg:ml-auto">
+                    <a href="/logout" class="text-gray-400 hover:text-red-500 transition flex items-center gap-1.5 text-xs md:text-sm font-semibold py-1.5 px-2.5 rounded-md hover:bg-red-50 touch-target ml-0 lg:ml-auto">
                         로그아웃 <i class="fas fa-sign-out-alt"></i>
                     </a>
                 </nav>
@@ -7454,14 +7669,14 @@ def mypage():
             <div class="p-6 md:p-10 lg:p-12">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-6 mb-8 md:mb-10">
                     <div class="text-left w-full">
-                        <span class="bg-teal-100 text-teal-700 text-[10px] px-3 py-1 rounded-lg tracking-widest uppercase mb-2 inline-block font-black">우수 회원</span>
-                        <h2 class="text-2xl md:text-4xl font-black text-gray-800 leading-tight">
-                            {{ mypage_name }} <span class="text-gray-400 font-medium text-lg md:text-xl">님</span>
+                        <p class="text-[11px] text-gray-400 tracking-wide uppercase mb-1">My Page</p>
+                        <h2 class="text-2xl md:text-4xl font-semibold text-gray-900 leading-tight">
+                            {{ mypage_name }} <span class="text-gray-400 font-normal text-lg md:text-xl">님</span>
                         </h2>
-                        <p class="text-gray-400 text-xs md:text-sm mt-1 font-bold break-all">{{ mypage_email }}</p>
+                        <p class="text-gray-400 text-xs md:text-sm mt-1 font-medium break-all">{{ mypage_email }}</p>
                     </div>
-                    <button type="button" onclick="toggleAddressEdit()" id="edit-btn" class="touch-target bg-gray-50 text-gray-600 px-5 py-3 rounded-xl text-xs md:text-sm font-black hover:bg-gray-100 transition border border-gray-100 shrink-0">
-                        {% if need_address %}<i class="fas fa-times"></i> 취소{% else %}<i class="fas fa-edit mr-1"></i> 주소 수정{% endif %}
+                    <button type="button" onclick="toggleAddressEdit()" id="edit-btn" class="touch-target bg-gray-900 text-white px-5 py-3 rounded-full text-xs md:text-sm font-medium hover:bg-black transition shrink-0">
+                        {% if need_address %}<i class="fas fa-times mr-1"></i> 취소{% else %}<i class="fas fa-edit mr-1"></i> 주소 수정{% endif %}
                     </button>
                 </div>
 
@@ -7472,30 +7687,30 @@ def mypage():
                     </div>
                     {% endif %}
                     <div id="address-display" class="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6 {% if need_address %}hidden{% endif %}">
-                        <div class="bg-gray-50/50 p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-50 text-left">
+                        <div class="bg-white p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-100 text-left">
                             <p class="text-[10px] text-gray-400 uppercase mb-2 tracking-widest font-black">고객명 · 전화번호</p>
-                            <p class="text-gray-700 text-sm md:text-base font-black">{{ mypage_name or '-' }}</p>
-                            <p class="text-gray-500 text-xs md:text-sm font-bold mt-1">{{ mypage_phone or '-' }}</p>
+                            <p class="text-gray-900 text-sm md:text-base font-semibold">{{ mypage_name or '-' }}</p>
+                            <p class="text-gray-500 text-xs md:text-sm font-medium mt-1">{{ mypage_phone or '-' }}</p>
                         </div>
-                        <div class="bg-gray-50/50 p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-50 text-left">
+                        <div class="bg-white p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-100 text-left">
                             <p class="text-[10px] text-gray-400 uppercase mb-2 tracking-widest font-black">기본 배송지</p>
-                            <p class="text-gray-700 text-sm md:text-base leading-snug font-black break-keep">
-                                {{ mypage_address or '정보 없음' }}{% if mypage_address_apt_name %}<br><span class="text-teal-600 font-bold">{{ mypage_address_apt_name }}</span>{% endif %}<br>
-                                <span class="text-gray-400 text-xs md:text-sm font-bold">{{ mypage_address_detail or '' }}</span>
+                            <p class="text-gray-900 text-sm md:text-base leading-snug font-semibold break-keep">
+                                {{ mypage_address or '정보 없음' }}{% if mypage_address_apt_name %}<br><span class="text-gray-700 font-medium">{{ mypage_address_apt_name }}</span>{% endif %}<br>
+                                <span class="text-gray-400 text-xs md:text-sm font-medium">{{ mypage_address_detail or '' }}</span>
                             </p>
                             {% if mypage_address_in_delivery_zone %}
-                            <p class="mt-2 text-[10px] font-black text-teal-600 uppercase tracking-wide"><i class="fas fa-check-circle mr-1"></i> 배송가능 지역</p>
+                            <p class="mt-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wide"><i class="fas fa-check-circle mr-1"></i> 배송가능 지역</p>
                             {% endif %}
                         </div>
-                        <div class="bg-orange-50/30 p-5 md:p-6 rounded-2xl md:rounded-3xl border border-orange-50 text-left">
-                            <p class="text-[10px] text-orange-400 uppercase mb-2 tracking-widest font-black">공동현관 비밀번호</p>
-                            <p class="text-orange-600 text-base md:text-lg flex items-center gap-2 font-black">
+                        <div class="bg-white p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-100 text-left">
+                            <p class="text-[10px] text-gray-400 uppercase mb-2 tracking-widest font-black">공동현관 비밀번호</p>
+                            <p class="text-gray-900 text-base md:text-lg flex items-center gap-2 font-semibold">
                                 <span class="text-xl md:text-2xl">🔑</span> {{ mypage_entrance_pw or '미등록' }}
                             </p>
                         </div>
-                        <div class="md:col-span-2 bg-teal-50/30 p-5 md:p-6 rounded-2xl md:rounded-3xl border border-teal-50 text-left">
-                            <p class="text-[10px] text-teal-500 uppercase mb-2 tracking-widest font-black">배송 시 요청사항</p>
-                            <p class="text-teal-800 text-sm md:text-base font-bold break-keep whitespace-pre-wrap">{{ mypage_request_memo or '없음' }}</p>
+                        <div class="md:col-span-2 bg-white p-5 md:p-6 rounded-2xl md:rounded-3xl border border-gray-100 text-left">
+                            <p class="text-[10px] text-gray-400 uppercase mb-2 tracking-widest font-black">배송 시 요청사항</p>
+                            <p class="text-gray-800 text-sm md:text-base font-medium break-keep whitespace-pre-wrap">{{ mypage_request_memo or '없음' }}</p>
                         </div>
                     </div>
 
@@ -8264,18 +8479,18 @@ def cart():
     
     # 상단 헤더 및 빈 장바구니 처리
     content = f"""
-    <div class="max-w-4xl mx-auto py-10 md:py-20 px-4 md:px-6 font-black text-left">
-        <h2 class="text-2xl md:text-3xl font-black mb-10 border-l-8 border-teal-600 pl-4 md:pl-6 tracking-tighter uppercase italic">
-            장바구니
-        </h2>
+    <div class="max-w-4xl mx-auto py-10 md:py-16 px-4 md:px-6 text-left">
+        <div class="flex items-baseline justify-between mb-8 md:mb-10">
+            <h1 class="text-2xl md:text-3xl font-semibold text-gray-900 tracking-tight">장바구니</h1>
+        </div>
         
-        <div class="bg-white rounded-[2rem] md:rounded-[3rem] shadow-xl border border-gray-50 overflow-hidden">
+        <div class="bg-white rounded-2xl md:rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
             {" " if items else f'''
-            <div class="py-32 md:py-48 text-center">
-                <p class="text-7xl md:text-8xl mb-8 opacity-20">🧺</p>
-                <p class="text-lg md:text-2xl mb-10 text-gray-400 font-bold">장바구니가 비어있습니다.</p>
-                <a href="/" class="inline-block bg-teal-600 text-white px-10 py-4 rounded-full shadow-lg font-black text-base md:text-lg hover:bg-teal-700 transition">
-                    인기 상품 보러가기
+            <div class="py-24 md:py-32 text-center">
+                <p class="text-6xl md:text-7xl mb-6 opacity-10">🧺</p>
+                <p class="text-base md:text-lg mb-6 text-gray-400 font-medium">장바구니가 비어 있습니다.</p>
+                <a href="/" class="inline-flex items-center justify-center bg-gray-900 text-white px-8 py-3 rounded-full text-sm md:text-base font-medium hover:bg-black transition">
+                    상품 보러가기
                 </a>
             </div>
             '''}
@@ -8286,26 +8501,26 @@ def cart():
         content += '<div class="p-6 md:p-12 space-y-8">'
         for i in items:
             content += f"""
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-50 pb-8 gap-4">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-100 pb-6 md:pb-7 gap-4">
                 <div class="flex-1 text-left">
-                    <p class="text-[10px] text-teal-600 font-black mb-1 uppercase tracking-widest">[{ i.product_category }]</p>
-                    <p class="font-black text-lg md:text-xl text-gray-800 leading-tight mb-2">{ i.product_name }</p>
-                    <p class="text-gray-400 font-bold text-sm">{ "{:,}".format(i.price) }원</p>
+                    <p class="text-[11px] text-gray-400 mb-1 tracking-wide">[{ i.product_category }]</p>
+                    <p class="font-semibold text-base md:text-lg text-gray-900 leading-snug mb-1.5">{ i.product_name }</p>
+                    <p class="text-gray-500 text-sm md:text-base font-medium">{ "{:,}".format(i.price) }원</p>
                 </div>
                 
                 <div class="flex items-center justify-between w-full md:w-auto gap-4">
-                    <div class="flex items-center gap-6 bg-gray-50 px-5 py-3 rounded-2xl border border-gray-100">
-                        <button onclick="minusFromCart({i.product_id})" class="text-gray-400 hover:text-red-500 transition text-xl">
+                    <div class="flex items-center gap-4 bg-gray-50 px-4 py-2.5 rounded-xl border border-gray-100">
+                        <button onclick="minusFromCart({i.product_id})" class="text-gray-400 hover:text-gray-700 transition text-lg">
                             <i class="fas fa-minus"></i>
                         </button>
-                        <span class="font-black text-lg w-6 text-center">{ i.quantity }</span>
-                        <button onclick="addToCart({i.product_id})" class="text-gray-400 hover:text-teal-600 transition text-xl">
+                        <span class="font-semibold text-base w-6 text-center text-gray-900">{ i.quantity }</span>
+                        <button onclick="addToCart({i.product_id})" class="text-gray-400 hover:text-gray-700 transition text-lg">
                             <i class="fas fa-plus"></i>
                         </button>
                     </div>
                     
                     <form action="/cart/delete/{i.product_id}" method="POST" class="md:ml-4">
-                        <button class="text-gray-200 hover:text-red-500 transition text-2xl p-2">
+                        <button class="text-gray-300 hover:text-red-500 transition text-xl p-2" aria-label="삭제">
                             <i class="fas fa-trash-alt"></i>
                         </button>
                     </form>
@@ -8324,48 +8539,46 @@ def cart():
         point_info = ""
         if can_use_points:
             point_info = f'''<div class="pt-4 mt-4 border-t border-gray-200">
-                <p class="text-[10px] text-gray-500 font-bold uppercase mb-1">포인트 사용</p>
-                <p class="text-sm font-black text-gray-800">보유 포인트 <span class="text-teal-600">{user_points:,}원</span> · 이 주문에서 최대 <span class="text-amber-600">{max_use:,}원</span> 사용 가능</p>
-                <p class="text-[10px] text-gray-500 mt-1">주문하기 버튼 클릭 후 다음 단계(주문 확인)에서 사용할 포인트 금액을 입력할 수 있습니다.</p>
+                <p class="text-[11px] text-gray-500 font-medium mb-1">보유 포인트 {user_points:,}원 · 이번 주문에서 최대 {max_use:,}원 사용 가능</p>
+                <p class="text-[10px] text-gray-400 mt-0.5">다음 단계(주문 확인)에서 사용할 포인트 금액을 입력할 수 있습니다.</p>
             </div>'''
         else:
             point_info = f'''<div class="pt-4 mt-4 border-t border-gray-200">
-                <p class="text-[10px] text-gray-500 font-bold uppercase mb-1">포인트</p>
-                <p class="text-sm font-black text-gray-800">보유 포인트 <span class="text-teal-600">{user_points:,}원</span></p>
-                <p class="text-[10px] text-gray-500 mt-1">포인트는 주문 금액이 {min_order_to_use:,}원 이상일 때 사용 가능하며, 주문 확인 단계에서 입력합니다.</p>
-            </div>''' if (min_order_to_use and min_order_to_use > 0) else f'<div class="pt-4 mt-4 border-t border-gray-200"><p class="text-[10px] text-gray-500">보유 포인트 {user_points:,}원</p></div>'
+                <p class="text-[11px] text-gray-500 font-medium mb-1">보유 포인트 {user_points:,}원</p>
+                <p class="text-[10px] text-gray-400 mt-0.5">포인트는 주문 금액이 {min_order_to_use:,}원 이상일 때 사용 가능하며, 주문 확인 단계에서 입력합니다.</p>
+            </div>''' if (min_order_to_use and min_order_to_use > 0) else f'<div class="pt-4 mt-4 border-t border-gray-200"><p class="text-[11px] text-gray-500">보유 포인트 {user_points:,}원</p></div>'
         content += f"""
-            <div class="bg-gray-50 p-8 md:p-10 rounded-[2rem] md:rounded-[2.5rem] space-y-4 mt-12 border border-gray-100">
-                <div class="flex justify-between text-sm md:text-base text-gray-500 font-bold">
+            <div class="bg-gray-50 p-6 md:p-8 rounded-2xl md:rounded-3xl space-y-4 mt-10 border border-gray-100">
+                <div class="flex justify-between text-sm md:text-base text-gray-600 font-medium">
                     <span>주문 상품 합계</span>
                     <span>{ "{:,}".format(subtotal) }원</span>
                 </div>
-                <div class="flex justify-between text-sm md:text-base text-orange-500 font-bold">
+                <div class="flex justify-between text-sm md:text-base text-gray-600 font-medium">
                     <span>카테고리별 배송료</span>
                     <span>+ { "{:,}".format(delivery_fee) }원</span>
                 </div>
-                {f'<p class="text-[10px] text-gray-500 font-bold">' + breakdown_text + '</p>' if breakdown_text else ''}
-                <div class="flex justify-between items-center pt-6 border-t border-gray-200 mt-6">
-                    <span class="text-lg md:text-xl text-gray-800 font-black">최종 결제 금액</span>
-                    <span class="text-3xl md:text-5xl text-teal-600 font-black italic tracking-tighter">
+                {f'<p class="text-[11px] text-gray-500">' + breakdown_text + '</p>' if breakdown_text else ''}
+                <div class="flex justify-between items-center pt-5 border-t border-gray-200 mt-5">
+                    <span class="text-sm md:text-base text-gray-500 font-medium">최종 결제 금액</span>
+                    <span class="text-2xl md:text-3xl text-gray-900 font-semibold tracking-tight">
                         { "{:,}".format(total) }원
                     </span>
                 </div>
                 {min_order_msg}
                 {point_info}
-                <p class="text-[10px] md:text-xs text-gray-400 mt-6 leading-relaxed font-medium">
+                <p class="text-[11px] md:text-xs text-gray-400 mt-4 leading-relaxed font-medium">
                     ※ 배송료: 카테고리별로 금액·건별 설정에 따라 계산됩니다. 각 카테고리 설정은 상품 상세/카테고리 페이지에서 확인할 수 있습니다.
                 </p>
-                <p class="text-[10px] md:text-xs text-teal-600 mt-2 font-bold">💡 다음 단계에서 배송지 확인·변경이 가능하며, 변경 주소를 회원정보에 저장할 수 있습니다.</p>
+                <p class="text-[11px] md:text-xs text-gray-500 mt-1 font-medium">다음 단계에서 배송지를 다시 확인하고 수정할 수 있습니다.</p>
             </div>
             
-            <div class="flex flex-col sm:flex-row gap-3 mt-12">
-                <a href="/order/confirm" id="cart-order-btn" class="flex-1 text-center bg-teal-600 text-white py-6 md:py-8 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl md:text-2xl shadow-xl shadow-teal-100 hover:bg-teal-700 hover:-translate-y-1 transition active:scale-95">
-                    주문하기
+            <div class="flex flex-col sm:flex-row gap-3 mt-8">
+                <a href="/order/confirm" id="cart-order-btn" class="flex-1 text-center bg-gray-900 text-white py-4 md:py-4.5 rounded-full text-sm md:text-base font-medium hover:bg-black transition active:scale-[0.99]">
+                    결제 단계로 이동
                 </a>
                 <form action="/cart/clear" method="POST" class="sm:w-auto">
-                    <button type="submit" class="w-full sm:w-auto px-6 py-4 md:py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-base border-2 border-gray-200 text-gray-500 hover:bg-gray-50 hover:border-gray-300 transition" onclick="return confirm('장바구니를 모두 비우시겠습니까?');">
-                        <i class="fas fa-undo-alt mr-2"></i>장바구니 비우기
+                    <button type="submit" class="w-full sm:w-auto px-5 py-3 md:py-3.5 rounded-full text-xs md:text-sm font-medium border border-gray-200 text-gray-500 hover:bg-gray-50 hover:border-gray-300 transition" onclick="return confirm('장바구니를 모두 비우시겠습니까?');">
+                        장바구니 비우기
                     </button>
                 </form>
             </div>
@@ -8422,61 +8635,63 @@ def order_confirm():
     # 일반 구역: 주문 확인 페이지 (간결화)
     if zone_type == 'normal':
         content = f"""
-    <div class="max-w-xl mx-auto py-6 md:py-10 px-4 font-black text-left">
-        <h2 class="text-xl md:text-2xl font-black mb-6 text-center text-teal-600">주문 확인</h2>
+    <div class="max-w-xl mx-auto py-6 md:py-10 px-4 text-left">
+        <div class="mb-6 text-center">
+            <h1 class="text-xl md:text-2xl font-semibold text-gray-900">주문 확인</h1>
+        </div>
         
-        <div class="bg-white p-5 md:p-6 rounded-2xl shadow-lg border border-gray-100 space-y-5 text-left">
+        <div class="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-gray-100 space-y-5 text-left">
             <div class="flex items-start justify-between gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
                 <div class="min-w-0 flex-1">
-                    <p class="text-xs text-gray-500 font-bold mb-1">배송지</p>
-                    <p class="text-sm text-gray-800 font-black leading-snug" id="display-address-text">
+                    <p class="text-xs text-gray-500 font-medium mb-1">배송지</p>
+                    <p class="text-sm text-gray-800 font-medium leading-snug" id="display-address-text">
                         { (current_user.address or '정보 없음').replace('<', '&lt;').replace('>', '&gt;') }<br>
-                        { f'<span class="text-teal-600 font-bold">{(getattr(current_user, "address_apt_name", None) or "").replace("<", "&lt;").replace(">", "&gt;")}</span><br>' if getattr(current_user, 'address_apt_name', None) else '' }
+                        { f'<span class="text-gray-700 font-medium">{(getattr(current_user, "address_apt_name", None) or "").replace("<", "&lt;').replace('>', '&gt;")}</span><br>' if getattr(current_user, 'address_apt_name', None) else '' }
                         <span class="text-gray-500 text-xs">{ (current_user.address_detail or '').replace('<', '&lt;').replace('>', '&gt;') }</span>
                     </p>
-                    <p class="text-teal-600 text-xs font-bold mt-1 flex items-center gap-1"><i class="fas fa-check-circle"></i> 배송가능</p>
+                    <p class="text-gray-500 text-xs font-medium mt-1 flex items-center gap-1"><i class="fas fa-check-circle text-gray-400"></i> 배송가능</p>
                 </div>
-                <a href="/mypage?from=cart" class="shrink-0 px-3 py-2 bg-teal-600 text-white rounded-lg text-xs font-black hover:bg-teal-700">주소 수정</a>
+                <a href="/mypage?from=cart" class="shrink-0 px-3 py-2 bg-gray-900 text-white rounded-full text-xs font-medium hover:bg-black transition">주소 수정</a>
             </div>
 
             <div class="grid grid-cols-2 gap-3 p-4 bg-gray-50 rounded-xl">
-                <div><span class="text-[10px] text-gray-500 uppercase">주문금액</span><p class="text-lg font-black text-gray-800">{ "{:,}".format(total) }원</p></div>
-                <div class="text-right"><span class="text-[10px] text-gray-500 uppercase">최종 결제</span><p class="text-xl font-black text-teal-600" id="final_amount_display">{ "{:,}".format(total) }원</p></div>
-                {f'''<div class="col-span-2 flex items-center gap-2 flex-wrap text-[10px] text-amber-800 font-bold">
+                <div><span class="text-[10px] text-gray-500 uppercase">주문금액</span><p class="text-lg font-semibold text-gray-900">{ "{:,}".format(total) }원</p></div>
+                <div class="text-right"><span class="text-[10px] text-gray-500 uppercase">최종 결제</span><p class="text-xl font-semibold text-gray-900" id="final_amount_display">{ "{:,}".format(total) }원</p></div>
+                {f'''<div class="col-span-2 flex items-center gap-2 flex-wrap text-[11px] text-gray-600 font-medium">
                     <span>포인트</span>
-                    <input type="number" id="points_used_input" min="0" max="{ max_use }" value="0" step="1" class="w-20 border border-amber-200 rounded-lg px-2 py-1 text-sm font-black">
+                    <input type="number" id="points_used_input" min="0" max="{ max_use }" value="0" step="1" class="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm font-medium">
                     <span>원 (최대 { "{:,}".format(max_use) }원)</span>
-                </div>''' if can_use_points else f'<p class="col-span-2 text-[10px] text-gray-500">포인트 { "{:,}".format(user_points) }원</p>'}
+                </div>''' if can_use_points else f'<p class="col-span-2 text-[11px] text-gray-500">포인트 { "{:,}".format(user_points) }원</p>'}
             </div>
 
-            <details class="bg-gray-50 rounded-xl border border-gray-100 text-[10px] text-gray-600">
-                <summary class="p-3 cursor-pointer font-black text-gray-700">결제 전 안내 (필수 확인)</summary>
-                <div class="px-3 pb-3 pt-0 space-y-4 text-left">
-                    <p class="font-black text-gray-700">· 품절/부분취소 가능 · 서비스 이용 동의 · 개인정보 제3자 제공 동의</p>
+            <details class="bg-gray-50 rounded-xl border border-gray-100 text-[11px] text-gray-600">
+                <summary class="p-3 cursor-pointer font-medium text-gray-800">결제 전 안내 (필수 확인)</summary>
+                <div class="px-3 pb-3 pt-0 space-y-4 text-left text-[11px] leading-relaxed">
+                    <p class="font-medium text-gray-700">· 품절/부분취소 가능 · 서비스 이용 동의 · 개인정보 제3자 제공 동의</p>
                     <div class="border-t border-gray-200 pt-3 space-y-4">
                         <div>
-                            <p class="font-black text-gray-800 mb-1">1. 취소 안내 동의</p>
+                            <p class="font-semibold text-gray-800 mb-1">1. 취소 안내 동의</p>
                             <p class="leading-relaxed">주문 후 상품 품절 시 해당 품목만 취소되며, 결제 금액은 카드사 정책에 따라 3~7일 내 환불됩니다. 일부 품목만 취소(부분 취소)할 수 있으며, 배송 요청·배송 중·배송 완료된 품목은 취소할 수 없습니다. 위 내용을 확인하였으며 동의합니다.</p>
                         </div>
                         <div>
-                            <p class="font-black text-gray-800 mb-1">2. 서비스 이용 동의</p>
+                            <p class="font-semibold text-gray-800 mb-1">2. 서비스 이용 동의</p>
                             <p class="leading-relaxed">바구니삼촌은 직접 소싱한 신선식품을 판매하며, 결제·배송 전반을 직접 관리합니다. 위 서비스 이용 방식에 동의합니다.</p>
                         </div>
                         <div>
-                            <p class="font-black text-gray-800 mb-1">3. 개인정보 제3자 제공 동의</p>
+                            <p class="font-semibold text-gray-800 mb-1">3. 개인정보 제3자 제공 동의</p>
                             <p class="leading-relaxed">주문 및 배송 업무 처리를 위해 다음 제3자에게 최소한의 개인정보가 제공됩니다. 제공 대상: 판매자(주문 상품의 카테고리 담당자), 배송 업무 수행 업체. 제공 항목: 수령인 성명, 연락처, 배송지 주소. 이용 목적: 주문 접수·배송·배송 연락. 보유 기간: 목적 달성 후 파기(관련 법령에 따라 보존하는 경우 해당 기간 준수). 위 내용에 동의합니다.</p>
                         </div>
                     </div>
                 </div>
             </details>
             <div class="space-y-2">
-                <label class="flex items-center gap-2 cursor-pointer text-sm font-black text-teal-700 border-b border-gray-200 pb-2">
-                    <input type="checkbox" id="consent_all" class="rounded border-gray-300 text-teal-600">
+                <label class="flex items-center gap-2 cursor-pointer text-sm font-medium text-gray-800 border-b border-gray-200 pb-2">
+                    <input type="checkbox" id="consent_all" class="rounded border-gray-300 text-gray-800">
                     <span>전체 동의하기</span>
                 </label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_partial_cancel" class="consent-item rounded border-gray-300 text-teal-600" required><span>취소 안내 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_agency" class="consent-item rounded border-gray-300 text-teal-600" required><span>서비스 이용 동의</span></label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="consent-item rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs text-gray-700"><input type="checkbox" id="consent_partial_cancel" class="consent-item rounded border-gray-300 text-gray-800" required><span>취소 안내 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs text-gray-700"><input type="checkbox" id="consent_agency" class="consent-item rounded border-gray-300 text-gray-800" required><span>서비스 이용 동의</span></label>
+                <label class="flex items-center gap-2 cursor-pointer text-xs text-gray-700"><input type="checkbox" id="consent_third_party_order" class="consent-item rounded border-gray-300 text-gray-800" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
             <form id="payForm" action="/order/payment" method="POST">
@@ -8487,7 +8702,7 @@ def order_confirm():
                 <input type="hidden" name="order_address_detail" id="order_address_detail_hidden" value="{ (current_user.address_detail or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="order_entrance_pw" id="order_entrance_pw_hidden" value="{ (current_user.entrance_pw or '').replace('&', '&amp;').replace('"', '&quot;') }">
                 <input type="hidden" name="save_address_to_profile" id="save_address_to_profile_hidden" value="0">
-                <button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-teal-600 text-white py-4 md:py-5 rounded-xl font-black text-base shadow-lg hover:bg-teal-700 transition">결제하기</button>
+                <button type="button" id="payBtn" onclick="startPayment()" class="w-full bg-gray-900 text-white py-3.5 md:py-4 rounded-full font-medium text-sm md:text-base hover:bg-black transition">결제하기</button>
             </form>
         </div>
     </div>
@@ -8765,35 +8980,31 @@ def order_payment():
         return redirect('/cart')
 
     content = f"""
-    <div class="max-w-md mx-auto py-24 md:py-40 px-6 text-center font-black">
-        <div class="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center text-5xl mx-auto mb-10 text-blue-600 shadow-inner animate-pulse">
-            <i class="fas fa-shield-alt"></i>
-        </div>
-        
-        <h2 class="text-2xl md:text-3xl font-black mb-4 text-gray-800 tracking-tighter">
-            안전 결제 시스템 연결
-        </h2>
-        <p class="text-gray-400 font-bold text-sm md:text-base mb-12 leading-relaxed">
+    <div class="max-w-md mx-auto py-20 md:py-28 px-6 text-center">
+        <h1 class="text-xl md:text-2xl font-semibold text-gray-900 mb-3">안전 결제 시스템 연결</h1>
+        <p class="text-[13px] md:text-sm text-gray-500 mb-10 leading-relaxed">
             바구니삼촌은 토스페이먼츠의 보안망을 통해<br>고객님의 결제 정보를 안전하게 보호합니다.
         </p>
 
-        <div class="bg-white p-8 rounded-3xl border border-gray-100 shadow-xl mb-12 text-left space-y-4">
-            <div class="flex justify-between text-xs font-bold text-gray-400 uppercase tracking-widest">
+        <div class="bg-white p-6 md:p-7 rounded-2xl border border-gray-100 shadow-sm mb-10 text-left space-y-4">
+            <div class="flex justify-between items-center text-[11px] text-gray-500">
                 <span>주문 상품</span>
-                <span class="text-gray-800">{ order_name }</span>
+                <span class="text-gray-900 font-medium truncate max-w-[60%] text-right">{ order_name }</span>
             </div>
-            {f'<div class="flex justify-between items-center text-sm text-amber-700 font-bold">포인트 사용 <span>- { "{:,}".format(points_used) }원</span></div>' if points_used else ''}
-            <div class="flex justify-between items-center border-t border-gray-50 pt-4 font-black">
-                <span class="text-sm text-gray-600">총 결제 금액</span>
-                <span class="text-2xl text-teal-600 italic underline underline-offset-4">{ "{:,}".format(total) }원</span>
+            {f'<div class="flex justify-between items-center text-[11px] text-gray-500"><span>포인트 사용</span><span class=\"text-gray-900 font-medium\">- { "{:,}".format(points_used) }원</span></div>' if points_used else ''}
+            <div class="flex justify-between items-center border-t border-gray-100 pt-4 mt-2">
+                <span class="text-[11px] text-gray-500">총 결제 금액</span>
+                <span class="text-xl md:text-2xl text-gray-900 font-semibold">
+                    { "{:,}".format(total) }원
+                </span>
             </div>
         </div>
 
-        <button id="payment-button" class="w-full bg-blue-600 text-white py-6 rounded-[1.5rem] md:rounded-[2rem] font-black text-xl shadow-xl shadow-blue-100 hover:bg-blue-700 transition active:scale-95 flex items-center justify-center gap-3">
-            <i class="fas fa-credit-card"></i> 결제창 열기
+        <button id="payment-button" class="w-full bg-gray-900 text-white py-3.5 md:py-4 rounded-full text-sm md:text-base font-medium hover:bg-black transition active:scale-[0.99]">
+            결제창 열기
         </button>
         
-        <p class="mt-8 text-[10px] text-gray-300 font-medium">
+        <p class="mt-6 text-[11px] text-gray-400 leading-relaxed">
             결제창이 열리지 않거나 오류가 발생할 경우<br>고객센터(1666-8320)로 문의해 주세요.
         </p>
     </div>
@@ -10978,8 +11189,17 @@ def admin_dashboard():
         admin_partnership_inquiries = q.all()
 
     admin_event_notices = []
+    admin_event_posts = []
+    board_manage_e_limit = 50
     if (tab == 'board_manage') and is_master:
         admin_event_notices = EventBoardPost.query.filter_by(is_notice=True).order_by(EventBoardPost.id.desc()).all()
+        try:
+            board_manage_e_limit = int(request.args.get('e_limit', '50').strip())
+        except (ValueError, TypeError):
+            board_manage_e_limit = 50
+        if board_manage_e_limit not in (5, 20, 50, 100):
+            board_manage_e_limit = 50
+        admin_event_posts = EventBoardPost.query.order_by(EventBoardPost.id.desc()).limit(board_manage_e_limit).all()
 
     admin_board_comments = []
     board_comment_board_type = ''
@@ -11302,6 +11522,12 @@ def admin_dashboard():
     # 3. HTML 템플릿 코드 (카테고리 설정 탭 완벽 복구본)
     admin_html = r"""
     <style id="admin-mobile-optimize">
+    /* Admin 공통: 글자체·정렬 통일 */
+    .admin-page, .admin-page * { font-family: inherit; }
+    .admin-page { text-align: left; }
+    .admin-page table { text-align: left; }
+    .admin-page th, .admin-page td { text-align: left; }
+    .admin-page .admin-tab-row { text-align: left; }
     /* Admin 모바일 최적화: safe-area, 터치 영역, 테이블 가로 스크롤 */
     @media (max-width: 768px) {
         .admin-page { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); padding-bottom: max(24px, env(safe-area-inset-bottom)); }
@@ -11312,50 +11538,56 @@ def admin_dashboard():
         .admin-page button[type="submit"], .admin-page a[href].min-h-\[44px\] { min-height: 44px; touch-action: manipulation; }
     }
     </style>
-    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-6 md:py-10 xl:py-12 px-3 md:px-6 xl:px-8 font-black text-xs md:text-sm text-left min-h-screen bg-gray-50/30 admin-page">
-        <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 md:mb-8">
-            <h2 class="text-xl md:text-3xl font-black text-orange-700 italic">Admin Panel</h2>
+    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-6 md:py-10 xl:py-12 px-3 md:px-6 xl:px-8 font-sans font-medium text-xs md:text-sm text-left min-h-screen bg-gray-50/30 admin-page">
+        <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 md:mb-8 text-left">
+            <h2 class="text-xl md:text-3xl font-bold text-orange-700 italic">Admin Panel</h2>
             <div class="flex gap-2 flex-shrink-0">
-                 <a href="/" class="min-h-[44px] min-w-[44px] flex items-center justify-center px-4 py-3 bg-gray-100 rounded-xl text-[11px] md:text-sm hover:bg-gray-200 transition">홈으로</a>
-                 <a href="/logout" class="min-h-[44px] min-w-[44px] flex items-center justify-center px-4 py-3 bg-red-50 text-red-500 rounded-xl text-[11px] md:text-sm hover:bg-red-100 transition">로그아웃</a>
+                 <a href="/" class="min-h-[44px] min-w-[44px] flex items-center justify-center px-4 py-3 bg-gray-100 rounded-xl text-xs md:text-sm hover:bg-gray-200 transition">홈으로</a>
+                 <a href="/logout" class="min-h-[44px] min-w-[44px] flex items-center justify-center px-4 py-3 bg-red-50 text-red-500 rounded-xl text-xs md:text-sm hover:bg-red-100 transition">로그아웃</a>
             </div>
         </div>
         
-        <div class="flex flex-col gap-4 p-3 md:p-4 mb-8 md:mb-10 bg-white rounded-2xl border border-gray-100 shadow-sm -mx-3 md:mx-0 overflow-x-auto">
-            <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
-                <span class="text-[10px] text-amber-600 font-black uppercase w-28 shrink-0">1. 물류·정산</span>
-                {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
-                <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
-                <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
-                <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
-                <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
-                {% if is_master %}<a href="/logi/driver-payout" target="_blank" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200 transition">기사정산(새창)</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=main_display" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'main_display' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메인화면설정</a>{% endif %}
-                <a href="/admin?tab=stats" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'stats' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">통계</a>
+        <div class="flex flex-col gap-4 p-3 md:p-4 mb-8 md:mb-10 bg-white rounded-2xl border border-gray-100 shadow-sm -mx-3 md:mx-0 overflow-x-auto text-left">
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-amber-600 font-bold uppercase w-32 shrink-0">상품·카테고리</span>
+                <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
+                <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
+                {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=main_display" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'main_display' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메인화면설정</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=sellers" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'sellers' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">판매자 관리</a>{% endif %}
             </div>
-            <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
-                <span class="text-[10px] text-teal-600 font-black uppercase w-28 shrink-0">2. 마케팅·회원</span>
-                {% if is_master %}<a href="/admin?tab=messages" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'messages' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메시지 발송</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=solapi_check" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'solapi_check' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">솔라피 확인</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=popup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">알림팝업</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=utm" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'utm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">유입/광고</a>{% endif %}
-                <a href="/admin?tab=reviews" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'reviews' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">리뷰 관리</a>
-                {% if is_master %}<a href="/admin?tab=sellers" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'sellers' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">판매자 관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=point_manage" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'point_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">포인트 관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=members" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'members' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원관리</a>{% endif %}
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-teal-600 font-bold uppercase w-32 shrink-0">주문·정산</span>
+                {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-left transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
+                <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문·매출 집계</a>
+                <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
+                {% if is_master %}<a href="/logi/driver-payout" target="_blank" class="px-4 py-3 rounded-xl text-left bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200 transition">기사정산(새창)</a>{% endif %}
             </div>
-            <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
-                <span class="text-[10px] text-gray-500 font-black uppercase w-28 shrink-0">3. 기타</span>
-                {% if is_master %}<a href="/admin?tab=marketing_cost" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'marketing_cost' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">마케팅비 사용내역</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=board_manage" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'board_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">게시판 관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=event_point_requests" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'event_point_requests' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이벤트 포인트 요청</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=member_grade" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'member_grade' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원 등급</a>{% endif %}
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-indigo-600 font-bold uppercase w-32 shrink-0">회원·포인트</span>
+                {% if is_master %}<a href="/admin?tab=members" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'members' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=member_grade" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'member_grade' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원 등급</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=point_manage" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'point_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">포인트 관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=event_point_requests" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'event_point_requests' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이벤트 포인트 요청</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=marketing_cost" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'marketing_cost' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">마케팅비 사용내역</a>{% endif %}
+            </div>
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-violet-600 font-bold uppercase w-32 shrink-0">콘텐츠·마케팅</span>
+                <a href="/admin?tab=reviews" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'reviews' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">리뷰 관리</a>
+                {% if is_master %}<a href="/admin?tab=board_manage" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'board_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">게시판 관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=popup" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">알림팝업</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=messages" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'messages' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메시지 발송</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=solapi_check" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'solapi_check' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">솔라피 확인</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=utm" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'utm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">유입/광고</a>{% endif %}
+            </div>
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-gray-600 font-bold uppercase w-32 shrink-0">설정·통계</span>
+                <a href="/admin?tab=stats" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'stats' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">통계</a>
+                {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
             </div>
         </div>
 
@@ -12230,26 +12462,34 @@ def admin_dashboard():
                         </div>
                         <div>
                             <h5 class="text-sm font-black text-gray-700 mb-3">이벤트 게시판</h5>
-                            <p class="text-[11px] text-gray-500 font-bold mb-2">이벤트 게시판 상단 공지. 공지 등록/수정은 이벤트 게시판 페이지에서도 가능합니다.</p>
-                            <div class="mb-4"><a href="/admin/board/event/notice/write" class="inline-block px-4 py-2 bg-amber-500 text-white rounded-xl text-[11px] font-black hover:bg-amber-600">📌 공지글 등록</a></div>
+                            <p class="text-[11px] text-gray-500 font-bold mb-2">이벤트 게시판의 공지·일반글을 한곳에서 조회할 수 있습니다. 공지는 이벤트 게시판 목록 상단에 노출됩니다. 수정·삭제·공지 설정은 아래 테이블에서 할 수 있습니다.</p>
+                            <div class="flex flex-wrap items-center gap-2 mb-4">
+                                <span class="text-[11px] text-gray-500 font-bold mr-1">표시:</span>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&e_limit=5{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_e_limit == 5 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">5</a>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&e_limit=20{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_e_limit == 20 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">20</a>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&e_limit=50{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_e_limit == 50 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">50</a>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&e_limit=100{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_e_limit == 100 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">100</a>
+                            </div>
+                            <div class="mb-4"><a href="/admin/board/event/notice/write" class="inline-block px-4 py-2 bg-amber-500 text-white rounded-xl text-[11px] font-black hover:bg-amber-600">📌 공지글 등록</a> <a href="/board/event" target="_blank" class="inline-block px-4 py-2 bg-teal-600 text-white rounded-xl text-[11px] font-black hover:bg-teal-700">이벤트 게시판 보기</a></div>
                             <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-x-auto -mx-3 md:mx-0">
-                                <table class="w-full text-left text-[11px] min-w-[600px]">
+                                <table class="w-full text-left text-[11px] min-w-[680px]">
                                     <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-4">ID</th><th class="p-4">제목</th><th class="p-4">공지</th><th class="p-4">작성자</th><th class="p-4">작성일</th><th class="p-4">관리</th></tr></thead>
                                     <tbody>
-                                        {% for p in admin_event_notices %}
+                                        {% for p in admin_event_posts %}
                                         <tr class="border-b border-gray-50 hover:bg-gray-50/50">
                                             <td class="p-4">{{ p.id }}</td>
-                                            <td class="p-4 font-bold">{{ p.title or '-' }}</td>
-                                            <td class="p-4"><span class="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-black rounded">공지</span></td>
+                                            <td class="p-4 font-bold max-w-[200px] truncate" title="{{ p.title or '-' }}">{{ p.title or '-' }}</td>
+                                            <td class="p-4"><form action="/admin/board/event/{{ p.id }}/notice" method="POST" class="inline"><button type="submit" class="px-2 py-1 rounded text-[10px] font-black {% if p.is_notice %}bg-amber-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ '공지 해제' if p.is_notice else '공지로' }}</button></form></td>
                                             <td class="p-4">{{ p.user_name or '-' }}</td>
                                             <td class="p-4">{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '-' }}</td>
                                             <td class="p-4">
+                                                <a href="/board/event/{{ p.id }}" target="_blank" class="text-teal-600 font-black mr-2">보기</a>
                                                 <a href="/admin/board/event/notice/{{ p.id }}/edit" class="text-teal-600 font-black mr-2">수정</a>
-                                                <form action="/admin/board/event/{{ p.id }}/notice" method="POST" class="inline" onsubmit="return confirm('공지를 해제하시겠습니까?');"><button type="submit" class="text-amber-600 font-black">공지 해제</button></form>
+                                                <form action="/admin/board/event/{{ p.id }}/delete" method="POST" class="inline" onsubmit="return confirm('이 글을 삭제하시겠습니까? 복구할 수 없습니다.');"><button type="submit" class="text-red-600 font-black">삭제</button></form>
                                             </td>
                                         </tr>
                                         {% else %}
-                                        <tr><td colspan="6" class="p-8 text-center text-gray-400">등록된 공지가 없습니다.</td></tr>
+                                        <tr><td colspan="6" class="p-8 text-center text-gray-400">등록된 글이 없습니다.</td></tr>
                                         {% endfor %}
                                     </tbody>
                                 </table>
@@ -12486,7 +12726,10 @@ def admin_dashboard():
                 </form>
                 {% if email_order_product_totals %}
                 <div class="mb-8">
-                    <h4 class="text-sm font-black text-gray-800 mb-3">판매상품명별 판매수량총합계 <span class="text-[10px] font-normal text-gray-500">(상태={{ email_order_status_filter }}{% if email_order_date %} · {{ email_order_date.strftime('%Y-%m-%d') }}{% else %} · 날짜전체{% endif %})</span></h4>
+                    <div class="flex flex-wrap items-center gap-2 mb-3">
+                        <h4 class="text-sm font-black text-gray-800">판매상품명별 판매수량총합계 <span class="text-[10px] font-normal text-gray-500">(상태={{ email_order_status_filter }}{% if email_order_date %} · {{ email_order_date.strftime('%Y-%m-%d') }}{% else %} · 날짜전체{% endif %})</span></h4>
+                        <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-xs hover:bg-amber-600" data-table-id="email-order-product-totals-table">복사하기</button>
+                    </div>
                     <p class="text-[10px] text-gray-500 mb-2">발주할 상품을 체크한 뒤 「선택 항목 발주서」를 누르면 외부 업체용 발주서를 볼 수 있습니다.</p>
                     <div class="flex flex-wrap items-center gap-2 mb-3">
                         <button type="button" id="email-order-po-btn" class="px-4 py-2 bg-teal-600 text-white rounded-xl text-xs font-black hover:bg-teal-700">선택 항목 발주서</button>
@@ -12494,7 +12737,7 @@ def admin_dashboard():
                         <button type="button" id="email-order-po-select-none" class="px-3 py-1.5 bg-gray-100 text-gray-500 rounded-lg text-[10px] font-black">선택 해제</button>
                     </div>
                     <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white max-w-3xl">
-                        <table class="w-full text-left min-w-[400px] text-[11px] font-bold border-collapse">
+                        <table id="email-order-product-totals-table" class="w-full text-left min-w-[400px] text-[11px] font-bold border-collapse">
                             <thead class="bg-teal-800 text-white">
                                 <tr>
                                     <th class="p-3 border border-teal-700 w-10 text-center">선택</th>
@@ -12626,9 +12869,12 @@ def admin_dashboard():
                 </div>
                 {% endif %}
                 <div class="mb-8">
-                    <h4 class="text-sm font-black text-gray-800 mb-3">조회결과 상세 <span class="text-[10px] font-normal text-gray-500">(총 {{ email_order_filtered_lines|length }}건)</span></h4>
+                    <div class="flex flex-wrap items-center gap-2 mb-3">
+                        <h4 class="text-sm font-black text-gray-800">조회결과 상세 <span class="text-[10px] font-normal text-gray-500">(총 {{ email_order_filtered_lines|length }}건)</span></h4>
+                        <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-xs hover:bg-amber-600" data-table-id="email-order-detail-table">복사하기</button>
+                    </div>
                     <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
-                        <table class="w-full text-left min-w-[800px] text-[11px] font-bold border-collapse">
+                        <table id="email-order-detail-table" class="w-full text-left min-w-[800px] text-[11px] font-bold border-collapse">
                             <thead class="bg-gray-800 text-white">
                                 <tr>
                                     <th class="p-3 border border-gray-600 w-24">카테고리</th>
@@ -12730,7 +12976,8 @@ def admin_dashboard():
                 <hr class="my-10 border-gray-200">
                 <div class="mb-8">
                     <h3 class="text-base font-black text-gray-800 mb-2">수기 이메일 발송</h3>
-                    <p class="text-[11px] text-gray-500 font-bold mb-4">발주양식과 별개로 수신·제목·본문을 직접 입력하여 이메일을 발송합니다.</p>
+                    <p class="text-[11px] text-gray-500 font-bold mb-2">발주양식과 별개로 수신·제목·본문을 직접 입력하여 이메일을 발송합니다.</p>
+                    <p class="text-[11px] text-gray-700 font-bold mb-4">카테고리별 담당자 이메일: {% for c in seller_request_categories %}<span class="inline-block mr-3">{{ c.name }} <code class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px]">{{ c.manager_email or '-' }}</code></span>{% endfor %}{% if not seller_request_categories %}등록된 카테고리 없음{% endif %}</p>
                     <div class="bg-white rounded-2xl border border-gray-200 p-6 max-w-xl">
                         <label class="block text-[11px] font-black text-gray-600 mb-1">수신 이메일</label>
                         <input type="email" id="manual-email-to" placeholder="받는 사람 이메일" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm mb-3">
@@ -12904,6 +13151,38 @@ def admin_dashboard():
                         else { msgEl.textContent = d.message || '발송 실패'; msgEl.className = 'ml-3 text-xs font-bold text-red-600'; }
                     }).catch(function(){ msgEl.textContent = '요청 실패'; msgEl.className = 'ml-3 text-xs font-bold text-red-600'; });
                 });
+                (function(){
+                    function cellText(cell) { var t = (cell.innerText || cell.textContent || '').trim(); return t.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' '); }
+                    function tableToPlainText(tableId) {
+                        var table = document.getElementById(tableId);
+                        if (!table) return '';
+                        var rows = [];
+                        var thead = table.querySelector('thead');
+                        if (thead) thead.querySelectorAll('tr').forEach(function(tr) { var cells = []; tr.querySelectorAll('th, td').forEach(function(c) { cells.push(cellText(c)); }); if (cells.length) rows.push(cells.join('\t')); });
+                        var tbody = table.querySelector('tbody');
+                        if (tbody) tbody.querySelectorAll('tr').forEach(function(tr) { var cells = []; tr.querySelectorAll('th, td').forEach(function(c) { cells.push(cellText(c)); }); if (cells.length) rows.push(cells.join('\t')); });
+                        var tfoot = table.querySelector('tfoot');
+                        if (tfoot) tfoot.querySelectorAll('tr').forEach(function(tr) { var cells = []; tr.querySelectorAll('th, td').forEach(function(c) { cells.push(cellText(c)); }); if (cells.length) rows.push(cells.join('\t')); });
+                        return rows.join('\r\n');
+                    }
+                    document.querySelectorAll('.admin-copy-table-btn').forEach(function(btn) {
+                        btn.addEventListener('click', function() {
+                            var tableId = this.getAttribute('data-table-id');
+                            if (!tableId) return;
+                            var text = tableToPlainText(tableId);
+                            if (!text) { alert('복사할 내용이 없습니다.'); return; }
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(text).then(function() { alert('클립보드에 복사되었습니다. 이메일 본문에 붙여넣기(Ctrl+V) 하세요.'); }).catch(function() { fallbackCopy(text); });
+                            } else { fallbackCopy(text); }
+                            function fallbackCopy(str) {
+                                var ta = document.createElement('textarea'); ta.value = str; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+                                document.body.appendChild(ta); ta.select();
+                                try { document.execCommand('copy'); alert('클립보드에 복사되었습니다. 이메일 본문에 붙여넣기(Ctrl+V) 하세요.'); } catch (e) { alert('복사 실패. 브라우저에서 클립보드 권한을 허용해 주세요.'); }
+                                document.body.removeChild(ta);
+                            }
+                        });
+                    });
+                })();
             })();
             </script>
 
@@ -14290,6 +14569,7 @@ def admin_dashboard():
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-base font-black text-gray-800">판매상품명별 판매수량 총합계</h3>
                         <div class="flex gap-2 flex-wrap">
+                            <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-amber-600 inline-flex items-center justify-center" data-table-id="sales-summary-table">복사하기</button>
                             <a href="/admin/orders/sales_summary_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
                             <a href="/admin/orders/sales_summary_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
                         </div>
@@ -14327,6 +14607,7 @@ def admin_dashboard():
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-base font-black text-gray-800">조회 결과 상세 (주문일시 · 오더아이디 · 품목 · 수량 · 상태)</h3>
                         <div class="flex gap-2 flex-wrap">
+                            <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-amber-600 inline-flex items-center justify-center" data-table-id="sales-detail-table">복사하기</button>
                             <a href="/admin/orders/sales_detail_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
                             <a href="/admin/orders/sales_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
                         </div>
@@ -14387,6 +14668,7 @@ def admin_dashboard():
             <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
                 <h3 class="text-base font-black text-gray-800">배송집계 테이블</h3>
                 <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-amber-600 inline-flex items-center justify-center" data-table-id="delivery-summary-table">복사하기</button>
                     <a href="/admin/orders/delivery_summary_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
                     <a href="/admin/orders/delivery_summary_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
                     <a href="/admin/orders/excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}" class="bg-teal-100 text-teal-700 px-5 py-2.5 rounded-2xl font-black text-xs">Excel</a>
@@ -14398,11 +14680,12 @@ def admin_dashboard():
                     <span class="text-xs font-black">전체 선택</span>
                 </label>
                 <button type="button" id="btnBulkDelivery" class="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black text-xs shadow-lg">일괄 배송요청</button>
+                <button type="button" id="btnDeleteOrders" class="bg-red-600 text-white px-8 py-3 rounded-2xl font-black text-xs shadow-lg">선택 주문 삭제</button>
                 <button type="button" id="btnPrintInvoices" class="bg-gray-800 text-white px-8 py-3 rounded-2xl font-black text-xs shadow-lg">송장 출력</button>
             </div>
 
             <div id="delivery-summary-table-wrap" class="bg-white rounded-[2.5rem] shadow-xl border border-gray-50 overflow-x-auto -mx-3 md:mx-0 mb-12">
-                <table class="w-full text-[10px] font-black min-w-[1200px]">
+                <table id="delivery-summary-table" class="w-full text-[10px] font-black min-w-[1200px]">
                     <thead class="bg-gray-800 text-white">
                         <tr><th class="p-6 text-center">선택</th><th class="p-6">오더넘버</th><th class="p-6">주문일 상태</th><th class="p-6">고객정보</th><th class="p-6">배송지</th><th class="p-6">품목</th><th class="p-6 text-center">송장</th></tr>
                     </thead>
@@ -14592,6 +14875,22 @@ def admin_dashboard():
                         } else { alert(data.message || '처리 실패'); }
                     }).catch(function() { alert("통신 오류"); });
                 };
+                window.deleteSelectedOrders = function() {
+                    var ids = getCheckedOrderIds();
+                    if (ids.length === 0) { alert("삭제할 주문을 선택하세요."); return; }
+                    if (!confirm(ids.length + "건의 주문 정보를 삭제합니다. 복구할 수 없습니다. 계속할까요?")) return;
+                    var fd = new FormData();
+                    fd.append('order_ids', ids.join(','));
+                    fetch('/admin/orders/delete_selected', {
+                        method: 'POST',
+                        body: fd,
+                        credentials: 'same-origin'
+                    }).then(function(r) {
+                        if (!r.ok) { alert("삭제 중 오류가 발생했습니다."); return; }
+                        // 플래시 메시지 반영을 위해 페이지 새로고침
+                        window.location.reload();
+                    }).catch(function() { alert("통신 오류"); });
+                };
                 var sel = document.getElementById('selectAllOrders');
                 if (sel) sel.addEventListener('change', function() {
                     var c = this.checked;
@@ -14601,6 +14900,65 @@ def admin_dashboard():
                 if (btnPrint) btnPrint.addEventListener('click', window.printSelectedInvoices);
                 var btnBulk = document.getElementById('btnBulkDelivery');
                 if (btnBulk) btnBulk.addEventListener('click', window.requestBulkDelivery);
+                var btnDelete = document.getElementById('btnDeleteOrders');
+                if (btnDelete) btnDelete.addEventListener('click', window.deleteSelectedOrders);
+            })();
+            </script>
+            <script>
+            (function() {
+                function cellText(cell) {
+                    var t = (cell.innerText || cell.textContent || '').trim();
+                    return t.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ');
+                }
+                function tableToPlainText(tableId) {
+                    var table = document.getElementById(tableId);
+                    if (!table) return '';
+                    var rows = [];
+                    var thead = table.querySelector('thead');
+                    if (thead) thead.querySelectorAll('tr').forEach(function(tr) {
+                        var cells = [];
+                        tr.querySelectorAll('th, td').forEach(function(c) { cells.push(cellText(c)); });
+                        if (cells.length) rows.push(cells.join('\t'));
+                    });
+                    var tbody = table.querySelector('tbody');
+                    if (tbody) tbody.querySelectorAll('tr').forEach(function(tr) {
+                        var cells = [];
+                        tr.querySelectorAll('th, td').forEach(function(c) { cells.push(cellText(c)); });
+                        if (cells.length) rows.push(cells.join('\t'));
+                    });
+                    var tfoot = table.querySelector('tfoot');
+                    if (tfoot) tfoot.querySelectorAll('tr').forEach(function(tr) {
+                        var cells = [];
+                        tr.querySelectorAll('th, td').forEach(function(c) { cells.push(cellText(c)); });
+                        if (cells.length) rows.push(cells.join('\t'));
+                    });
+                    return rows.join('\r\n');
+                }
+                document.querySelectorAll('.admin-copy-table-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var tableId = this.getAttribute('data-table-id');
+                        if (!tableId) return;
+                        var text = tableToPlainText(tableId);
+                        if (!text) { alert('복사할 내용이 없습니다.'); return; }
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(text).then(function() {
+                                alert('클립보드에 복사되었습니다. 이메일 본문에 붙여넣기(Ctrl+V) 하세요.');
+                            }).catch(function() { fallbackCopy(text); });
+                        } else { fallbackCopy(text); }
+                        function fallbackCopy(str) {
+                            var ta = document.createElement('textarea');
+                            ta.value = str;
+                            ta.style.position = 'fixed'; ta.style.left = '-9999px';
+                            document.body.appendChild(ta);
+                            ta.select();
+                            try {
+                                document.execCommand('copy');
+                                alert('클립보드에 복사되었습니다. 이메일 본문에 붙여넣기(Ctrl+V) 하세요.');
+                            } catch (e) { alert('복사 실패. 브라우저에서 클립보드 권한을 허용해 주세요.'); }
+                            document.body.removeChild(ta);
+                        }
+                    });
+                });
             })();
             </script>
 
@@ -15199,47 +15557,53 @@ def admin_dashboard():
         <p class="text-xl font-black text-white">{{ "{:,}".format(stats.grand_total) }}원</p>
     </div>
 </div>
-    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-10 xl:py-12 px-4 md:px-6 xl:px-8 font-black text-xs md:text-sm text-left min-h-screen bg-gray-50/30">
+    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-10 xl:py-12 px-4 md:px-6 xl:px-8 font-sans font-medium text-xs md:text-sm text-left min-h-screen bg-gray-50/30 admin-page">
         <div class="flex justify-between items-center mb-8 md:mb-10 text-left">
-            <h2 class="text-2xl md:text-3xl font-black text-orange-700 italic text-left">Admin Panel</h2>
-            <div class="flex gap-4 text-left"><a href="/logout" class="absolute top-6 right-6 z-[9999] text-[12px] md:text-sm bg-gray-100 px-6 py-3 md:px-5 md:py-2 rounded-full text-gray-500 font-black hover:bg-red-50 hover:text-red-500 transition-all shadow-md border border-gray-200 text-center">LOGOUT</a></div>
+            <h2 class="text-2xl md:text-3xl font-bold text-orange-700 italic text-left">Admin Panel</h2>
+            <div class="flex gap-4 text-left"><a href="/logout" class="absolute top-6 right-6 z-[9999] text-xs md:text-sm bg-gray-100 px-6 py-3 md:px-5 md:py-2 rounded-full text-gray-500 font-semibold hover:bg-red-50 hover:text-red-500 transition-all shadow-md border border-gray-200 text-center">LOGOUT</a></div>
         </div>
         
         <div class="flex flex-col gap-4 p-4 mb-10 bg-white rounded-2xl border border-gray-100 shadow-sm text-left">
-            <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
-                <span class="text-[10px] text-amber-600 font-black uppercase w-28 shrink-0">1. 물류·정산</span>
-                {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
-                <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
-                <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
-                <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문 및 매출 집계</a>
-                <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
-                {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=main_display" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'main_display' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메인화면설정</a>{% endif %}
-                <a href="/admin?tab=stats" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'stats' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">통계</a>
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-amber-600 font-bold uppercase w-32 shrink-0">상품·카테고리</span>
+                <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
+                <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
+                {% if is_master %}<a href="/admin?tab=categories" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'categories' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">카테고리관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=main_display" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'main_display' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메인화면설정</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=sellers" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'sellers' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">판매자 관리</a>{% endif %}
             </div>
-            <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
-                <span class="text-[10px] text-teal-600 font-black uppercase w-28 shrink-0">2. 마케팅·회원</span>
-                {% if is_master %}<a href="/admin?tab=messages" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'messages' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메시지 발송</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=solapi_check" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'solapi_check' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">솔라피 확인</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=popup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs trans
-ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">알림팝업</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=utm" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'utm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">유입/광고</a>{% endif %}
-                <a href="/admin?tab=reviews" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'reviews' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">리뷰 관리</a>
-                {% if is_master %}<a href="/admin?tab=sellers" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'sellers' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">판매자 관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=point_manage" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'point_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">포인트 관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=members" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'members' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원관리</a>{% endif %}
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-teal-600 font-bold uppercase w-32 shrink-0">주문·정산</span>
+                {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-left transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
+                <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문·매출 집계</a>
+                <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
+                {% if is_master %}<a href="/logi/driver-payout" target="_blank" class="px-4 py-3 rounded-xl text-left bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200 transition">기사정산(새창)</a>{% endif %}
             </div>
-            <div class="flex flex-wrap gap-2 items-center [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap">
-                <span class="text-[10px] text-gray-500 font-black uppercase w-28 shrink-0">3. 기타</span>
-                {% if is_master %}<a href="/admin?tab=marketing_cost" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'marketing_cost' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">마케팅비 사용내역</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=board_manage" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'board_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">게시판 관리</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=event_point_requests" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'event_point_requests' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이벤트 포인트 요청</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
-                {% if is_master %}<a href="/admin?tab=member_grade" class="px-4 py-3 rounded-xl text-center font-black text-[11px] md:text-xs transition {% if tab == 'member_grade' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원 등급</a>{% endif %}
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-indigo-600 font-bold uppercase w-32 shrink-0">회원·포인트</span>
+                {% if is_master %}<a href="/admin?tab=members" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'members' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=member_grade" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'member_grade' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">회원 등급</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=point_manage" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'point_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">포인트 관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=event_point_requests" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'event_point_requests' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이벤트 포인트 요청</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=marketing_cost" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'marketing_cost' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">마케팅비 사용내역</a>{% endif %}
+            </div>
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-violet-600 font-bold uppercase w-32 shrink-0">콘텐츠·마케팅</span>
+                <a href="/admin?tab=reviews" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'reviews' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">리뷰 관리</a>
+                {% if is_master %}<a href="/admin?tab=board_manage" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'board_manage' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">게시판 관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=popup" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">알림팝업</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=messages" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'messages' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">메시지 발송</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=solapi_check" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'solapi_check' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">솔라피 확인</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=utm" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'utm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">유입/광고</a>{% endif %}
+            </div>
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
+                <span class="text-[10px] text-gray-600 font-bold uppercase w-32 shrink-0">설정·통계</span>
+                <a href="/admin?tab=stats" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'stats' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">통계</a>
+                {% if is_master %}<a href="/admin?tab=revenue_report" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'revenue_report' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">수익통계</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=delivery_zone" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'delivery_zone' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">배송구역관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=backup" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'backup' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">백업</a>{% endif %}
             </div>
         </div>
 
@@ -16643,13 +17007,10 @@ def admin_event_notice_write():
 
 @login_required
 def admin_event_notice_edit(eid):
-    """관리자: 이벤트 게시판 공지글 수정."""
+    """관리자: 이벤트 게시판 글 수정 (공지·일반 모두)."""
     if not current_user.is_admin:
         return redirect('/')
     p = EventBoardPost.query.get_or_404(eid)
-    if not p.is_notice:
-        flash("공지글만 수정할 수 있습니다.")
-        return redirect(url_for('board_event'))
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()
         if not title:
@@ -16658,23 +17019,35 @@ def admin_event_notice_edit(eid):
         p.title = title[:200]
         p.content = (request.form.get('content') or '').strip() or None
         db.session.commit()
-        flash("공지글이 수정되었습니다.")
-        return redirect(url_for('board_event'))
+        flash("글이 수정되었습니다.")
+        return redirect('/admin?tab=board_manage')
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-2xl mx-auto py-8 px-4 font-black text-left">
-            <a href="/board/event" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 이벤트 게시판</a>
-            <h1 class="text-2xl font-black text-gray-900 mb-6">이벤트 게시판 공지글 수정</h1>
+            <a href="/admin?tab=board_manage" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 게시판 관리</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">이벤트 게시판 글 수정</h1>
             <form method="POST" action="/admin/board/event/notice/{{ eid }}/edit" class="space-y-4">
                 <div><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" value="{{ post.title }}"></div>
                 <div><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="5" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ post.content or '' }}</textarea></div>
-                <button type="submit" class="w-full py-4 bg-amber-600 text-white rounded-xl font-black hover:bg-amber-700 transition">저장</button>
+                <button type="submit" class="w-full py-4 bg-teal-600 text-white rounded-xl font-black hover:bg-teal-700 transition">저장</button>
             </form>
         </div>
         """ + FOOTER_HTML,
         post=p,
         eid=eid
     )
+
+
+@login_required
+def admin_event_post_delete(eid):
+    """관리자: 이벤트 게시판 글 삭제."""
+    if not current_user.is_admin:
+        return redirect('/')
+    p = EventBoardPost.query.get_or_404(eid)
+    db.session.delete(p)
+    db.session.commit()
+    flash("글이 삭제되었습니다.")
+    return redirect('/admin?tab=board_manage')
 
 
 @login_required
@@ -17948,6 +18321,57 @@ def admin_orders_delete_all():
     except Exception as e:
         db.session.rollback()
         flash(f"주문 전체 삭제 중 오류: {e}")
+    return redirect('/admin?tab=orders')
+
+
+@login_required
+def admin_orders_delete_selected():
+    """선택한 주문만 삭제 (Order, OrderItem 및 주요 연관 테이블). 관리자 전용."""
+    if not current_user.is_admin:
+        return redirect('/')
+    if request.method != 'POST':
+        flash("선택 삭제는 POST 요청만 가능합니다.")
+        return redirect('/admin?tab=orders')
+
+    order_ids_str = (request.form.get('order_ids') or '').strip()
+    if not order_ids_str:
+        flash("삭제할 주문을 선택하세요.")
+        return redirect('/admin?tab=orders')
+
+    order_id_list = [s.strip() for s in order_ids_str.split(',') if s.strip()]
+    if not order_id_list:
+        flash("삭제할 주문을 선택하세요.")
+        return redirect('/admin?tab=orders')
+
+    try:
+        # 선택된 오더아이디로 실제 Order 레코드 조회
+        target_orders = Order.query.filter(Order.order_id.in_(order_id_list)).all()
+        if not target_orders:
+            flash("선택된 주문을 찾을 수 없습니다.")
+            return redirect('/admin?tab=orders')
+
+        order_ids = [o.id for o in target_orders]
+        order_id_strs = [o.order_id or '' for o in target_orders if o.order_id]
+
+        # FK 순서: order_item 참조하는 것 먼저
+        oi_ids = [r.id for r in OrderItem.query.filter(OrderItem.order_id.in_(order_ids)).with_entities(OrderItem.id).all()]
+        if oi_ids:
+            EmailOrderLineStatus.query.filter(EmailOrderLineStatus.order_item_id.in_(oi_ids)).delete(synchronize_session=False)
+        OrderItemLog.query.filter(OrderItemLog.order_id.in_(order_ids)).delete(synchronize_session=False)
+        Settlement.query.filter(Settlement.order_id.in_(order_ids)).delete(synchronize_session=False)
+        MarketingCost.query.filter(MarketingCost.order_id.in_(order_ids)).delete(synchronize_session=False)
+        Review.query.filter(Review.order_id.in_(order_ids)).delete(synchronize_session=False)
+        if order_id_strs:
+            DeliveryTask.query.filter(DeliveryTask.order_id.in_(order_id_strs)).delete(synchronize_session=False)
+            DeliveryLog.query.filter(DeliveryLog.order_id.in_(order_id_strs)).delete(synchronize_session=False)
+        OrderItem.query.filter(OrderItem.order_id.in_(order_ids)).delete(synchronize_session=False)
+        Order.query.filter(Order.id.in_(order_ids)).delete(synchronize_session=False)
+
+        db.session.commit()
+        flash(f"선택한 주문 {len(order_ids)}건이 삭제되었습니다.")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"선택 주문 삭제 중 오류: {e}")
     return redirect('/admin?tab=orders')
 
 

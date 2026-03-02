@@ -276,6 +276,16 @@ class FreeBoard(db.Model):
     is_notice = db.Column(db.Boolean, default=False)
 
 
+class FreeBoardAttachment(db.Model):
+    """자유게시판 첨부 (사진 여러 장, 동영상)"""
+    __tablename__ = "free_board_attachment"
+    id = db.Column(db.Integer, primary_key=True)
+    free_board_id = db.Column(db.Integer, db.ForeignKey('free_board.id', ondelete='CASCADE'), nullable=False)
+    file_url = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(20), nullable=False)  # 'image' | 'video'
+    sort_order = db.Column(db.Integer, default=0)
+
+
 class EventPointRequest(db.Model):
     """이벤트 게시판 — SNS 공유 URL·신청 이메일·글 작성 후 포인트 지급 요청. 관리자가 링크 확인 후 이메일별 포인트 지급."""
     __tablename__ = "event_point_request"
