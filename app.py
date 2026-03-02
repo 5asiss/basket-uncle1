@@ -3107,27 +3107,39 @@ def search_view():
 
 @app.route('/')
 def index():
-    """메인 페이지 (디자인 유지). 카테고리·상품 개수는 관리자 > 메인화면 설정에서 조정."""
+    """메인 페이지 (디자인 유지). 카테고리·상품 개수는 관리자 > 메인화면 설정에서 조정. 판매 마감(재고0·마감경과) 상품은 노출하지 않음."""
     _record_page_view('main')
     run_product_stock_reset()
+    now = now_kst()
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
     main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
     all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
     main_categories = all_categories[:main_cat_count]
     grouped_products = {}
-    order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
-    
-    latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(latest_count).all()
+    # 판매 중인 상품만: 마감 전 + 재고 있음
+    available_filter = and_(
+        or_(Product.deadline.is_(None), Product.deadline > now),
+        or_(Product.stock.is_(None), Product.stock > 0)
+    )
+    order_logic = Product.id.desc()
+
+    latest_all = Product.query.filter_by(is_active=True).filter(available_filter).order_by(Product.id.desc()).limit(latest_count * 2).all()
     random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
-    
-    today_end = now_kst().replace(hour=23, minute=59, second=59)
-    closing_today = Product.query.filter(Product.is_active == True, Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(closing_count).all()
-    latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
+
+    today_end = now.replace(hour=23, minute=59, second=59)
+    # 남은 시간 짧은 순 = 마감일 가까운 순 (deadline 오름차순)
+    closing_today = Product.query.filter(
+        Product.is_active == True,
+        Product.deadline > now,
+        Product.deadline <= today_end,
+        or_(Product.stock.is_(None), Product.stock > 0)
+    ).order_by(Product.deadline.asc()).limit(closing_count).all()
 
     for cat in main_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(order_logic, Product.id.desc()).limit(products_per_cat).all()
+        prods = Product.query.filter_by(category=cat.name, is_active=True).filter(available_filter).order_by(Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
         if prods: grouped_products[cat] = prods
 
+    latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
     all_pids = set()
     for p in random_latest: all_pids.add(p.id)
     for p in closing_today: all_pids.add(p.id)
@@ -3193,9 +3205,7 @@ def index():
     display: flex;
     align-items: center;
 }
-@media (min-width: 768px) {
-    .page-main .hero-wrap { min-height: 70vh; padding: clamp(4rem, 12vw, 8rem) 1.5rem; }
-}
+@media (min-width: 768px) { .page-main .hero-wrap { min-height: 70vh; padding: clamp(4rem, 12vw, 8rem) 1.5rem; } }
 .page-main .hero-wrap::before {
     content: '';
     position: absolute;
@@ -3243,7 +3253,7 @@ def index():
 }
 .page-main .hero-title .accent { color: #4ade80; font-weight: 900; letter-spacing: -0.02em; }
 .page-main .hero-divider {
-    width: 4rem;
+    width: 7rem;
     height: 3px;
     background: linear-gradient(90deg, transparent, rgba(74, 222, 128, 0.6), transparent);
     margin: 0 auto 2rem;
@@ -3253,9 +3263,9 @@ def index():
     font-size: clamp(0.8rem, 1.7vw, 1.1rem);
     color: rgba(226, 232, 240, 0.9);
     line-height: 1.7;
-    max-width: 34rem;
+    max-width: 36rem;
     margin: 0 auto 1.5rem;
-    font-weight: 500;
+    font-weight: 600;
 }
 @media (min-width: 768px) { .page-main .hero-desc { margin-bottom: 2.5rem; } }
 @media (max-width: 640px) {
@@ -3409,6 +3419,7 @@ def index():
         <h1 class="text-2xl md:text-3xl lg:text-4xl font-semibold text-white leading-snug md:leading-snug mb-3">
             엄선된 제철 농산물,<br class="hidden md:block">당일 배송으로 가장 신선하게 전해드립니다.
         </h1>
+        <div class="hero-divider"></div>
         <p class="text-[13px] md:text-sm text-slate-300 mt-1 mb-6 max-w-2xl">
             송도 지역을 위한 맞춤형 서비스, 효율적인 유통시스템으로 비용을 최소화하고, 최상의 품질을 유지합니다.
         </p>
@@ -3648,7 +3659,7 @@ def index():
     latest_all = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(50).all()
     random_latest = random.sample(latest_all, min(len(latest_all), 50)) if latest_all else []
     
-    # 오늘 마감 상품 (트래픽 절감용 상한)
+    # 오늘 마감 상품 — 남은 시간 짧은 순(deadline 오름차순)
     today_end = now_kst().replace(hour=23, minute=59, second=59)
     closing_today = Product.query.filter(
         Product.is_active == True,
@@ -4923,18 +4934,83 @@ def board_partnership_detail(pid):
 
 
 # ---------- 자유게시판 ----------
-@app.route('/board/free', methods=['GET', 'POST'])
+@app.route('/board/free', methods=['GET'])
 def board_free():
-    """자유게시판 목록 및 글쓰기 (아이디어·제안 등 자유 입력). 사진 여러 장·동영상 첨부 가능."""
+    """자유게시판 목록 (아이디어·제안 등 자유 입력). 글쓰기는 별도 페이지에서 작성."""
+    notice_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=True).order_by(FreeBoard.id.desc()).all()
+    normal_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=False).order_by(FreeBoard.id.desc()).all()
+    all_posts = list(notice_posts) + list(normal_posts)
+    per_page = 10
+    total = len(all_posts)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(int(request.args.get('page', 1)), total_pages))
+    posts = all_posts[(page - 1) * per_page:page * per_page]
+    post_ids = [p.id for p in posts]
+    first_image_by_post = {}
+    if post_ids:
+        for att in FreeBoardAttachment.query.filter(
+            FreeBoardAttachment.free_board_id.in_(post_ids),
+            FreeBoardAttachment.file_type == 'image'
+        ).order_by(FreeBoardAttachment.free_board_id, FreeBoardAttachment.sort_order, FreeBoardAttachment.id).all():
+            if att.free_board_id not in first_image_by_post:
+                first_image_by_post[att.free_board_id] = att.file_url
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-3xl mx-auto px-4 py-12">
+            <a href="/" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 메인</a>
+            <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">자유게시판 <span class="text-sm font-bold text-gray-500">전체 {{ total }}건</span></h1>
+            <div class="flex items-center justify-between mb-4">
+                <p class="text-gray-500 text-sm">아이디어, 제안, 하고 싶은 말 등을 자유롭게 남겨 주세요.</p>
+                <a href="/board/free/write" class="px-4 py-2.5 rounded-xl bg-teal-600 text-white text-xs md:text-sm font-black shadow hover:bg-teal-700 transition">글쓰기</a>
+            </div>
+            <div class="space-y-3">
+                {% for p in posts %}
+                <a href="/board/free/{{ p.id }}" class="flex gap-4 bg-white rounded-2xl border border-gray-100 p-4 shadow-sm hover:shadow-md transition text-left {% if p.is_notice %}border-amber-200 bg-amber-50/50{% endif %}">
+                    {% if first_image_by_post.get(p.id) %}
+                    <div class="shrink-0 w-24 h-24 md:w-28 md:h-28 rounded-xl overflow-hidden bg-gray-100">
+                        <img src="{{ first_image_by_post[p.id] }}" alt="" class="w-full h-full object-cover">
+                    </div>
+                    {% endif %}
+                    <div class="min-w-0 flex-1">
+                        <p class="font-black text-gray-800">{% if p.is_notice %}<span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{% endif %}{{ p.title }}</p>
+                        <p class="text-[10px] text-gray-400 mt-1">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '익명' }}</p>
+                        {% if p.content %}<p class="text-gray-500 text-sm mt-2 line-clamp-2">{{ p.content[:120] }}{% if p.content|length > 120 %}...{% endif %}</p>{% endif %}
+                    </div>
+                </a>
+                {% else %}
+                <p class="text-gray-400 text-sm py-8 text-center">아직 글이 없습니다. 첫 글을 남겨 보세요!</p>
+                {% endfor %}
+            </div>
+            {% if total_pages > 1 %}
+            <nav class="mt-10 flex flex-wrap items-center justify-center gap-2" aria-label="페이지 이동">
+                <a href="/board/free?page=1" class="px-3 py-2 rounded-lg text-sm font-bold {% if page == 1 %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">처음</a>
+                <a href="/board/free?page={{ page - 1 }}" class="px-3 py-2 rounded-lg text-sm font-bold {% if page <= 1 %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">이전</a>
+                {% for n in range(1, total_pages + 1) %}
+                {% if n == page %}<span class="px-3 py-2 rounded-lg text-sm font-black bg-teal-600 text-white">{{ n }}</span>{% else %}<a href="/board/free?page={{ n }}" class="px-3 py-2 rounded-lg text-sm font-bold bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700">{{ n }}</a>{% endif %}
+                {% endfor %}
+                <a href="/board/free?page={{ page + 1 }}" class="px-3 py-2 rounded-lg text-sm font-bold {% if page >= total_pages %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">다음</a>
+                <a href="/board/free?page={{ total_pages }}" class="px-3 py-2 rounded-lg text-sm font-bold {% if page == total_pages %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">마지막</a>
+            </nav>
+            <p class="mt-4 text-center text-[11px] text-gray-500 font-bold">{{ page }} / {{ total_pages }} 페이지</p>
+            {% endif %}
+        </div>
+        """ + FOOTER_HTML,
+        posts=posts, total=total, page=page, total_pages=total_pages, first_image_by_post=first_image_by_post
+    )
+
+
+@app.route('/board/free/write', methods=['GET', 'POST'])
+def board_free_write():
+    """자유게시판 글쓰기 (사진 여러 장, 동영상 첨부 가능)."""
+    if not current_user.is_authenticated:
+        flash("로그인 후 작성할 수 있습니다.")
+        return redirect(url_for('login'))
     if request.method == 'POST':
-        if not current_user.is_authenticated:
-            flash("로그인 후 작성할 수 있습니다.")
-            return redirect(url_for('login'))
         title = (request.form.get('title') or '').strip()
         content = (request.form.get('content') or '').strip()
         if not title:
             flash("제목을 입력해 주세요.")
-            return redirect(url_for('board_free'))
+            return redirect(url_for('board_free_write'))
         post = FreeBoard(
             user_id=current_user.id,
             user_name=current_user.name or current_user.email or '회원',
@@ -4973,61 +5049,37 @@ def board_free():
             db.session.commit()
         flash("글이 등록되었습니다.")
         return redirect(url_for('board_free'))
-    notice_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=True).order_by(FreeBoard.id.desc()).all()
-    normal_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=False).order_by(FreeBoard.id.desc()).all()
-    all_posts = list(notice_posts) + list(normal_posts)
-    per_page = 10
-    total = len(all_posts)
-    total_pages = max(1, (total + per_page - 1) // per_page)
-    page = max(1, min(int(request.args.get('page', 1)), total_pages))
-    posts = all_posts[(page - 1) * per_page:page * per_page]
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-3xl mx-auto px-4 py-12">
-            <a href="/" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 메인</a>
-            <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">자유게시판 <span class="text-sm font-bold text-gray-500">전체 {{ total }}건</span></h1>
-            <p class="text-gray-500 text-sm mb-6">아이디어, 제안, 하고 싶은 말 등을 자유롭게 남겨 주세요.</p>
-            <div class="flex flex-col sm:flex-row gap-4 mb-8">
-                <form method="POST" action="/board/free" enctype="multipart/form-data" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm flex-1">
-                    <div class="mb-4"><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" placeholder="제목을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
-                    <div class="mb-4"><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="4" placeholder="아이디어, 제안, 하고 싶은 말 등 자유롭게 작성해 주세요." class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></textarea></div>
-                    <div class="mb-4">
-                        <label class="block text-[10px] text-gray-500 uppercase mb-1">사진 (여러 장 선택 가능)</label>
-                        <input type="file" name="images" multiple accept="image/*" class="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm">
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-[10px] text-gray-500 uppercase mb-1">동영상 (여러 개 선택 가능, mp4/webm 권장, 최대 {{ max_video_mb }}MB)</label>
-                        <input type="file" name="videos" multiple accept="video/*" class="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm">
-                    </div>
-                    <button type="submit" class="w-full py-3 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">글쓰기</button>
-                </form>
-            </div>
-            <div class="space-y-3">
-                {% for p in posts %}
-                <a href="/board/free/{{ p.id }}" class="block bg-white rounded-2xl border border-gray-100 p-4 shadow-sm hover:shadow-md transition text-left {% if p.is_notice %}border-amber-200 bg-amber-50/50{% endif %}">
-                    <p class="font-black text-gray-800">{% if p.is_notice %}<span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{% endif %}{{ p.title }}</p>
-                    <p class="text-[10px] text-gray-400 mt-1">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '익명' }}</p>
-                    {% if p.content %}<p class="text-gray-500 text-sm mt-2 line-clamp-2">{{ p.content[:120] }}{% if p.content|length > 120 %}...{% endif %}</p>{% endif %}
-                </a>
-                {% else %}
-                <p class="text-gray-400 text-sm py-8 text-center">아직 글이 없습니다. 첫 글을 남겨 보세요!</p>
-                {% endfor %}
-            </div>
-            {% if total_pages > 1 %}
-            <nav class="mt-10 flex flex-wrap items-center justify-center gap-2" aria-label="페이지 이동">
-                <a href="/board/free?page=1" class="px-3 py-2 rounded-lg text-sm font-bold {% if page == 1 %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">처음</a>
-                <a href="/board/free?page={{ page - 1 }}" class="px-3 py-2 rounded-lg text-sm font-bold {% if page <= 1 %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">이전</a>
-                {% for n in range(1, total_pages + 1) %}
-                {% if n == page %}<span class="px-3 py-2 rounded-lg text-sm font-black bg-teal-600 text-white">{{ n }}</span>{% else %}<a href="/board/free?page={{ n }}" class="px-3 py-2 rounded-lg text-sm font-bold bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700">{{ n }}</a>{% endif %}
-                {% endfor %}
-                <a href="/board/free?page={{ page + 1 }}" class="px-3 py-2 rounded-lg text-sm font-bold {% if page >= total_pages %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">다음</a>
-                <a href="/board/free?page={{ total_pages }}" class="px-3 py-2 rounded-lg text-sm font-bold {% if page == total_pages %}bg-gray-200 text-gray-400 cursor-default pointer-events-none{% else %}bg-gray-100 text-gray-700 hover:bg-teal-100 hover:text-teal-700{% endif %}">마지막</a>
-            </nav>
-            <p class="mt-4 text-center text-[11px] text-gray-500 font-bold">{{ page }} / {{ total_pages }} 페이지</p>
-            {% endif %}
+            <a href="/board/free" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 자유게시판</a>
+            <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">자유게시판 글쓰기</h1>
+            <p class="text-gray-500 text-sm mb-6">아이디어, 제안, 하고 싶은 말 등을 자유롭게 남겨 주세요. 사진 여러 장과 동영상도 함께 올릴 수 있습니다.</p>
+            <form method="POST" action="/board/free/write" enctype="multipart/form-data" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                <div class="mb-4">
+                    <label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label>
+                    <input type="text" name="title" required maxlength="200" placeholder="제목을 입력하세요" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label>
+                    <textarea name="content" rows="5" placeholder="아이디어, 제안, 하고 싶은 말 등 자유롭게 작성해 주세요." class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></textarea>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-[10px] text-gray-500 uppercase mb-1">사진 (여러 장 선택 가능)</label>
+                    <input type="file" name="images" multiple accept="image/*" class="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-[10px] text-gray-500 uppercase mb-1">동영상 (여러 개 선택 가능, mp4/webm 권장, 최대 {{ max_video_mb }}MB)</label>
+                    <input type="file" name="videos" multiple accept="video/*" class="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm">
+                </div>
+                <div class="flex items-center justify-end gap-3">
+                    <a href="/board/free" class="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs md:text-sm font-bold hover:bg-gray-200">목록으로</a>
+                    <button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-xs md:text-sm font-black hover:bg-teal-700 transition">등록하기</button>
+                </div>
+            </form>
         </div>
         """ + FOOTER_HTML,
-        posts=posts, total=total, page=page, total_pages=total_pages, max_video_mb=MAX_VIDEO_SIZE_MB
+        max_video_mb=MAX_VIDEO_SIZE_MB
     )
 
 
@@ -5416,6 +5468,7 @@ def api_category_products(cat_name):
         query = query.order_by(Product.id.desc())
     elif cat_name == '오늘마감':
         today_end = now_kst().replace(hour=23, minute=59, second=59)
+        # 남은 시간 짧은 순
         query = query.filter(Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc())
     else:
         query = query.filter_by(category=cat_name).order_by(Product.id.desc())
@@ -5450,7 +5503,12 @@ def category_view(cat_name):
         display_name = "✨ 최신 상품"
     elif cat_name == '오늘마감':
         today_end = now_kst().replace(hour=23, minute=59, second=59)
-        products = Product.query.filter(Product.is_active == True, Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc()).limit(limit_num).all()
+        # 남은 시간 짧은 순 = deadline 오름차순
+        products = Product.query.filter(
+            Product.is_active == True,
+            Product.deadline > now_kst(),
+            Product.deadline <= today_end
+        ).order_by(Product.deadline.asc()).limit(limit_num).all()
         display_name = "🔥 오늘 마감 임박!"
     else:
         cat = Category.query.filter_by(name=cat_name).first_or_404()
