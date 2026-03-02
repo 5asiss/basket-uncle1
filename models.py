@@ -73,6 +73,7 @@ class Category(db.Model):
     biz_name = db.Column(db.String(100), nullable=True)
     biz_representative = db.Column(db.String(50), nullable=True)
     biz_reg_number = db.Column(db.String(50), nullable=True)
+    biz_online_sales_number = db.Column(db.String(50), nullable=True)  # 통신판매업신고번호
     biz_address = db.Column(db.String(200), nullable=True)
     biz_contact = db.Column(db.String(50), nullable=True)
     bank_name = db.Column(db.String(50), nullable=True)

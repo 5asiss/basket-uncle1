@@ -19,7 +19,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
-from sqlalchemy import text, or_, func
+from sqlalchemy import text, or_, func, and_
 from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint 가져오기
 import cloudinary
 import cloudinary.uploader
@@ -5678,6 +5678,22 @@ def product_detail(pid):
         Product.is_active == True,
     ).order_by(Product.stock.desc(), Product.id.desc()).limit(8).all()
 
+    # 판매자 정보: 이 상품의 카테고리에 판매자 정보가 있으면 해당 카테고리, 없으면 바구니삼촌(내꺼) 카테고리 사용
+    seller_category = None
+    if cat_info and (getattr(cat_info, 'biz_name', None) or getattr(cat_info, 'seller_name', None)):
+        seller_category = cat_info
+    else:
+        # 내꺼 = 바구니삼촌 카테고리. 없으면 상호/판매자명 등록된 카테고리 중 첫 번째
+        fallback = Category.query.filter_by(name='바구니삼촌').first()
+        if not fallback:
+            fallback = Category.query.filter(
+                or_(
+                    and_(Category.biz_name.isnot(None), Category.biz_name != ''),
+                    and_(Category.seller_name.isnot(None), Category.seller_name != '')
+                )
+            ).order_by(Category.order.asc(), Category.id.asc()).first()
+        seller_category = fallback
+
     content = """
     <div class="max-w-5xl xl:max-w-[1400px] 2xl:max-w-[1600px] mx-auto px-0 md:px-8 lg:px-12 xl:px-16 2xl:px-20 pb-16 font-black text-left">
         
@@ -5783,6 +5799,14 @@ def product_detail(pid):
                         </button>
                     </div>
                 </div>
+                {% if seller_category %}
+                <div class="mt-4">
+                    <a href="/category/seller/{{ seller_category.id }}" class="w-full py-4 md:py-5 rounded-2xl bg-gray-50 border-2 border-gray-100 text-gray-700 font-black text-base md:text-lg hover:bg-gray-100 hover:border-gray-200 transition-all flex items-center justify-center gap-3">
+                        <i class="fas fa-store text-gray-500"></i>
+                        <span>판매자 정보 보기</span>
+                    </a>
+                </div>
+                {% endif %}
                 {% if kakao_js_key %}
                 <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.6.0/kakao.min.js" integrity="sha384-6bF3YJb2HdCjYjOHoJAGxF8b3B2dMylA2NlO+nOuC+f2nL0KpQ5jPYLEEFrHpJZw" crossorigin="anonymous"></script>
                 <script>Kakao.init({{ kakao_js_key | tojson }});</script>
@@ -6107,6 +6131,7 @@ def product_detail(pid):
                                   cat_previews_detail=cat_previews_detail,
                                   category_delivery_desc=category_delivery_desc,
                                   product_base_url=product_base_url,
+                                  seller_category=seller_category,
                                   product_share_url=request.url_root.rstrip('/') + '/product/' + str(pid),
                                   product_share_title=p.name or '상품',
                                   product_share_image=product_image_url_absolute,
@@ -6146,6 +6171,7 @@ def seller_info_page(cid):
                     <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Representative</p><p class="text-gray-800 font-black text-lg md:text-xl text-left">대표자 : {{ cat.biz_representative or '-' }}</p></div>
                     <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Tax ID</p><p class="text-gray-800 font-black text-lg md:text-xl text-left">{{ cat.biz_reg_number or '-' }}</p></div>
                 </div>
+                <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">통신판매업신고번호</p><p class="text-gray-800 font-black text-lg md:text-xl text-left">{{ cat.biz_online_sales_number or '-' }}</p></div>
                 <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Location</p><p class="text-gray-700 font-bold leading-relaxed text-sm md:text-lg text-left">{{ cat.biz_address or '-' }}</p></div>
                 <div class="p-8 md:p-12 bg-gray-50 rounded-[2rem] md:rounded-[3rem] border border-dashed border-gray-200 text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Inquiry Center</p><p class="text-teal-600 text-2xl md:text-4xl font-black italic text-left">{{ cat.biz_contact or '-' }}</p></div>
             </div>
@@ -8707,7 +8733,7 @@ def order_payment():
         flash("결제 클라이언트 키가 설정되지 않았습니다. 관리자에게 문의해 주세요.")
         return redirect('/cart')
 
-    # 결제창은 'API 개별 연동 키'(live_ck_/test_ck_) 필요. 결제위젯 연동 키(gck_) 사용 시 400 오류 발생
+        # 결제창은 'API 개별 연동 키'(live_ck_/test_ck_) 필요. 결제위젯 연동 키(gck_) 사용 시 400 오류 발생
     ck = (TOSS_CLIENT_KEY or "").strip()
     if "_gck_" in ck or ck.startswith("live_gck_") or ck.startswith("test_gck_"):
         flash("결제창에는 'API 개별 연동 키'(live_ck_ 또는 test_ck_로 시작)를 사용해 주세요. 현재 결제위젯 연동 키(gck_)가 설정되어 있어 결제창 요청이 400 오류로 실패합니다. 개발자센터 > API 키 > 결제창(일반결제)용 클라이언트 키로 변경 후 다시 시도해 주세요.")
@@ -11775,6 +11801,7 @@ def admin_dashboard():
                               <input name="biz_name" placeholder="사업자 상호명" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm">
                               <input name="biz_representative" placeholder="대표자 성함" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm">
                               <input name="biz_reg_number" placeholder="사업자 등록번호 ( - 포함 )" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm">
+                              <input name="biz_online_sales_number" placeholder="통신판매업신고번호" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm">
                               <input name="biz_address" placeholder="사업장 소재지" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm">
                               <input name="biz_contact" placeholder="고객 센터 번호" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm">
                               <input name="seller_link" placeholder="판매자 문의 링크" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm">
@@ -14165,6 +14192,7 @@ def admin_dashboard():
                                 <th class="p-3 border border-gray-600">상호</th>
                                 <th class="p-3 border border-gray-600">대표자</th>
                                 <th class="p-3 border border-gray-600">사업자등록번호</th>
+                                <th class="p-3 border border-gray-600">통신판매업번호</th>
                                 <th class="p-3 border border-gray-600">소재지</th>
                                 <th class="p-3 border border-gray-600">고객센터</th>
                                 <th class="p-3 border border-gray-600">문의링크</th>
@@ -14184,6 +14212,7 @@ def admin_dashboard():
                                 <td class="p-3 border border-gray-100">{{ c.biz_name or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_representative or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_reg_number or '-' }}</td>
+                                <td class="p-3 border border-gray-100">{{ c.biz_online_sales_number or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_address or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_contact or '-' }}</td>
                                 <td class="p-3 border border-gray-100 text-teal-600 truncate max-w-[120px]" title="{{ c.seller_inquiry_link or '' }}">{% if c.seller_inquiry_link %}{{ c.seller_inquiry_link[:30] }}{% if c.seller_inquiry_link|length > 30 %}...{% endif %}{% else %}-{% endif %}</td>
@@ -14194,7 +14223,7 @@ def admin_dashboard():
                                 <td class="p-3 border border-gray-100 text-center"><a href="/admin/category/edit/{{ c.id }}" class="text-blue-600 font-black hover:underline text-[10px]">수정</a></td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="14" class="p-8 text-center text-gray-400 font-bold">등록된 카테고리가 없습니다. 카테고리 설정에서 추가해 주세요.</td></tr>
+                            <tr><td colspan="15" class="p-8 text-center text-gray-400 font-bold">등록된 카테고리가 없습니다. 카테고리 설정에서 추가해 주세요.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -15293,6 +15322,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                             <input name="biz_name" placeholder="사업자 상호명" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm text-left">
                             <input name="biz_representative" placeholder="대표자 성함" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm text-left">
                             <input name="biz_reg_number" placeholder="사업자 등록번호 ( - 포함 )" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm text-left">
+                            <input name="biz_online_sales_number" placeholder="통신판매업신고번호" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm text-left">
                             <input name="biz_address" placeholder="사업장 소재지" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm text-left">
                             <input name="biz_contact" placeholder="고객 센터 번호" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm text-left">
                             <input name="seller_link" placeholder="판매자 문의 (카카오/채팅) 링크" class="border border-gray-100 p-4 rounded-xl w-full font-bold text-xs md:text-sm text-left">
@@ -15353,6 +15383,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                                 <th class="p-3 border border-gray-600">상호</th>
                                 <th class="p-3 border border-gray-600">대표자</th>
                                 <th class="p-3 border border-gray-600">사업자등록번호</th>
+                                <th class="p-3 border border-gray-600">통신판매업번호</th>
                                 <th class="p-3 border border-gray-600">소재지</th>
                                 <th class="p-3 border border-gray-600">고객센터</th>
                                 <th class="p-3 border border-gray-600">문의링크</th>
@@ -15372,6 +15403,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                                 <td class="p-3 border border-gray-100">{{ c.biz_name or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_representative or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_reg_number or '-' }}</td>
+                                <td class="p-3 border border-gray-100">{{ c.biz_online_sales_number or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_address or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_contact or '-' }}</td>
                                 <td class="p-3 border border-gray-100 text-teal-600 truncate max-w-[120px]" title="{{ c.seller_inquiry_link or '' }}">{% if c.seller_inquiry_link %}{{ c.seller_inquiry_link[:30] }}{% if c.seller_inquiry_link|length > 30 %}...{% endif %}{% else %}-{% endif %}</td>
@@ -15382,7 +15414,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                                 <td class="p-3 border border-gray-100 text-center"><a href="/admin/category/edit/{{ c.id }}" class="text-blue-600 font-black hover:underline text-[10px]">수정</a></td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="14" class="p-8 text-center text-gray-400 font-bold">등록된 카테고리가 없습니다. 카테고리 설정에서 추가해 주세요.</td></tr>
+                            <tr><td colspan="15" class="p-8 text-center text-gray-400 font-bold">등록된 카테고리가 없습니다. 카테고리 설정에서 추가해 주세요.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -18652,7 +18684,7 @@ def admin_category_add():
     cat_type = (request.form.get('category_type') or '입점형').strip()
     if cat_type not in ('입점형', '공급자형'):
         cat_type = '입점형'
-    db.session.add(Category(name=request.form['cat_name'], category_type=cat_type, description=request.form.get('description'), tax_type=request.form['tax_type'], manager_email=request.form.get('manager_email'), seller_name=request.form.get('biz_name'), seller_inquiry_link=request.form.get('seller_link'), biz_name=request.form.get('biz_name'), biz_representative=request.form.get('biz_representative'), biz_reg_number=request.form.get('biz_reg_number'), biz_address=request.form.get('biz_address'), biz_contact=request.form.get('biz_contact'), bank_name=request.form.get('bank_name'), account_holder=request.form.get('account_holder'), settlement_account=request.form.get('settlement_account'), order=next_order, min_member_grade=min_mg))
+    db.session.add(Category(name=request.form['cat_name'], category_type=cat_type, description=request.form.get('description'), tax_type=request.form['tax_type'], manager_email=request.form.get('manager_email'), seller_name=request.form.get('biz_name'), seller_inquiry_link=request.form.get('seller_link'), biz_name=request.form.get('biz_name'), biz_representative=request.form.get('biz_representative'), biz_reg_number=request.form.get('biz_reg_number'), biz_online_sales_number=request.form.get('biz_online_sales_number'), biz_address=request.form.get('biz_address'), biz_contact=request.form.get('biz_contact'), bank_name=request.form.get('bank_name'), account_holder=request.form.get('account_holder'), settlement_account=request.form.get('settlement_account'), order=next_order, min_member_grade=min_mg))
     db.session.commit(); return redirect('/admin?tab=categories')
 
 @login_required
@@ -18666,7 +18698,7 @@ def admin_category_edit(cid):
         if cat_type not in ('입점형', '공급자형'):
             cat_type = '입점형'
         setattr(cat, 'category_type', cat_type)
-        cat.biz_name, cat.biz_representative, cat.biz_reg_number, cat.biz_address, cat.biz_contact, cat.seller_inquiry_link = request.form.get('biz_name'), request.form.get('biz_representative'), request.form.get('biz_reg_number'), request.form.get('biz_address'), request.form.get('biz_contact'), request.form.get('seller_link')
+        cat.biz_name, cat.biz_representative, cat.biz_reg_number, cat.biz_online_sales_number, cat.biz_address, cat.biz_contact, cat.seller_inquiry_link = request.form.get('biz_name'), request.form.get('biz_representative'), request.form.get('biz_reg_number'), request.form.get('biz_online_sales_number'), request.form.get('biz_address'), request.form.get('biz_contact'), request.form.get('seller_link')
         cat.bank_name, cat.account_holder, cat.settlement_account = request.form.get('bank_name'), request.form.get('account_holder'), request.form.get('settlement_account')
         cat.seller_name = cat.biz_name
         mg = request.form.get('min_member_grade', '').strip()
@@ -18705,7 +18737,7 @@ def admin_category_edit(cid):
     d_thr = getattr(cat, 'delivery_extra_threshold', None)
     d_extra = getattr(cat, 'delivery_extra_fee', None)
     d_per = getattr(cat, 'delivery_fee_per_item', None)
-    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-20 px-6 font-black text-left"><h2 class="text-2xl md:text-3xl font-black mb-12 tracking-tighter uppercase text-teal-600 text-left">Edit Category Profile</h2><form method="POST" class="bg-white p-10 rounded-[3rem] shadow-2xl space-y-8 text-left"><div><label class="text-[10px] text-gray-400 uppercase font-black ml-4 text-left">Settings</label><input name="cat_name" value="{{cat.name}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-2 text-sm text-left" required><textarea name="description" class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black mt-3 text-sm text-left" placeholder="한줄 소개">{{cat.description or ''}}</textarea><p class="text-[10px] text-teal-600 font-bold uppercase mt-4 ml-4 text-left">정산 구분</p><select name="category_type" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left bg-white"><option value="입점형" {% if cat_type_val == '입점형' %}selected{% endif %}>입점형 (배송료·판매수수료 있음)</option><option value="공급자형" {% if cat_type_val == '공급자형' %}selected{% endif %}>공급자형 (배송료·수수료 없음, 공급가 기준)</option></select><input name="manager_email" value="{{cat.manager_email or ''}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left" placeholder="매니저 이메일"><select name="tax_type" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left bg-white"><option value="과세" {% if cat.tax_type == '과세' %}selected{% endif %}>과세</option><option value="면세" {% if cat.tax_type == '면세' %}selected{% endif %}>면세</option></select><p class="text-[10px] text-amber-600 font-bold uppercase mt-4 ml-4 text-left">회원 등급별 노출 (비워두면 전체)</p><select name="min_member_grade" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2 bg-white"><option value="">전체 회원</option><option value="1" {% if mg_val == 1 %}selected{% endif %}>1단계 이상</option><option value="2" {% if mg_val == 2 %}selected{% endif %}>2단계 이상</option><option value="3" {% if mg_val == 3 %}selected{% endif %}>3단계 이상</option><option value="4" {% if mg_val == 4 %}selected{% endif %}>4단계 이상</option><option value="5" {% if mg_val == 5 %}selected{% endif %}>5단계만</option></select><p class="text-[10px] text-orange-600 font-bold uppercase mt-6 ml-4 text-left">카테고리별 배송료 (금액·건별)</p><input name="delivery_base_fee" type="number" min="0" value="{{ d_base or 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="기본 배송료(원)"><input name="delivery_free_over" type="number" min="0" value="{{ d_free or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="무료조건: 이 금액 이상이면 무료 (비워두면 미적용)"><input name="delivery_extra_threshold" type="number" min="0" value="{{ d_thr or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가료 기준: 이 금액 이상이면 추가료 적용 (비워두면 50000)"><input name="delivery_extra_fee" type="number" min="0" value="{{ d_extra or 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가 배송료(원)"><input name="delivery_fee_per_item" type="number" min="0" value="{{ d_per or 0 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="건별 추가 배송료(원, 0=미적용)"></div><div class="border-t border-gray-50 pt-10 space-y-4 text-left"><label class="text-[10px] text-teal-600 uppercase font-black ml-4 text-left">Business Info</label><input name="biz_name" value="{{cat.biz_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="상호명"><input name="biz_representative" value="{{cat.biz_representative or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="대표자"><input name="biz_reg_number" value="{{cat.biz_reg_number or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="사업자번호"><input name="biz_address" value="{{cat.biz_address or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="주소"><input name="biz_contact" value="{{cat.biz_contact or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="고객센터"><input name="seller_link" value="{{cat.seller_inquiry_link or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="문의 링크 URL"><p class="text-[10px] text-blue-600 font-bold uppercase mt-4 text-left">정산 계좌</p><input name="bank_name" value="{{cat.bank_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="은행명"><input name="account_holder" value="{{cat.account_holder or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="예금주"><input name="settlement_account" value="{{cat.settlement_account or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="정산계좌 (계좌번호)"></div><button class="w-full bg-blue-600 text-white py-6 rounded-3xl font-black shadow-xl hover:bg-blue-700 transition text-center text-center">Save Profile Updates</button></form></div>""", cat=cat, mg_val=mg_val, cat_type_val=cat_type_val, d_base=d_base, d_free=d_free, d_thr=d_thr, d_extra=d_extra, d_per=d_per)
+    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-20 px-6 font-black text-left"><h2 class="text-2xl md:text-3xl font-black mb-12 tracking-tighter uppercase text-teal-600 text-left">Edit Category Profile</h2><form method="POST" class="bg-white p-10 rounded-[3rem] shadow-2xl space-y-8 text-left"><div><label class="text-[10px] text-gray-400 uppercase font-black ml-4 text-left">Settings</label><input name="cat_name" value="{{cat.name}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-2 text-sm text-left" required><textarea name="description" class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black mt-3 text-sm text-left" placeholder="한줄 소개">{{cat.description or ''}}</textarea><p class="text-[10px] text-teal-600 font-bold uppercase mt-4 ml-4 text-left">정산 구분</p><select name="category_type" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left bg-white"><option value="입점형" {% if cat_type_val == '입점형' %}selected{% endif %}>입점형 (배송료·판매수수료 있음)</option><option value="공급자형" {% if cat_type_val == '공급자형' %}selected{% endif %}>공급자형 (배송료·수수료 없음, 공급가 기준)</option></select><input name="manager_email" value="{{cat.manager_email or ''}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left" placeholder="매니저 이메일"><select name="tax_type" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left bg-white"><option value="과세" {% if cat.tax_type == '과세' %}selected{% endif %}>과세</option><option value="면세" {% if cat.tax_type == '면세' %}selected{% endif %}>면세</option></select><p class="text-[10px] text-amber-600 font-bold uppercase mt-4 ml-4 text-left">회원 등급별 노출 (비워두면 전체)</p><select name="min_member_grade" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2 bg-white"><option value="">전체 회원</option><option value="1" {% if mg_val == 1 %}selected{% endif %}>1단계 이상</option><option value="2" {% if mg_val == 2 %}selected{% endif %}>2단계 이상</option><option value="3" {% if mg_val == 3 %}selected{% endif %}>3단계 이상</option><option value="4" {% if mg_val == 4 %}selected{% endif %}>4단계 이상</option><option value="5" {% if mg_val == 5 %}selected{% endif %}>5단계만</option></select><p class="text-[10px] text-orange-600 font-bold uppercase mt-6 ml-4 text-left">카테고리별 배송료 (금액·건별)</p><input name="delivery_base_fee" type="number" min="0" value="{{ d_base or 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="기본 배송료(원)"><input name="delivery_free_over" type="number" min="0" value="{{ d_free or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="무료조건: 이 금액 이상이면 무료 (비워두면 미적용)"><input name="delivery_extra_threshold" type="number" min="0" value="{{ d_thr or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가료 기준: 이 금액 이상이면 추가료 적용 (비워두면 50000)"><input name="delivery_extra_fee" type="number" min="0" value="{{ d_extra or 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가 배송료(원)"><input name="delivery_fee_per_item" type="number" min="0" value="{{ d_per or 0 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="건별 추가 배송료(원, 0=미적용)"></div><div class="border-t border-gray-50 pt-10 space-y-4 text-left"><label class="text-[10px] text-teal-600 uppercase font-black ml-4 text-left">Business Info</label><input name="biz_name" value="{{cat.biz_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="상호명"><input name="biz_representative" value="{{cat.biz_representative or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="대표자"><input name="biz_reg_number" value="{{cat.biz_reg_number or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="사업자번호"><input name="biz_online_sales_number" value="{{cat.biz_online_sales_number or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="통신판매업신고번호"><input name="biz_address" value="{{cat.biz_address or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="주소"><input name="biz_contact" value="{{cat.biz_contact or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="고객센터"><input name="seller_link" value="{{cat.seller_inquiry_link or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="문의 링크 URL"><p class="text-[10px] text-blue-600 font-bold uppercase mt-4 text-left">정산 계좌</p><input name="bank_name" value="{{cat.bank_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="은행명"><input name="account_holder" value="{{cat.account_holder or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="예금주"><input name="settlement_account" value="{{cat.settlement_account or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="정산계좌 (계좌번호)"></div><button class="w-full bg-blue-600 text-white py-6 rounded-3xl font-black shadow-xl hover:bg-blue-700 transition text-center text-center">Save Profile Updates</button></form></div>""", cat=cat, mg_val=mg_val, cat_type_val=cat_type_val, d_base=d_base, d_free=d_free, d_thr=d_thr, d_extra=d_extra, d_per=d_per)
 
 @login_required
 def admin_category_move(cid, direction):
@@ -18765,6 +18797,7 @@ def admin_sellers_excel():
             '상호': c.biz_name or '',
             '대표자': c.biz_representative or '',
             '사업자등록번호': c.biz_reg_number or '',
+            '통신판매업번호': c.biz_online_sales_number or '',
             '소재지': c.biz_address or '',
             '고객센터': c.biz_contact or '',
             '문의링크': c.seller_inquiry_link or '',
@@ -19711,6 +19744,7 @@ def init_db():
             ("category", "biz_name", "VARCHAR(100)"),
             ("category", "biz_representative", "VARCHAR(50)"),
             ("category", "biz_reg_number", "VARCHAR(50)"),
+            ("category", "biz_online_sales_number", "VARCHAR(50)"),
             ("category", "biz_address", "VARCHAR(200)"),
             ("category", "biz_contact", "VARCHAR(50)"),
             ("category", "bank_name", "VARCHAR(50)"),
