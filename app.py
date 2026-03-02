@@ -189,6 +189,7 @@ from models import (
     EventPointRequest,
     ShareLink,
     EventBoardPost,
+    BulkImageMap,
 )
 
 # (모델 클래스는 models.py에 정의됨)
@@ -6070,40 +6071,62 @@ def product_detail(pid):
                     </div>
                 </div>
                 {% if seller_category %}
-                <div class="mt-6 bg-gray-50 border border-gray-100 rounded-2xl p-5 md:p-6 text-left">
-                    <div class="flex items-center gap-2 mb-3">
-                        <i class="fas fa-store text-gray-500"></i>
-                        <p class="text-[10px] md:text-xs text-gray-500 font-bold tracking-[0.15em] uppercase">Seller Business Profile</p>
-                    </div>
-                    <div class="space-y-1.5 text-[11px] md:text-xs text-gray-700">
-                        {% if seller_category.biz_name %}
-                        <p><span class="text-gray-400">상호</span> · <span class="font-semibold">{{ seller_category.biz_name }}</span></p>
-                        {% endif %}
-                        {% if seller_category.biz_representative %}
-                        <p><span class="text-gray-400">대표자</span> · <span class="font-semibold">{{ seller_category.biz_representative }}</span></p>
-                        {% endif %}
-                        {% if seller_category.biz_reg_number %}
-                        <p><span class="text-gray-400">사업자등록번호</span> · <span class="font-mono">{{ seller_category.biz_reg_number }}</span></p>
-                        {% endif %}
-                        {% if getattr(seller_category, 'biz_online_sales_number', None) %}
-                        <p><span class="text-gray-400">통신판매업번호</span> · <span class="font-mono">{{ seller_category.biz_online_sales_number }}</span></p>
-                        {% endif %}
-                        {% if seller_category.biz_address %}
-                        <p><span class="text-gray-400">소재지</span> · <span>{{ seller_category.biz_address }}</span></p>
-                        {% endif %}
-                        {% if seller_category.biz_contact %}
-                        <p><span class="text-gray-400">고객센터</span> · <span class="font-semibold">{{ seller_category.biz_contact }}</span></p>
-                        {% endif %}
-                        {% if seller_category.seller_inquiry_link %}
-                        <p class="pt-1">
-                            <a href="{{ seller_category.seller_inquiry_link }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-teal-600 hover:text-teal-700 font-semibold">
-                                문의하기 링크 바로가기
-                                <i class="fas fa-external-link-alt text-[9px]"></i>
-                            </a>
-                        </p>
-                        {% endif %}
+                <div class="mt-6">
+                    <button type="button" id="seller-profile-toggle" class="w-full px-5 py-4 text-left text-sm font-bold text-gray-700 hover:bg-gray-50 border border-gray-100 rounded-2xl flex items-center justify-between gap-3 transition">
+                        <span class="flex items-center gap-2">
+                            <i class="fas fa-store text-gray-500"></i>
+                            판매자 정보보기
+                        </span>
+                        <i class="fas fa-chevron-down text-gray-400 text-xs transition-transform" id="seller-profile-chevron"></i>
+                    </button>
+                    <div id="seller-profile-block" class="hidden mt-3 bg-gray-50 border border-gray-100 rounded-2xl p-5 md:p-6 text-left">
+                        <div class="flex items-center gap-2 mb-3">
+                            <i class="fas fa-store text-gray-500"></i>
+                            <p class="text-[10px] md:text-xs text-gray-500 font-bold tracking-[0.15em] uppercase">Seller Business Profile</p>
+                        </div>
+                        <div class="space-y-1.5 text-[11px] md:text-xs text-gray-700">
+                            {% if seller_category.biz_name %}
+                            <p><span class="text-gray-400">상호</span> · <span class="font-semibold">{{ seller_category.biz_name }}</span></p>
+                            {% endif %}
+                            {% if seller_category.biz_representative %}
+                            <p><span class="text-gray-400">대표자</span> · <span class="font-semibold">{{ seller_category.biz_representative }}</span></p>
+                            {% endif %}
+                            {% if seller_category.biz_reg_number %}
+                            <p><span class="text-gray-400">사업자등록번호</span> · <span class="font-mono">{{ seller_category.biz_reg_number }}</span></p>
+                            {% endif %}
+                            {% if getattr(seller_category, 'biz_online_sales_number', None) %}
+                            <p><span class="text-gray-400">통신판매업번호</span> · <span class="font-mono">{{ seller_category.biz_online_sales_number }}</span></p>
+                            {% endif %}
+                            {% if seller_category.biz_address %}
+                            <p><span class="text-gray-400">소재지</span> · <span>{{ seller_category.biz_address }}</span></p>
+                            {% endif %}
+                            {% if seller_category.biz_contact %}
+                            <p><span class="text-gray-400">고객센터</span> · <span class="font-semibold">{{ seller_category.biz_contact }}</span></p>
+                            {% endif %}
+                            {% if seller_category.seller_inquiry_link %}
+                            <p class="pt-1">
+                                <a href="{{ seller_category.seller_inquiry_link }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-teal-600 hover:text-teal-700 font-semibold">
+                                    문의하기 링크 바로가기
+                                    <i class="fas fa-external-link-alt text-[9px]"></i>
+                                </a>
+                            </p>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
+                <script>
+                (function(){
+                    var btn = document.getElementById('seller-profile-toggle');
+                    var block = document.getElementById('seller-profile-block');
+                    var chevron = document.getElementById('seller-profile-chevron');
+                    if (btn && block) {
+                        btn.addEventListener('click', function() {
+                            block.classList.toggle('hidden');
+                            if (chevron) chevron.classList.toggle('rotate-180', !block.classList.contains('hidden'));
+                        });
+                    }
+                })();
+                </script>
                 {% endif %}
                 {% if kakao_js_key %}
                 <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.6.0/kakao.min.js" integrity="sha384-6bF3YJb2HdCjYjOHoJAGxF8b3B2dMylA2NlO+nOuC+f2nL0KpQ5jPYLEEFrHpJZw" crossorigin="anonymous"></script>
@@ -16121,7 +16144,7 @@ def _bulk_safe_image_filename(filename):
 
 @login_required
 def admin_bulk_upload_images():
-    """대량등록용 이미지를 static/uploads/에 저장. 엑셀에서 파일명 그대로 참조 가능."""
+    """대량등록용 이미지를 static/uploads/에 저장. Cloudinary 설정 시 Cloudinary에도 올려 배포 환경에서도 노출되도록 함."""
     if not current_user.is_admin:
         return redirect('/')
     if request.method != 'POST':
@@ -16131,6 +16154,7 @@ def admin_bulk_upload_images():
     os.makedirs(upload_dir, exist_ok=True)
     saved = []
     skipped = 0
+    bulk_map_updated = 0
     for f in files:
         if not f or not getattr(f, 'filename', None) or (f.filename or '').strip() == '':
             continue
@@ -16139,9 +16163,6 @@ def admin_bulk_upload_images():
             continue
         try:
             path = os.path.join(upload_dir, safe_name)
-            if os.path.isfile(path):
-                skipped += 1
-                continue  # 같은 이름 이미 있으면 건너뜀
             if getattr(f, 'stream', None) and hasattr(f.stream, 'seek'):
                 try:
                     f.stream.seek(0)
@@ -16150,13 +16171,42 @@ def admin_bulk_upload_images():
             data = f.read()
             if not data:
                 continue
+            if os.path.isfile(path):
+                skipped += 1
+                continue  # 같은 이름 이미 있으면 건너뜀
             with open(path, 'wb') as out:
                 out.write(data)
             saved.append(safe_name)
+            # Cloudinary 설정 시 동일 이미지를 Cloudinary에 올리고 파일명→URL 매핑 저장 (배포 환경에서 노출용)
+            if cloudinary_url:
+                try:
+                    upload_res = cloudinary.uploader.upload(
+                        data,
+                        folder="basket-uncle/bulk",
+                        public_id=None,
+                    )
+                    url = upload_res.get("secure_url") or upload_res.get("url")
+                    if url and "/upload/" in url:
+                        url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
+                    if url:
+                        existing = BulkImageMap.query.filter_by(file_name=safe_name).first()
+                        if existing:
+                            existing.url = url
+                        else:
+                            db.session.add(BulkImageMap(file_name=safe_name, url=url))
+                        bulk_map_updated += 1
+                except Exception as ce:
+                    print(f"[admin_bulk_upload_images] Cloudinary upload failed for {safe_name}: {ce}")
         except Exception as e:
             flash(f"이미지 저장 실패 ({f.filename}): {str(e)}")
+    if bulk_map_updated:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[admin_bulk_upload_images] BulkImageMap commit failed: {e}")
     if saved:
-        flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요.")
+        flash(f"{len(saved)}개 이미지가 static/uploads/에 저장되었습니다. 엑셀의 대표·상세이미지파일명에 위 파일명을 그대로 입력하세요." + (" Cloudinary에도 반영되어 배포 서버에서도 노출됩니다." if bulk_map_updated else ""))
     elif skipped:
         flash(f"같은 이름의 파일이 이미 있어 {skipped}개는 건너뛰었습니다. 새 파일만 선택해 주세요.")
     else:
@@ -16299,7 +16349,7 @@ def admin_product_bulk_upload():
                     for suffix in ("1", "_1"):
                         found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
                         if found:
-                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                            image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
                             break
                     if not image_url:
                         name_no_spaces = name_val.replace(" ", "")
@@ -16307,20 +16357,20 @@ def admin_product_bulk_upload():
                             for suffix in ("1", "_1"):
                                 found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
                                 if found:
-                                    image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                    image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
                                     break
                     if not image_url:
                         for base in (name_val + "1", name_val + "_1", name_val.replace(" ", "") + "1", name_val.replace(" ", "") + "_1"):
                             found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
                             if found:
-                                image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                                image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
                                 break
                 if not image_url:
                     main_img = _bulk_image_filename_only(main_img_raw)
                     if main_img and not _bulk_is_placeholder_image(main_img):
-                        found = _bulk_find_upload_file(upload_dir, main_img)
-                        if found:
-                            image_url = f"/static/uploads/{found.replace(chr(92), '/')}"
+                        resolved_main = _bulk_resolve_image_url(upload_dir, main_img)
+                        if resolved_main:
+                            image_url = resolved_main
                         else:
                             missing_main = main_img
             path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
@@ -16341,9 +16391,9 @@ def admin_product_bulk_upload():
                         else:
                             fn_img = _bulk_image_filename_only(p)
                             if fn_img:
-                                found = _bulk_find_upload_file(upload_dir, fn_img)
-                                if found:
-                                    detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
+                                u = _bulk_resolve_image_url(upload_dir, fn_img)
+                                if u:
+                                    detail_parts.append(u)
                                 else:
                                     missing_details.append(fn_img)
                     if detail_parts:
@@ -16366,7 +16416,8 @@ def admin_product_bulk_upload():
                                 if found:
                                     break
                         if found:
-                            detail_parts.append(f"/static/uploads/{found.replace(chr(92), '/')}")
+                            u = _bulk_resolve_image_url(upload_dir, found)
+                            detail_parts.append(u if u else f"/static/uploads/{found.replace(chr(92), '/')}")
                     if detail_parts:
                         detail_image_url = ",".join(detail_parts)
             if missing_main or missing_details:
@@ -16466,6 +16517,22 @@ def _bulk_image_filename_only(s):
     if '/' in t or '\\' in t:
         return os.path.basename(t)
     return t
+
+
+def _bulk_resolve_image_url(upload_dir, filename):
+    """파일명으로 이미지 URL 반환. Cloudinary 매핑(BulkImageMap) 우선, 없으면 로컬 /static/uploads/ 경로."""
+    if not filename or not isinstance(filename, str):
+        return None
+    fn = _bulk_image_filename_only(filename)
+    if not fn:
+        return None
+    row = BulkImageMap.query.filter_by(file_name=fn).first()
+    if row and row.url:
+        return row.url
+    found = _bulk_find_upload_file(upload_dir, fn)
+    if found:
+        return "/static/uploads/" + found.replace(chr(92), '/')
+    return None
 
 
 def _bulk_find_upload_file(upload_dir, filename):

@@ -566,3 +566,12 @@ class MarketingAlimtalkLog(db.Model):
     success = db.Column(db.Boolean, default=False)
     memo = db.Column(db.String(500), nullable=True)
     sent_at = db.Column(db.DateTime, default=_now_kst)
+
+
+class BulkImageMap(db.Model):
+    """대량등록 이미지 파일명 → Cloudinary 등 외부 URL 매핑. 배포 환경에서 로컬 static/uploads/가 없어도 이미지 노출용."""
+    __tablename__ = "bulk_image_map"
+    id = db.Column(db.Integer, primary_key=True)
+    file_name = db.Column(db.String(255), unique=True, nullable=False)
+    url = db.Column(db.String(512), nullable=False)
+    created_at = db.Column(db.DateTime, default=_now_kst)
