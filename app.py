@@ -149,6 +149,21 @@ login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
 
+
+@app.errorhandler(500)
+def internal_error(e):
+    """500 발생 시 콘솔에 traceback 출력 (원인 파악용)."""
+    import traceback
+    if e is not None and hasattr(e, '__traceback__') and e.__traceback__ is not None:
+        traceback.print_exception(type(e), e, e.__traceback__)
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'><title>오류</title></head><body>"
+        "<h1>Internal Server Error</h1><p>서버 오류가 발생했습니다. 터미널(콘솔) 로그를 확인해 주세요.</p>"
+        "</body></html>",
+        500,
+    )
+
+
 # --------------------------------------------------------------------------------
 # 2. 데이터베이스 모델 (models.py에서 로드)
 # --------------------------------------------------------------------------------
@@ -914,7 +929,7 @@ def apply_welcome_event_points(user_obj):
     if not user_obj:
         return
     amount = 0
-    row = SignupWelcomeConfig.query.get(1)
+    row = db.session.get(SignupWelcomeConfig, 1)
     if row is not None and getattr(row, 'points_amount', None) is not None:
         amount = max(0, int(row.points_amount))
     if amount <= 0:
@@ -6171,7 +6186,7 @@ def seller_info_page(cid):
                     <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Representative</p><p class="text-gray-800 font-black text-lg md:text-xl text-left">대표자 : {{ cat.biz_representative or '-' }}</p></div>
                     <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Tax ID</p><p class="text-gray-800 font-black text-lg md:text-xl text-left">{{ cat.biz_reg_number or '-' }}</p></div>
                 </div>
-                <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">통신판매업신고번호</p><p class="text-gray-800 font-black text-lg md:text-xl text-left">{{ cat.biz_online_sales_number or '-' }}</p></div>
+                <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">통신판매업신고번호</p><p class="text-gray-800 font-black text-lg md:text-xl text-left">{{ getattr(cat, 'biz_online_sales_number', None) or '-' }}</p></div>
                 <div class="text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Location</p><p class="text-gray-700 font-bold leading-relaxed text-sm md:text-lg text-left">{{ cat.biz_address or '-' }}</p></div>
                 <div class="p-8 md:p-12 bg-gray-50 rounded-[2rem] md:rounded-[3rem] border border-dashed border-gray-200 text-left"><p class="text-[10px] text-gray-400 uppercase tracking-[0.3em] mb-3 font-black text-left">Inquiry Center</p><p class="text-teal-600 text-2xl md:text-4xl font-black italic text-left">{{ cat.biz_contact or '-' }}</p></div>
             </div>
@@ -9894,7 +9909,7 @@ def admin_signup_welcome_config():
     if not current_user.is_admin:
         return jsonify({'error': '권한 없음'}), 403
     if request.method == 'GET':
-        row = SignupWelcomeConfig.query.get(1)
+        row = db.session.get(SignupWelcomeConfig, 1)
         amount = int(row.points_amount) if row and getattr(row, 'points_amount', None) is not None else 0
         return jsonify({'points_amount': amount})
     try:
@@ -9902,7 +9917,7 @@ def admin_signup_welcome_config():
         amount = int(data.get('points_amount', 0) or 0)
         if amount < 0:
             amount = 0
-        row = SignupWelcomeConfig.query.get(1)
+        row = db.session.get(SignupWelcomeConfig, 1)
         if not row:
             row = SignupWelcomeConfig(id=1, points_amount=amount)
             db.session.add(row)
@@ -10662,7 +10677,7 @@ def admin_dashboard():
         point_accumulation_rate, point_min_order, point_max_use = rate, min_ord, max_pts
         welcome_event_points = _get_point_config_val('welcome_event_points', 0)
         try:
-            _swc = SignupWelcomeConfig.query.get(1)
+            _swc = db.session.get(SignupWelcomeConfig, 1)
             signup_welcome_config_amount = int(_swc.points_amount) if _swc and getattr(_swc, 'points_amount', None) is not None else welcome_event_points
         except Exception:
             signup_welcome_config_amount = welcome_event_points
@@ -19824,7 +19839,7 @@ if __name__ == "__main__":
         # 모든 테이블을 현재 DATABASE_URL 기준 DB에 생성
         db.create_all()
         # 신규가입 자동지급 설정 테이블 초기 행(id=1) 없으면 생성
-        if SignupWelcomeConfig.query.get(1) is None:
+        if db.session.get(SignupWelcomeConfig, 1) is None:
             db.session.add(SignupWelcomeConfig(id=1, points_amount=0))
             db.session.commit()
         # [복구] 배송 시스템 최초 관리자 생성 로직 추가
@@ -19851,7 +19866,7 @@ with app.app_context():
     from models import EventBoardPost, ShareLink, EventPointRequest  # noqa: F401 - 테이블 생성용 로드
     db.create_all()
     try:
-        if SignupWelcomeConfig.query.get(1) is None:
+        if db.session.get(SignupWelcomeConfig, 1) is None:
             db.session.add(SignupWelcomeConfig(id=1, points_amount=0))
             db.session.commit()
     except Exception:
