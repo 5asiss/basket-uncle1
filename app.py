@@ -153,9 +153,19 @@ login_manager.init_app(app)
 @app.errorhandler(500)
 def internal_error(e):
     """500 발생 시 콘솔에 traceback 출력 (원인 파악용)."""
+    import sys
     import traceback
-    if e is not None and hasattr(e, '__traceback__') and e.__traceback__ is not None:
-        traceback.print_exception(type(e), e, e.__traceback__)
+    # 터미널에 반드시 출력되도록 print 사용
+    print("\n" + "=" * 60 + " 500 Internal Server Error " + "=" * 60, flush=True)
+    if e is not None:
+        print("Exception:", type(e).__name__, str(e), flush=True)
+        if hasattr(e, '__traceback__') and e.__traceback__ is not None:
+            traceback.print_exception(type(e), e, e.__traceback__)
+    exc_type, exc_value, exc_tb = sys.exc_info()
+    if exc_tb is not None:
+        print("--- sys.exc_info() ---", flush=True)
+        traceback.print_exception(exc_type, exc_value, exc_tb)
+    print("=" * 60, flush=True)
     return (
         "<!DOCTYPE html><html><head><meta charset='utf-8'><title>오류</title></head><body>"
         "<h1>Internal Server Error</h1><p>서버 오류가 발생했습니다. 터미널(콘솔) 로그를 확인해 주세요.</p>"
@@ -14227,7 +14237,7 @@ def admin_dashboard():
                                 <td class="p-3 border border-gray-100">{{ c.biz_name or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_representative or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_reg_number or '-' }}</td>
-                                <td class="p-3 border border-gray-100">{{ c.biz_online_sales_number or '-' }}</td>
+                                <td class="p-3 border border-gray-100">{{ getattr(c, 'biz_online_sales_number', None) or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_address or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_contact or '-' }}</td>
                                 <td class="p-3 border border-gray-100 text-teal-600 truncate max-w-[120px]" title="{{ c.seller_inquiry_link or '' }}">{% if c.seller_inquiry_link %}{{ c.seller_inquiry_link[:30] }}{% if c.seller_inquiry_link|length > 30 %}...{% endif %}{% else %}-{% endif %}</td>
@@ -15418,7 +15428,7 @@ ition {% if tab == 'popup' %}bg-orange-50 border-2 border-orange-500 text-orange
                                 <td class="p-3 border border-gray-100">{{ c.biz_name or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_representative or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_reg_number or '-' }}</td>
-                                <td class="p-3 border border-gray-100">{{ c.biz_online_sales_number or '-' }}</td>
+                                <td class="p-3 border border-gray-100">{{ getattr(c, 'biz_online_sales_number', None) or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_address or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ c.biz_contact or '-' }}</td>
                                 <td class="p-3 border border-gray-100 text-teal-600 truncate max-w-[120px]" title="{{ c.seller_inquiry_link or '' }}">{% if c.seller_inquiry_link %}{{ c.seller_inquiry_link[:30] }}{% if c.seller_inquiry_link|length > 30 %}...{% endif %}{% else %}-{% endif %}</td>
@@ -18812,7 +18822,7 @@ def admin_sellers_excel():
             '상호': c.biz_name or '',
             '대표자': c.biz_representative or '',
             '사업자등록번호': c.biz_reg_number or '',
-            '통신판매업번호': c.biz_online_sales_number or '',
+            '통신판매업번호': getattr(c, 'biz_online_sales_number', None) or '',
             '소재지': c.biz_address or '',
             '고객센터': c.biz_contact or '',
             '문의링크': c.seller_inquiry_link or '',
@@ -19945,6 +19955,11 @@ with app.app_context():
             db.session.commit()
         except Exception:
             db.session.rollback()
+    try:
+        db.session.execute(text('ALTER TABLE category ADD COLUMN biz_online_sales_number VARCHAR(50)'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     try:
         db.session.execute(text('ALTER TABLE user ADD COLUMN points INTEGER DEFAULT 0'))
         db.session.commit()
