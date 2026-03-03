@@ -3437,6 +3437,12 @@ def index():
     box-shadow: 0 14px 35px rgba(15, 23, 42, 0.04);
     transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease, border-color 0.25s;
 }
+.page-main .product-card a img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    aspect-ratio: 1 / 1;
+}
 .page-main .product-card:hover {
     transform: translateY(-4px);
     box-shadow: 0 22px 50px rgba(15, 23, 42, 0.07);
@@ -5148,6 +5154,13 @@ def board_free_detail(fid):
     prev_id = ids[idx - 1] if idx > 0 else None
     next_id = ids[idx + 1] if idx >= 0 and idx + 1 < len(ids) else None
     board_comments = BoardComment.query.filter_by(board_type='free', post_id=p.id).order_by(BoardComment.id.asc()).all()
+    can_edit = bool(
+        current_user.is_authenticated
+        and (
+            (p.user_id is not None and current_user.id == p.user_id)
+            or getattr(current_user, "is_admin", False)
+        )
+    )
     attachments = FreeBoardAttachment.query.filter_by(free_board_id=p.id).order_by(FreeBoardAttachment.sort_order.asc(), FreeBoardAttachment.id.asc()).all()
     return render_template_string(
         HEADER_HTML + """
@@ -5162,6 +5175,14 @@ def board_free_detail(fid):
             <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
                 <h1 class="text-xl md:text-2xl font-black text-gray-900 mb-2">{{ p.title }}</h1>
                 <p class="text-[10px] text-gray-400 mb-4">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '익명' }}</p>
+                {% if can_edit %}
+                <div class="flex justify-end gap-2 mb-4">
+                    <a href="/board/free/{{ p.id }}/edit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gray-100 text-gray-700 hover:bg-teal-50 hover:text-teal-700 transition">수정</a>
+                    <form method="POST" action="/board/free/{{ p.id }}/delete" onsubmit="return confirm('정말 이 글을 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.');">
+                        <button type="submit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">삭제</button>
+                    </form>
+                </div>
+                {% endif %}
                 <div class="text-gray-700 text-sm whitespace-pre-wrap">{{ p.content or '' }}</div>
                 {% if attachments %}
                 <div class="mt-6 pt-6 border-t border-gray-100">
@@ -5205,8 +5226,80 @@ def board_free_detail(fid):
             </div>
         </div>
         """ + FOOTER_HTML,
-        p=p, prev_id=prev_id, next_id=next_id, board_comments=board_comments, attachments=attachments
+        p=p,
+        prev_id=prev_id,
+        next_id=next_id,
+        board_comments=board_comments,
+        attachments=attachments,
+        can_edit=can_edit,
     )
+
+
+@app.route('/board/free/<int:fid>/edit', methods=['GET', 'POST'])
+@login_required
+def board_free_edit(fid):
+    """자유게시판 글 수정 (작성자·관리자만 가능)."""
+    post = FreeBoard.query.filter_by(id=fid, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 수정할 수 있습니다.")
+        return redirect(url_for("board_free_detail", fid=fid))
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        content = (request.form.get("content") or "").strip()
+        if not title:
+            flash("제목을 입력해 주세요.")
+            return redirect(url_for("board_free_edit", fid=fid))
+        post.title = title[:200]
+        post.content = content or None
+        db.session.commit()
+        flash("글이 수정되었습니다.")
+        return redirect(url_for("board_free_detail", fid=fid))
+    return render_template_string(
+        HEADER_HTML
+        + """
+        <div class="max-w-3xl mx-auto px-4 py-12">
+            <a href="/board/free/{{ p.id }}" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 글 상세로</a>
+            <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">자유게시판 글 수정</h1>
+            <p class="text-gray-500 text-sm mb-6">제목과 내용을 수정할 수 있습니다. 첨부된 사진·동영상은 그대로 유지됩니다.</p>
+            <form method="POST" action="/board/free/{{ p.id }}/edit" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                <div class="mb-4">
+                    <label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label>
+                    <input type="text" name="title" required maxlength="200" value="{{ p.title }}" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label>
+                    <textarea name="content" rows="6" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="내용을 입력하세요.">{{ p.content or '' }}</textarea>
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <a href="/board/free/{{ p.id }}" class="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs md:text-sm font-bold hover:bg-gray-200">취소</a>
+                    <button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-xs md:text-sm font-black hover:bg-teal-700 transition">저장하기</button>
+                </div>
+            </form>
+        </div>
+        """
+        + FOOTER_HTML,
+        p=post,
+    )
+
+
+@app.route('/board/free/<int:fid>/delete', methods=['POST'])
+@login_required
+def board_free_delete(fid):
+    """자유게시판 글 삭제 (작성자·관리자만, is_hidden 처리)."""
+    post = FreeBoard.query.filter_by(id=fid, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 삭제할 수 있습니다.")
+        return redirect(url_for("board_free_detail", fid=fid))
+    post.is_hidden = True
+    db.session.commit()
+    flash("글이 삭제되었습니다.")
+    return redirect(url_for("board_free"))
 
 
 # ---------- 이벤트 게시판 (SNS 공유·포인트 지급 요청) ----------
