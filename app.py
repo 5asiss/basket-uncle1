@@ -1434,6 +1434,169 @@ HEADER_HTML = """
     }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     
+    /* 상품카드 이미지 영역 통일 (메인·카테고리·검색 공통) */
+    .product-card > a {
+        display: block;
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        flex-shrink: 0;
+        overflow: hidden;
+    }
+    .product-card > a img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    /* ========== 상품카드 심플 디자인 (전체 통일) ========== */
+    .product-card {
+        border-radius: 0.75rem !important;
+        border: 1px solid #e2e8f0 !important;
+        background: #fff !important;
+        box-shadow: none !important;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+    }
+    .product-card:hover {
+        border-color: #cbd5e1 !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04) !important;
+        transform: none !important;
+    }
+    .product-card > a {
+        border-radius: 0.75rem 0.75rem 0 0;
+    }
+    .product-card.sold-out {
+        opacity: 0.7;
+    }
+    .product-card .absolute.top-2.right-2.z-10,
+    .product-card [class*="absolute"][class*="right-2"] {
+        background: #475569 !important;
+        color: #fff !important;
+        font-size: 0.65rem !important;
+        font-weight: 700 !important;
+        padding: 0.2rem 0.4rem !important;
+        border-radius: 0.25rem !important;
+        box-shadow: none !important;
+    }
+    .product-card .absolute.top-2.left-0.z-20 span,
+    .product-card [class*="absolute"][class*="left-0"] span {
+        font-size: 0.6rem !important;
+        font-weight: 700 !important;
+        padding: 0.2rem 0.5rem !important;
+        border-radius: 0 0.25rem 0.25rem 0 !important;
+        box-shadow: none !important;
+    }
+    .product-card .add-btn {
+        width: 2rem !important;
+        height: 2rem !important;
+        min-width: 2rem !important;
+        min-height: 2rem !important;
+        border-radius: 0.5rem !important;
+        background: #0d9488 !important;
+        color: #fff !important;
+        border: none !important;
+        box-shadow: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        transition: background-color 0.2s ease, opacity 0.2s ease !important;
+    }
+    .product-card .add-btn:hover {
+        background: #0f766e !important;
+        transform: none !important;
+    }
+    .product-card .add-btn i {
+        font-size: 0.6rem !important;
+    }
+    @media (min-width: 768px) {
+        .product-card .add-btn {
+            width: 2.25rem !important;
+            height: 2.25rem !important;
+            min-width: 2.25rem !important;
+            min-height: 2.25rem !important;
+            border-radius: 0.5rem !important;
+        }
+        .product-card .add-btn i { font-size: 0.65rem !important; }
+    }
+    .product-card .countdown-timer {
+        color: #64748b !important;
+        font-weight: 600 !important;
+    }
+    .product-card > div:last-child h3 {
+        font-weight: 700 !important;
+        color: #1e293b !important;
+    }
+    .product-card > div:last-child .price {
+        font-weight: 700 !important;
+        color: #0d9488 !important;
+    }
+    /* 상품카드 글귀·숫자 일정하게 표시 (줄 높이·숫자 정렬) */
+    .product-card .countdown-timer {
+        font-variant-numeric: tabular-nums;
+        min-height: 1.25em;
+        line-height: 1.25;
+        display: block;
+    }
+    .product-card > div:last-child h3 {
+        min-height: 1.75em;
+        line-height: 1.25;
+    }
+    .product-card > div:last-child > p.text-slate-400 {
+        font-variant-numeric: tabular-nums;
+        min-height: 1.75em;
+        line-height: 1.25;
+    }
+    .product-card .price {
+        font-variant-numeric: tabular-nums;
+    }
+    /* 상품카드 글귀 짤리지 않게 (줄바꿈·넘침 처리) */
+    .product-card > div:last-child {
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: break-word;
+        padding: 0.5rem 0.5rem 0.625rem;
+        gap: 0.125rem;
+        display: flex;
+        flex-direction: column;
+    }
+    @media (min-width: 768px) {
+        .product-card > div:last-child {
+            padding: 0.625rem 0.75rem 0.75rem;
+            gap: 0.25rem;
+        }
+    }
+    .product-card > div:last-child .countdown-timer {
+        margin-bottom: 0;
+    }
+    .product-card > div:last-child h3 {
+        margin-bottom: 0;
+        margin-top: 0;
+    }
+    .product-card > div:last-child > p.text-slate-400 {
+        margin-bottom: 0;
+        margin-top: 0;
+    }
+    .product-card > div:last-child .mt-auto {
+        margin-top: auto;
+        padding-top: 0.375rem;
+        align-items: center;
+    }
+    .product-card > div:last-child h3 {
+        overflow-wrap: break-word;
+        word-break: break-word;
+        hyphens: auto;
+    }
+    .product-card > div:last-child p {
+        overflow-wrap: break-word;
+        word-break: break-word;
+    }
+    .product-card > div:last-child .mt-auto {
+        min-width: 0;
+    }
+    .product-card > div:last-child .price {
+        min-width: 0;
+        font-size: clamp(0.5rem, 1.2vw, 0.875rem);
+        white-space: nowrap;
+    }
+    
     .horizontal-scroll {
         display: flex; overflow-x: auto; scroll-snap-type: x mandatory; 
         gap: 20px; padding: 12px 24px 28px; 
@@ -3037,6 +3200,8 @@ def api_search():
         "id": p.id, "name": p.name, "price": p.price, "image_url": p.image_url,
         "image_url_thumb": cloudinary_thumbnail_url(p.image_url) or p.image_url,
         "description": p.description or "", "stock": p.stock,
+        "spec": p.spec or "일반", "badge": p.badge or "",
+        "deadline": p.deadline.strftime('%Y-%m-%dT%H:%M:%S') if p.deadline else "",
         "is_sold_out": (p.deadline and p.deadline < now_kst()) or p.stock <= 0,
     } for p in products])
 
@@ -3064,17 +3229,30 @@ def search_view():
         </h2>
 
         {% if search_products %}
-        <div id="search-product-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 mb-12">
+        <div id="search-product-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left mb-12">
             {% for p in search_products %}
-            <div class="product-card bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %}">
-                <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover p-2 md:p-6">
+            {% set is_expired = (p.deadline and p.deadline < now) or p.stock <= 0 %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired %}sold-out opacity-80{% endif %}">
+                {% if is_expired %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                {% if p.description %}
+                <div class="absolute top-2 left-0 z-20">
+                    <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
+                </div>
+                {% endif %}
+                <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
-                <div class="p-3 md:p-8 flex flex-col flex-1">
-                    <h3 class="font-black text-gray-800 text-[11px] md:text-base mb-1 truncate">{{ p.name }}</h3>
-                    <div class="mt-auto flex justify-between items-end">
-                        <span class="text-[13px] md:text-2xl font-black text-teal-600">{{ "{:,}".format(p.price) }}원</span>
-                        <button onclick="addToCart('{{p.id}}')" class="bg-teal-600 w-8 h-8 md:w-14 md:h-14 rounded-xl text-white flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button>
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">
+                        {{ p.spec or '일반' }}
+                        {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                    </p>
+                    
+                    <div class="mt-auto flex justify-between items-end gap-2">
+                        <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                        {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                     </div>
                 </div>
             </div>
@@ -3128,13 +3306,29 @@ def search_view():
                     else {
                         var grid = document.getElementById('search-product-grid');
                         data.forEach(function(p){
-                            var sold = p.is_sold_out ? ' sold-out' : '';
+                            var sold = p.is_sold_out ? ' sold-out opacity-80' : '';
+                            var soldBadge = p.is_sold_out ? '<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>' : '';
+                            var badgeColor = 'bg-slate-600';
+                            if (p.description && p.description.indexOf('당일') !== -1) badgeColor = 'bg-red-600';
+                            else if (p.description && p.description.indexOf('+1') !== -1) badgeColor = 'bg-blue-600';
+                            else if (p.description && p.description.indexOf('+2') !== -1) badgeColor = 'bg-emerald-600';
+                            var deliveryBadge = (p.description && p.description.trim()) ? '<div class="absolute top-2 left-0 z-20"><span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full ' + badgeColor + '"><i class="fas fa-truck-fast mr-1"></i> ' + p.description.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span></div>' : '';
+                            var deadlineAttr = (p.deadline && p.deadline.trim()) ? ' data-deadline="' + p.deadline + '+09:00"' : '';
+                            var countdownText = (p.deadline && p.deadline.trim()) ? '' : '📅 상시판매';
+                            var specPart = (p.spec || '일반').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                            var stockPart = p.stock != null ? ' · 잔여 ' + p.stock + '개' : '';
+                            var badgeSpan = (p.badge && p.badge.trim()) ? ' <span class="text-[9px] text-orange-500 font-bold">| ' + (p.badge.replace(/</g,'&lt;').replace(/>/g,'&gt;')) + '</span>' : '';
+                            var addBtn = !p.is_sold_out && p.stock > 0 ? '<button onclick="addToCart(\'' + p.id + '\')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>' : '';
+                            var imgUrl = (p.image_url_thumb || p.image_url || '').trim() || 'https://placehold.co/400x400/f1f5f9/64748b?text=상품';
                             grid.insertAdjacentHTML('beforeend',
-                                '<div class="product-card bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-2xl' + sold + '">'
-                                + '<a href="/product/' + p.id + '" class="relative aspect-square block bg-white overflow-hidden"><img src="' + (p.image_url_thumb || p.image_url) + '" loading="lazy" class="w-full h-full object-cover p-2 md:p-6"></a>'
-                                + '<div class="p-3 md:p-8 flex flex-col flex-1"><h3 class="font-black text-gray-800 text-[11px] md:text-base mb-1 truncate">' + p.name + '</h3>'
-                                + '<div class="mt-auto flex justify-between items-end"><span class="text-[13px] md:text-2xl font-black text-teal-600">' + (p.price || 0).toLocaleString() + '원</span>'
-                                + '<button onclick="addToCart(\\'' + p.id + '\\')" class="bg-teal-600 w-8 h-8 md:w-14 md:h-14 rounded-xl text-white flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button></div></div></div>');
+                                '<div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all ' + sold + '">'
+                                + soldBadge + deliveryBadge
+                                + '<a href="/product/' + p.id + '" class="relative aspect-square block bg-slate-50 overflow-hidden"><img src="' + imgUrl.replace(/"/g,'&quot;') + '" loading="lazy" class="w-full h-full object-cover" onerror="this.src=\'https://placehold.co/400x400/f1f5f9/64748b?text=상품\'"></a>'
+                                + '<div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">'
+                                + '<p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5"' + deadlineAttr + '>' + countdownText + '</p>'
+                                + '<h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">' + (p.name || '').replace(/</g,'&lt;').replace(/>/g,'&gt;') + badgeSpan + '</h3>'
+                                + '<p class="text-[9px] text-slate-400 font-bold mb-1">' + specPart + (stockPart ? '\n                        ' + stockPart : '') + '</p>'
+                                + '<div class="mt-auto flex justify-between items-end gap-2"><span class="price text-[12px] md:text-lg font-black text-teal-700">' + (p.price || 0).toLocaleString() + '원</span>' + addBtn + '</div></div></div>');
                         });
                         searchOffset += data.length;
                         if (data.length < 50) { searchHasMore = false; document.getElementById('search-end-message').classList.remove('hidden'); }
@@ -3159,7 +3353,7 @@ def search_view():
     </script>
     {% endif %}
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, query=query, search_products=search_products, total_count=total_count, search_has_more=search_has_more, cat_previews=cat_previews, recommend_cats=recommend_cats)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, query=query, search_products=search_products, total_count=total_count, search_has_more=search_has_more, cat_previews=cat_previews, recommend_cats=recommend_cats, now=now_kst())
 
 @app.route('/')
 def index():
@@ -3390,6 +3584,60 @@ def index():
     }
 }
 .page-main .product-card .p-3 { }
+/* 메인 상품카드 모바일 최적화: 글자 잘림 방지, 터치 영역·가독성 */
+@media (max-width: 767px) {
+    .page-main #products .grid { gap: 0.5rem; }
+    .page-main .product-card {
+        border-radius: 1rem;
+        min-height: 0;
+    }
+    .page-main .product-card .p-3.md\:p-4,
+    .page-main .product-card > div:last-child {
+        padding: 0.4rem 0.45rem 0.5rem;
+        min-width: 0;
+        gap: 0.125rem;
+    }
+    .page-main .product-card h3 {
+        font-size: 0.6875rem;
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: keep-all;
+        overflow-wrap: break-word;
+    }
+    .page-main .product-card .price {
+        font-size: 0.625rem;
+        letter-spacing: -0.03em;
+    }
+    .page-main .product-card .countdown-timer,
+    .page-main .product-card .text-slate-400,
+    .page-main .product-card .text-amber-600 {
+        font-size: 0.5rem;
+    }
+    .page-main .product-card .add-btn {
+        min-width: 2rem;
+        min-height: 2rem;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 0.5rem;
+    }
+    .page-main .product-card .add-btn i { font-size: 0.5rem; }
+}
+@media (min-width: 640px) and (max-width: 767px) {
+    .page-main #products .grid { gap: 0.75rem; }
+    .page-main .product-card h3 { font-size: 0.75rem; }
+    .page-main .product-card .price { font-size: 0.7rem; }
+}
+@media (min-width: 768px) {
+    .page-main .product-card .p-3.md\:p-4,
+    .page-main .product-card > div:last-child { min-width: 0; }
+    .page-main .product-card h3 {
+        word-break: keep-all;
+        overflow-wrap: break-word;
+    }
+}
 @media (max-width: 767px) {
     .page-main .section-title { font-size: 1rem; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
     .page-main .section-title .bar { height: 1.25rem; }
@@ -3398,11 +3646,11 @@ def index():
     .page-main .section-title { font-size: 1.5rem; margin-bottom: 1.25rem; }
     .page-main .section-title .bar { height: 1.75rem; }
     .page-main .product-card h3 { font-size: 0.9375rem; }
-    .page-main .product-card .price { font-size: 1.15rem; }
+    .page-main .product-card .price { font-size: 0.875rem; }
 }
 @media (min-width: 1280px) {
     .page-main .product-card h3 { font-size: 1rem; line-height: 1.4; }
-    .page-main .product-card .price { font-size: 1.25rem; }
+    .page-main .product-card .price { font-size: 0.9375rem; }
 }
 .page-main .section-title {
     font-size: clamp(1.1rem, 2vw, 1.5rem);
@@ -3431,11 +3679,23 @@ def index():
 .page-main .review-card .review-meta { font-size: 0.5rem; }
 .page-main .review-card .review-content { font-size: 0.6rem; line-height: 1.3; }
 .page-main .product-card {
-    background: #ffffff;
-    border-radius: 1.5rem;
-    border: 1px solid #e5e7eb;
-    box-shadow: 0 14px 35px rgba(15, 23, 42, 0.04);
-    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s ease, border-color 0.25s;
+    border-radius: 0.75rem !important;
+    border: 1px solid #e2e8f0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.page-main .product-card:hover {
+    border-color: #cbd5e1 !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04) !important;
+    transform: none !important;
+}
+.page-main .product-card > a {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    flex-shrink: 0;
+    overflow: hidden;
 }
 .page-main .product-card a img {
     width: 100%;
@@ -3443,35 +3703,45 @@ def index():
     object-fit: cover;
     aspect-ratio: 1 / 1;
 }
-.page-main .product-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 22px 50px rgba(15, 23, 42, 0.07);
-    border-color: #d1d5db;
+.page-main .product-card a img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    aspect-ratio: 1 / 1;
 }
 .page-main .product-card .price {
     font-weight: 700;
     color: #111827;
     letter-spacing: -0.02em;
+    white-space: nowrap;
 }
 .page-main .product-card .add-btn {
-    min-width: 44px;
-    min-height: 44px;
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 0.75rem;
-    background: linear-gradient(135deg, #0d9488, #0f766e);
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 12px rgba(13, 148, 136, 0.3);
-    transition: transform 0.2s, box-shadow 0.2s;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
+    min-width: 2rem !important;
+    min-height: 2rem !important;
+    width: 2rem !important;
+    height: 2rem !important;
+    border-radius: 0.5rem !important;
+    background: #0d9488 !important;
+    color: #fff !important;
+    border: none !important;
+    box-shadow: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: background-color 0.2s ease !important;
 }
-@media (min-width: 768px) { .page-main .product-card .add-btn { width: 3.5rem; height: 3.5rem; min-width: 3.5rem; min-height: 3.5rem; border-radius: 1.25rem; } }
-.page-main .product-card .add-btn:hover { transform: scale(1.05); box-shadow: 0 6px 18px rgba(13, 148, 136, 0.4); }
-.page-main .product-card .add-btn:active { transform: scale(0.96); }
+.page-main .product-card .add-btn:hover {
+    background: #0f766e !important;
+    transform: none !important;
+}
+@media (min-width: 768px) {
+    .page-main .product-card .add-btn {
+        width: 2.25rem !important;
+        height: 2.25rem !important;
+        min-width: 2.25rem !important;
+        min-height: 2.25rem !important;
+    }
+}
 </style>
 
 <div class="page-main">
@@ -3534,24 +3804,30 @@ def index():
             <h2 class="text-sm md:text-base font-semibold text-gray-900">오늘 마감 임박</h2>
             <a href="/category/오늘마감" class="text-xs md:text-sm font-medium text-stone-400 hover:text-gray-900 flex items-center gap-1 transition min-h-[32px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left">
             {% for p in closing_today %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
-            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
-                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-full font-medium">판매마감</div>{% endif %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                {% if p.description %}
+                <div class="absolute top-2 left-0 z-20">
+                    <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
+                </div>
+                {% endif %}
+                
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                     <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
-                <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[9px] md:text-[11px] font-medium text-red-500 mb-1" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                    <h3 class="font-semibold text-slate-900 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}</h3>
-                    <p class="text-[9px] text-slate-400 font-normal mb-1">
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">
                         {{ p.spec or '일반' }}
                         {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
                     </p>
-                    {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
+                    
                     <div class="mt-auto flex justify-between items-end gap-2">
-                        <span class="price text-[12px] md:text-lg font-semibold text-gray-900">{{ "{:,}".format(p.price) }}원</span>
+                        <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                         {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                     </div>
                 </div>
@@ -3567,29 +3843,30 @@ def index():
             <h2 class="text-sm md:text-base font-semibold text-gray-900">최신 상품</h2>
             <a href="/category/최신상품" class="text-xs md:text-sm font-medium text-stone-400 hover:text-gray-900 flex items-center gap-1 transition min-h-[32px] items-center justify-end py-1 touch-manipulation">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left">
             {% for p in random_latest %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
-            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
-                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-full font-medium">판매마감</div>{% endif %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
                 {% if p.description %}
                 <div class="absolute top-2 left-0 z-20">
-                    <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-medium text-white shadow-sm rounded-r-full bg-gray-900"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
+                    <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
                 </div>
                 {% endif %}
+                
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                     <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
-                <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[9px] md:text-[11px] font-medium text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                    <h3 class="font-semibold text-slate-900 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-gray-500 font-medium">· {{ p.badge }}</span>{% endif %}</h3>
-                    <p class="text-[9px] text-slate-400 font-normal mb-1">
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">
                         {{ p.spec or '일반' }}
                         {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
                     </p>
-                    {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
+                    
                     <div class="mt-auto flex justify-between items-end gap-2">
-                        <span class="price text-[12px] md:text-lg font-semibold text-gray-900">{{ "{:,}".format(p.price) }}원</span>
+                        <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                         {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                     </div>
                 </div>
@@ -3605,7 +3882,7 @@ def index():
             <div class="min-w-0 flex-1"><h2 class="section-title bar-green"><span class="bar"></span> {{ cat.name }}</h2>{% if cat.description %}<p class="text-[10px] text-slate-400 font-bold mt-1">{{ cat.description }}</p>{% endif %}</div>
             <a href="/category/{{ cat.name }}" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition min-h-[44px] items-center justify-end py-1 touch-manipulation shrink-0">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-5 lg:gap-6">
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left">
             {% for p in products %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -3615,17 +3892,18 @@ def index():
                     <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1"></i> {{ p.description }}</span>
                 </div>
                 {% endif %}
+                
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                     <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
-                <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
                     <p class="text-[9px] text-slate-400 font-bold mb-1">
                         {{ p.spec or '일반' }}
                         {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
                     </p>
-                    {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
+                    
                     <div class="mt-auto flex justify-between items-end gap-2">
                         <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                         {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
@@ -3812,7 +4090,7 @@ def index():
                     전체보기 <i class="fas fa-chevron-right text-[8px]"></i>
                 </a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 text-left">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left">
                 {% for p in random_latest %}
                 {% set is_expired = (p.deadline and p.deadline < now) %}
                 <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -3825,13 +4103,16 @@ def index():
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                         <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
-                    <div class="p-3 md:p-4 flex flex-col flex-1">
-                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm line-clamp-2 mb-0.5">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
-                        <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
-                        {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
-                        <div class="mt-auto flex justify-between items-end">
-                            <span class="text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                    <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mb-1">
+                            {{ p.spec or '일반' }}
+                            {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                        </p>
+                        
+                        <div class="mt-auto flex justify-between items-end gap-2">
+                            <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                             {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                         </div>
                     </div>
@@ -3851,7 +4132,7 @@ def index():
                     전체보기 <i class="fas fa-chevron-right text-[8px]"></i>
                 </a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 text-left">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left">
                 {% for p in closing_today %}
                 {% set is_expired = (p.deadline and p.deadline < now) %}
                 <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -3864,13 +4145,16 @@ def index():
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                         <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
-                    <div class="p-3 md:p-4 flex flex-col flex-1">
-                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm line-clamp-2 mb-0.5">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
-                        <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
-                        {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
-                        <div class="mt-auto flex justify-between items-end">
-                            <span class="text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                    <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mb-1">
+                            {{ p.spec or '일반' }}
+                            {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                        </p>
+                        
+                        <div class="mt-auto flex justify-between items-end gap-2">
+                            <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                             {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                         </div>
                     </div>
@@ -3893,7 +4177,7 @@ def index():
                     전체보기 <i class="fas fa-chevron-right text-[8px]"></i>
                 </a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 text-left">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left">
                 {% for p in products %}
                 {% set is_expired = (p.deadline and p.deadline < now) %}
                 <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -3906,13 +4190,16 @@ def index():
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                         <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
-                    <div class="p-3 md:p-4 flex flex-col flex-1">
-                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm line-clamp-2 mb-0.5">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
-                        <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
-                        {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
-                        <div class="mt-auto flex justify-between items-end">
-                            <span class="text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
+                    <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                        <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                        <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                        <p class="text-[9px] text-slate-400 font-bold mb-1">
+                            {{ p.spec or '일반' }}
+                            {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
+                        </p>
+                        
+                        <div class="mt-auto flex justify-between items-end gap-2">
+                            <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                             {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
                         </div>
                     </div>
@@ -4476,6 +4763,13 @@ def board_restaurant_request_detail(rid):
     prev_id = ids[idx - 1] if idx > 0 else None
     next_id = ids[idx + 1] if idx >= 0 and idx + 1 < len(ids) else None
     board_comments = BoardComment.query.filter_by(board_type='restaurant', post_id=p.id).order_by(BoardComment.id.asc()).all()
+    can_edit = bool(
+        current_user.is_authenticated
+        and (
+            (p.user_id is not None and current_user.id == p.user_id)
+            or getattr(current_user, "is_admin", False)
+        )
+    )
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-3xl mx-auto py-8 md:py-12 px-4 font-black text-left">
@@ -4490,6 +4784,14 @@ def board_restaurant_request_detail(rid):
                 {% if p.image_url %}<img src="{{ p.image_url }}" class="w-full max-h-80 object-cover rounded-xl mb-4" alt="">{% endif %}
                 <h1 class="text-xl font-black text-gray-900 mb-2">{{ p.store_name }}</h1>
                 <p class="text-[10px] text-gray-400 mb-4">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '비회원' }}</p>
+                {% if can_edit %}
+                <div class="flex justify-end gap-2 mb-4">
+                    <a href="/board/restaurant-request/{{ p.id }}/edit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gray-100 text-gray-700 hover:bg-teal-50 hover:text-teal-700 transition">수정</a>
+                    <form method="POST" action="/board/restaurant-request/{{ p.id }}/delete" onsubmit="return confirm('정말 이 글을 삭제하시겠습니까?');" class="inline">
+                        <button type="submit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">삭제</button>
+                    </form>
+                </div>
+                {% endif %}
                 {% if p.store_info %}<div class="mb-4"><p class="text-[10px] text-gray-500 uppercase mb-1">업체정보</p><p class="text-gray-700 text-sm whitespace-pre-wrap">{{ p.store_info }}</p></div>{% endif %}
                 {% if p.menu %}<div class="mb-4"><p class="text-[10px] text-gray-500 uppercase mb-1">메뉴</p><p class="text-gray-700 text-sm whitespace-pre-wrap">{{ p.menu }}</p></div>{% endif %}
                 <div class="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
@@ -4536,8 +4838,68 @@ def board_restaurant_request_detail(rid):
             </div>
         </div>
         """ + FOOTER_HTML,
-        p=p, up_count=up_count, down_count=down_count, user_vote=user_vote, show_100_notice=show_100_notice, prev_id=prev_id, next_id=next_id, board_comments=board_comments
+        p=p, up_count=up_count, down_count=down_count, user_vote=user_vote, show_100_notice=show_100_notice, prev_id=prev_id, next_id=next_id, board_comments=board_comments, can_edit=can_edit
     )
+
+
+@app.route('/board/restaurant-request/<int:rid>/edit', methods=['GET', 'POST'])
+@login_required
+def board_restaurant_request_edit(rid):
+    """전국맛집요청 글 수정 (작성자·관리자만)."""
+    post = RestaurantRequest.query.filter_by(id=rid, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 수정할 수 있습니다.")
+        return redirect(url_for("board_restaurant_request_detail", rid=rid))
+    if request.method == "POST":
+        store_name = (request.form.get("store_name") or "").strip()
+        if not store_name:
+            flash("업체명을 입력해 주세요.")
+            return redirect(url_for("board_restaurant_request_edit", rid=rid))
+        post.store_name = store_name[:200]
+        post.store_info = (request.form.get("store_info") or "").strip() or None
+        post.menu = (request.form.get("menu") or "").strip() or None
+        new_img = save_board_image(request.files.get("image"))
+        if new_img:
+            post.image_url = new_img
+        db.session.commit()
+        flash("글이 수정되었습니다.")
+        return redirect(url_for("board_restaurant_request_detail", rid=rid))
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-2xl lg:max-w-4xl mx-auto py-8 md:py-12 px-4 font-black text-left">
+            <a href="/board/restaurant-request/{{ p.id }}" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 글 상세로</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">전국맛집요청 글 수정</h1>
+            <form method="POST" action="/board/restaurant-request/{{ p.id }}/edit" enctype="multipart/form-data" class="space-y-4">
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">업체명 *</label><input type="text" name="store_name" required value="{{ p.store_name or '' }}" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">업체 정보</label><textarea name="store_info" rows="3" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ p.store_info or '' }}</textarea></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">메뉴</label><textarea name="menu" rows="4" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ p.menu or '' }}</textarea></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">사진 (변경 시에만 선택)</label><input type="file" name="image" accept="image/*" class="w-full text-sm p-3 rounded-xl border border-gray-200"></div>
+                <div class="flex gap-3"><a href="/board/restaurant-request/{{ p.id }}" class="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-sm font-bold hover:bg-gray-200">취소</a><button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700">저장</button></div>
+            </form>
+        </div>
+        """ + FOOTER_HTML,
+        p=post,
+    )
+
+
+@app.route('/board/restaurant-request/<int:rid>/delete', methods=['POST'])
+@login_required
+def board_restaurant_request_delete(rid):
+    """전국맛집요청 글 삭제 (작성자·관리자만, is_hidden)."""
+    post = RestaurantRequest.query.filter_by(id=rid, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 삭제할 수 있습니다.")
+        return redirect(url_for("board_restaurant_request_detail", rid=rid))
+    post.is_hidden = True
+    db.session.commit()
+    flash("글이 삭제되었습니다.")
+    return redirect(url_for("board_restaurant_request"))
 
 
 @app.route('/board/restaurant-request/<int:rid>/recommend', methods=['POST'])
@@ -4684,6 +5046,13 @@ def board_delivery_request_detail(did):
     prev_id = ids[idx - 1] if idx > 0 else None
     next_id = ids[idx + 1] if idx >= 0 and idx + 1 < len(ids) else None
     board_comments = BoardComment.query.filter_by(board_type='delivery', post_id=p.id).order_by(BoardComment.id.asc()).all()
+    can_edit = bool(
+        current_user.is_authenticated
+        and (
+            (p.user_id is not None and current_user.id == p.user_id)
+            or getattr(current_user, "is_admin", False)
+        )
+    )
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-3xl mx-auto py-8 md:py-12 px-4 font-black text-left">
@@ -4697,6 +5066,14 @@ def board_delivery_request_detail(did):
             <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
                 <h1 class="text-xl font-black text-teal-700 mb-2">{{ p.region_name }}</h1>
                 <p class="text-[10px] text-gray-400 mb-4">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '비회원' }}</p>
+                {% if can_edit %}
+                <div class="flex justify-end gap-2 mb-4">
+                    <a href="/board/delivery-request/{{ p.id }}/edit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gray-100 text-gray-700 hover:bg-teal-50 hover:text-teal-700 transition">수정</a>
+                    <form method="POST" action="/board/delivery-request/{{ p.id }}/delete" onsubmit="return confirm('정말 이 글을 삭제하시겠습니까?');" class="inline">
+                        <button type="submit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">삭제</button>
+                    </form>
+                </div>
+                {% endif %}
                 {% if p.content %}<div class="mb-4"><p class="text-gray-700 text-sm whitespace-pre-wrap">{{ p.content }}</p></div>{% endif %}
                 <div class="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
                     <span class="text-teal-600 font-black">👍 추천 {{ up_count }}</span>
@@ -4742,8 +5119,62 @@ def board_delivery_request_detail(did):
             </div>
         </div>
         """ + FOOTER_HTML,
-        p=p, up_count=up_count, down_count=down_count, user_vote=user_vote, show_notice=show_notice, prev_id=prev_id, next_id=next_id, board_comments=board_comments
+        p=p, up_count=up_count, down_count=down_count, user_vote=user_vote, show_notice=show_notice, prev_id=prev_id, next_id=next_id, board_comments=board_comments, can_edit=can_edit
     )
+
+
+@app.route('/board/delivery-request/<int:did>/edit', methods=['GET', 'POST'])
+@login_required
+def board_delivery_request_edit(did):
+    """배송요청 글 수정 (작성자·관리자만)."""
+    post = DeliveryRequest.query.filter_by(id=did, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 수정할 수 있습니다.")
+        return redirect(url_for("board_delivery_request_detail", did=did))
+    if request.method == "POST":
+        region_name = (request.form.get("region_name") or "").strip()
+        if not region_name:
+            flash("지역명을 입력해 주세요.")
+            return redirect(url_for("board_delivery_request_edit", did=did))
+        post.region_name = region_name[:200]
+        post.content = (request.form.get("content") or "").strip() or None
+        db.session.commit()
+        flash("글이 수정되었습니다.")
+        return redirect(url_for("board_delivery_request_detail", did=did))
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-2xl mx-auto py-8 md:py-12 px-4 font-black text-left">
+            <a href="/board/delivery-request/{{ p.id }}" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 글 상세로</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">배송요청 글 수정</h1>
+            <form method="POST" action="/board/delivery-request/{{ p.id }}/edit" class="space-y-4">
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">지역명 *</label><input type="text" name="region_name" required value="{{ p.region_name or '' }}" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">글내용</label><textarea name="content" rows="4" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ p.content or '' }}</textarea></div>
+                <div class="flex gap-3"><a href="/board/delivery-request/{{ p.id }}" class="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-sm font-bold hover:bg-gray-200">취소</a><button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700">저장</button></div>
+            </form>
+        </div>
+        """ + FOOTER_HTML,
+        p=post,
+    )
+
+
+@app.route('/board/delivery-request/<int:did>/delete', methods=['POST'])
+@login_required
+def board_delivery_request_delete(did):
+    """배송요청 글 삭제 (작성자·관리자만, is_hidden)."""
+    post = DeliveryRequest.query.filter_by(id=did, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 삭제할 수 있습니다.")
+        return redirect(url_for("board_delivery_request_detail", did=did))
+    post.is_hidden = True
+    db.session.commit()
+    flash("글이 삭제되었습니다.")
+    return redirect(url_for("board_delivery_request"))
 
 
 @app.route('/board/delivery-request/<int:did>/vote', methods=['POST'])
@@ -4947,6 +5378,13 @@ def board_partnership_detail(pid):
     prev_id = ids[idx - 1] if idx > 0 else None
     next_id = ids[idx + 1] if idx >= 0 and idx + 1 < len(ids) else None
     board_comments = BoardComment.query.filter_by(board_type='partnership', post_id=p.id).order_by(BoardComment.id.asc()).all()
+    can_edit = bool(
+        current_user.is_authenticated
+        and (
+            (p.user_id is not None and current_user.id == p.user_id)
+            or getattr(current_user, "is_admin", False)
+        )
+    )
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-3xl mx-auto py-8 md:py-12 px-4 font-black text-left">
@@ -4961,6 +5399,14 @@ def board_partnership_detail(pid):
                 <p class="text-[10px] text-gray-500 uppercase mb-1">제휴 종류</p>
                 <p class="font-black text-gray-900 mb-4">{{ p.partnership_type or '-' }}</p>
                 <p class="text-[10px] text-gray-400 mb-2">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '비회원' }}</p>
+                {% if can_edit %}
+                <div class="flex justify-end gap-2 mb-4">
+                    <a href="/board/partnership/{{ p.id }}/edit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gray-100 text-gray-700 hover:bg-teal-50 hover:text-teal-700 transition">수정</a>
+                    <form method="POST" action="/board/partnership/{{ p.id }}/delete" onsubmit="return confirm('정말 이 글을 삭제하시겠습니까?');" class="inline">
+                        <button type="submit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">삭제</button>
+                    </form>
+                </div>
+                {% endif %}
                 <p class="text-[10px] text-gray-500 uppercase mb-1">내용</p>
                 <p class="text-gray-700 text-sm whitespace-pre-wrap">{{ p.content or '' }}</p>
                 {% if p.admin_notes %}
@@ -4991,8 +5437,60 @@ def board_partnership_detail(pid):
             </div>
         </div>
         """ + FOOTER_HTML,
-        p=p, prev_id=prev_id, next_id=next_id, board_comments=board_comments
+        p=p, prev_id=prev_id, next_id=next_id, board_comments=board_comments, can_edit=can_edit
     )
+
+
+@app.route('/board/partnership/<int:pid>/edit', methods=['GET', 'POST'])
+@login_required
+def board_partnership_edit(pid):
+    """제휴문의 글 수정 (작성자·관리자만)."""
+    post = PartnershipInquiry.query.filter_by(id=pid, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 수정할 수 있습니다.")
+        return redirect(url_for("board_partnership_detail", pid=pid))
+    if request.method == "POST":
+        post.partnership_type = (request.form.get("partnership_type") or "").strip() or None
+        post.content = (request.form.get("content") or "").strip() or None
+        post.is_secret = request.form.get("is_secret") in ("1", "on", "yes")
+        db.session.commit()
+        flash("글이 수정되었습니다.")
+        return redirect(url_for("board_partnership_detail", pid=pid))
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-3xl mx-auto py-8 md:py-12 px-4 font-black text-left">
+            <a href="/board/partnership/{{ p.id }}" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 글 상세로</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">제휴문의 글 수정</h1>
+            <form method="POST" action="/board/partnership/{{ p.id }}/edit" class="space-y-4">
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">제휴 종류</label><input type="text" name="partnership_type" value="{{ p.partnership_type or '' }}" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="예: 로컬맛집, 배달업체"></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="6" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ p.content or '' }}</textarea></div>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="is_secret" value="1" {% if p.is_secret %}checked{% endif %} class="rounded"> <span class="text-sm font-bold">비밀글로 유지</span></label>
+                <div class="flex gap-3"><a href="/board/partnership/{{ p.id }}" class="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-sm font-bold hover:bg-gray-200">취소</a><button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700">저장</button></div>
+            </form>
+        </div>
+        """ + FOOTER_HTML,
+        p=post,
+    )
+
+
+@app.route('/board/partnership/<int:pid>/delete', methods=['POST'])
+@login_required
+def board_partnership_delete(pid):
+    """제휴문의 글 삭제 (작성자·관리자만, is_hidden)."""
+    post = PartnershipInquiry.query.filter_by(id=pid, is_hidden=False).first_or_404()
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 삭제할 수 있습니다.")
+        return redirect(url_for("board_partnership_detail", pid=pid))
+    post.is_hidden = True
+    db.session.commit()
+    flash("글이 삭제되었습니다.")
+    return redirect(url_for("board_partnership"))
 
 
 # ---------- 자유게시판 ----------
@@ -5332,6 +5830,13 @@ def board_event_detail(eid):
     idx = ids.index(eid) if eid in ids else -1
     prev_id = ids[idx - 1] if idx > 0 else None
     next_id = ids[idx + 1] if idx >= 0 and idx + 1 < len(ids) else None
+    can_edit = bool(
+        current_user.is_authenticated
+        and (
+            (p.user_id is not None and current_user.id == p.user_id)
+            or getattr(current_user, "is_admin", False)
+        )
+    )
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-3xl mx-auto px-4 py-12">
@@ -5345,14 +5850,77 @@ def board_event_detail(eid):
             <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
                 <h1 class="text-xl md:text-2xl font-black text-gray-900 mb-2">{% if post.is_notice %}<span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{% endif %}{{ post.title }}</h1>
                 <p class="text-[10px] text-gray-400 mb-4">{{ post.created_at.strftime('%Y.%m.%d %H:%M') if post.created_at else '' }} · {{ post.user_name or '익명' }}</p>
+                {% if can_edit %}
+                <div class="flex justify-end gap-2 mb-4">
+                    <a href="/board/event/{{ post.id }}/edit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gray-100 text-gray-700 hover:bg-teal-50 hover:text-teal-700 transition">수정</a>
+                    <form method="POST" action="/board/event/{{ post.id }}/delete" onsubmit="return confirm('정말 이 글을 삭제하시겠습니까?');" class="inline">
+                        <button type="submit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">삭제</button>
+                    </form>
+                </div>
+                {% endif %}
                 <div class="text-gray-700 text-sm whitespace-pre-wrap">{{ post.content or '' }}</div>
             </div>
         </div>
         """ + FOOTER_HTML,
         post=p,
         prev_id=prev_id,
-        next_id=next_id
+        next_id=next_id,
+        can_edit=can_edit,
     )
+
+
+@app.route('/board/event/<int:eid>/edit', methods=['GET', 'POST'])
+@login_required
+def board_event_edit(eid):
+    """이벤트 게시판 글 수정 (작성자·관리자만)."""
+    post = EventBoardPost.query.get_or_404(eid)
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 수정할 수 있습니다.")
+        return redirect(url_for("board_event_detail", eid=eid))
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        if not title:
+            flash("제목을 입력해 주세요.")
+            return redirect(url_for("board_event_edit", eid=eid))
+        post.title = title[:200]
+        post.content = (request.form.get("content") or "").strip() or None
+        db.session.commit()
+        flash("글이 수정되었습니다.")
+        return redirect(url_for("board_event_detail", eid=eid))
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-3xl mx-auto px-4 py-12">
+            <a href="/board/event/{{ p.id }}" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 글 상세로</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">이벤트 게시판 글 수정</h1>
+            <form method="POST" action="/board/event/{{ p.id }}/edit" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+                <div class="mb-4"><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="title" required maxlength="200" value="{{ p.title }}" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+                <div class="mb-6"><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="6" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ p.content or '' }}</textarea></div>
+                <div class="flex gap-3"><a href="/board/event/{{ p.id }}" class="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-sm font-bold hover:bg-gray-200">취소</a><button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700">저장</button></div>
+            </form>
+        </div>
+        """ + FOOTER_HTML,
+        p=post,
+    )
+
+
+@app.route('/board/event/<int:eid>/delete', methods=['POST'])
+@login_required
+def board_event_delete(eid):
+    """이벤트 게시판 글 삭제 (작성자·관리자만, DB에서 삭제)."""
+    post = EventBoardPost.query.get_or_404(eid)
+    if not (
+        (post.user_id is not None and current_user.id == post.user_id)
+        or getattr(current_user, "is_admin", False)
+    ):
+        flash("본인이 작성한 글만 삭제할 수 있습니다.")
+        return redirect(url_for("board_event_detail", eid=eid))
+    db.session.delete(post)
+    db.session.commit()
+    flash("글이 삭제되었습니다.")
+    return redirect(url_for("board_event"))
 
 
 @app.route('/board/event', methods=['GET', 'POST'])
@@ -5700,14 +6268,14 @@ def category_view(cat_name):
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                     <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
-                <div class="p-3 md:p-4 flex flex-col flex-1">
-                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
-                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}📅 상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
                     <p class="text-[9px] text-slate-400 font-bold mb-1">
                         {{ p.spec or '일반' }}
                         {% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}
                     </p>
-                    {% if review_counts.get(p.id, 0) > 0 %}<p class="text-[9px] text-amber-600 font-bold mb-1">리뷰 {{ review_counts.get(p.id, 0) }}개</p>{% endif %}
+                    
                     <div class="mt-auto flex justify-between items-end gap-2">
                         <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                         {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{p.id}}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
@@ -5731,7 +6299,7 @@ def category_view(cat_name):
                     <h3 class="section-title bar-green"><span class="bar"></span> {{ c_info.name }}</h3>
                     <a href="/category/{{ c_info.name }}" class="text-xs md:text-sm font-bold text-stone-400 hover:text-teal-600 flex items-center gap-1 transition">전체보기 <i class="fas fa-chevron-right text-[8px]"></i></a>
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6">
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-5 lg:gap-6 text-left">
                     {% for cp in c_prods %}
                     {% set is_expired = (cp.deadline and cp.deadline < now) %}
                     <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or cp.stock <= 0 %}sold-out opacity-80{% endif %}">
@@ -5742,15 +6310,16 @@ def category_view(cat_name):
                         </div>
                         {% endif %}
                         <a href="/product/{{ cp.id }}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                            <img src="{{ cp.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                            <img src="{{ cloudinary_thumbnail_url(cp.image_url) or cp.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                         </a>
-                        <div class="p-3 md:p-4 flex flex-col flex-1">
-                            <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (cp.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if cp.deadline else '' }}"></p>
-                            <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">{{ cp.name }}{% if cp.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ cp.badge }}</span>{% endif %}</h3>
+                        <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                            <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (cp.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if cp.deadline else '' }}">{% if not cp.deadline %}📅 상시판매{% endif %}</p>
+                            <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ cp.name }}{% if cp.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ cp.badge }}</span>{% endif %}</h3>
                             <p class="text-[9px] text-slate-400 font-bold mb-1">
                                 {{ cp.spec or '일반' }}
                                 {% if cp.stock is not none %} · 잔여 {{ cp.stock }}개{% endif %}
                             </p>
+                            
                             <div class="mt-auto flex justify-between items-end gap-2">
                                 <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(cp.price) }}원</span>
                                 {% if not is_expired and cp.stock > 0 %}<button onclick="addToCart('{{ cp.id }}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
@@ -5807,7 +6376,9 @@ def category_view(cat_name):
                         <span class="px-2 py-0.5 text-[8px] md:text-[10px] font-black text-white shadow-md rounded-r-full ${badgeColor}"><i class="fas fa-truck-fast mr-1"></i> ${p.description.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>
                     </div>` : '';
                 const deadlineAttr = p.deadline ? ' data-deadline="' + p.deadline + '+09:00"' : '';
-                const specText = (p.spec || '일반') + (p.stock != null ? ' · 잔여 ' + p.stock + '개' : '');
+                const countdownInner = (p.deadline && p.deadline.trim()) ? '' : '📅 상시판매';
+                const specPart = (p.spec || '일반').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const stockPart = p.stock != null ? ' · 잔여 ' + p.stock + '개' : '';
                 const badgeSpan = (p.badge && p.badge.trim()) ? ' <span class="text-[9px] text-orange-500 font-bold">| ' + (p.badge.replace(/</g,'&lt;').replace(/>/g,'&gt;')) + '</span>' : '';
                 const addBtn = !p.is_sold_out && p.stock > 0 ? '<button onclick="addToCart(\'' + p.id + '\')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>' : '';
                 const html = `
@@ -5817,10 +6388,11 @@ def category_view(cat_name):
                         <a href="/product/${p.id}" class="relative aspect-square block bg-slate-50 overflow-hidden">
                             <img src="${imgUrl}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                         </a>
-                        <div class="p-3 md:p-4 flex flex-col flex-1">
-                            <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5"${deadlineAttr}></p>
-                            <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2">${p.name.replace(/</g,'&lt;').replace(/>/g,'&gt;')}${badgeSpan}</h3>
-                            <p class="text-[9px] text-slate-400 font-bold mb-1">${specText.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>
+                        <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                            <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5"${deadlineAttr}>${countdownInner}</p>
+                            <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">${p.name.replace(/</g,'&lt;').replace(/>/g,'&gt;')}${badgeSpan}</h3>
+                            <p class="text-[9px] text-slate-400 font-bold mb-1">${specPart}${stockPart ? '\n                        ' + stockPart : ''}</p>
+                            
                             <div class="mt-auto flex justify-between items-end gap-2">
                                 <span class="price text-[12px] md:text-lg font-black text-teal-700">${p.price.toLocaleString()}원</span>
                                 ${addBtn}
@@ -16745,7 +17317,8 @@ def admin_product_bulk_upload():
             image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
             if not image_url:
                 if not main_img_raw or _bulk_is_placeholder_image(main_img_raw):
-                    for suffix in ("1", "_1"):
+                    # 품명+1 = 메인이미지 (우선 검색: 품명1, 품명+1, 품명_1)
+                    for suffix in ("1", "+1", "_1"):
                         found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
                         if found:
                             image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
@@ -16753,13 +17326,13 @@ def admin_product_bulk_upload():
                     if not image_url:
                         name_no_spaces = name_val.replace(" ", "")
                         if name_no_spaces != name_val:
-                            for suffix in ("1", "_1"):
+                            for suffix in ("1", "+1", "_1"):
                                 found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
                                 if found:
                                     image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
                                     break
                     if not image_url:
-                        for base in (name_val + "1", name_val + "_1", name_val.replace(" ", "") + "1", name_val.replace(" ", "") + "_1"):
+                        for base in (name_val + "1", name_val + "+1", name_val + "_1", name_val.replace(" ", "") + "1", name_val.replace(" ", "") + "+1", name_val.replace(" ", "") + "_1"):
                             found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
                             if found:
                                 image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
@@ -16798,19 +17371,25 @@ def admin_product_bulk_upload():
                     if detail_parts:
                         detail_image_url = ",".join(detail_parts)
                 else:
+                    # 품명+2 ~ 품명+10 = 상세이미지 (우선 검색)
                     detail_parts = []
-                    for suffix in ("2", "3", "4", "5", "6", "7", "8", "9", "10"):
-                        found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
-                        if not found and suffix.isdigit():
-                            found = _bulk_find_upload_by_basename(upload_dir, name_val + "_" + suffix)
+                    for num in range(2, 11):
+                        suffix_str = str(num)
+                        found = None
+                        for suffix in (suffix_str, "+" + suffix_str, "_" + suffix_str):
+                            found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
+                            if found:
+                                break
                         if not found:
                             name_no_spaces = name_val.replace(" ", "")
                             if name_no_spaces != name_val:
-                                found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
-                                if not found and suffix.isdigit():
-                                    found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + "_" + suffix)
+                                for suffix in (suffix_str, "+" + suffix_str, "_" + suffix_str):
+                                    found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
+                                    if found:
+                                        break
                         if not found:
-                            for base in (name_val + suffix, name_val + "_" + suffix, name_val.replace(" ", "") + suffix, name_val.replace(" ", "") + "_" + suffix):
+                            for base in (name_val + suffix_str, name_val + "+" + suffix_str, name_val + "_" + suffix_str,
+                                         name_val.replace(" ", "") + suffix_str, name_val.replace(" ", "") + "+" + suffix_str, name_val.replace(" ", "") + "_" + suffix_str):
                                 found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
                                 if found:
                                     break
@@ -16863,7 +17442,7 @@ def admin_product_bulk_upload():
                 lines.append(f"{name} ({'; '.join(parts)})")
             n = len(missing_images)
             flash(f"이미지가 없는 {n}건: {' | '.join(lines[:10])}{' ...' if len(lines) > 10 else ''}")
-            flash("→ 엑셀의 대표·상세이미지파일명을 '저장된 이미지 목록'에 보이는 파일명과 똑같이 쓰거나, 칸을 비우면 상품명+1·상품명+2 패턴으로 찾습니다. 공백·오타·인코딩이 다르면 매칭되지 않습니다.")
+            flash("→ 엑셀의 대표·상세이미지파일명을 '저장된 이미지 목록'에 보이는 파일명과 똑같이 쓰거나, 칸을 비우면 품명+1=메인이미지, 품명+2~품명+10=상세이미지로 자동 검색합니다. (파일명 예: 상품명1.jpg, 상품명2.jpg)")
         return redirect('/admin?tab=bulk_register')
     except Exception as e:
         db.session.rollback()
