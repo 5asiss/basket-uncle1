@@ -23,6 +23,7 @@ from sqlalchemy import text, or_, func, and_
 from delivery_system import logi_bp # 배송 시스템 파일에서 Blueprint 가져오기
 import cloudinary
 import cloudinary.uploader
+import cloudinary.api
 load_dotenv()
 
 # 한국 시간(KST) 기준 현재 시각 (홈/템플릿 표시 및 마감 비교용)
@@ -95,7 +96,10 @@ from config import (
 # 로컬 업로드 폴더 (Cloudinary 미사용 시만 활용). app.root_path 기준 절대 경로로 저장해 직접 올린 사진이 항상 /static/uploads/ 에서 노출되도록 함
 UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+try:
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+except OSError:
+    pass  # 배포 서버(읽기전용 등)에서는 폴더가 없을 수 있음. Cloudinary 사용 시 정상 동작
 
 # Cloudinary 설정 (CLOUDINARY_URL 환경변수 기반)
 cloudinary_url = os.getenv("CLOUDINARY_URL", "").strip()
@@ -6640,6 +6644,25 @@ def product_detail(pid):
             else:
                 u = u.replace(prefix + transform + suffix, prefix + 'w_1200,c_scale' + suffix, 1)
         return u
+
+    def _cloudinary_card_thumb_url(url):
+        """카드용 썸네일: Cloudinary 이미지를 정사각형으로 리사이즈/크롭해서 출력폼에 맞추기."""
+        u = _abs_url(url)
+        if 'res.cloudinary.com' not in u or '/image/upload/' not in u:
+            return u
+        try:
+            prefix, rest = u.split('/image/upload/', 1)
+        except ValueError:
+            return u
+        # rest가 바로 버전(v123...)으로 시작하면 단순 삽입
+        if rest.startswith('v'):
+            return f"{prefix}/image/upload/w_600,h_600,c_fill,g_auto,f_auto,q_auto/{rest}"
+        # 이미 변환이 있으면 버전 앞까지만 잘라서 교체
+        slash = rest.find('/')
+        if slash == -1:
+            return u
+        after = rest[slash + 1 :]
+        return f"{prefix}/image/upload/w_600,h_600,c_fill,g_auto,f_auto,q_auto/{after}"
     # 대표 이미지: w_1200,c_scale. 상세 이미지: 원본(변환 제거) so 세로 긴 이미지 끝까지 노출
     product_image_url_absolute = _cloudinary_full_display_url(getattr(p, 'image_url', None))
     detail_images_absolute = [_cloudinary_full_display_url(img, use_original=True) for img in detail_images]
@@ -7121,7 +7144,7 @@ def product_detail(pid):
                         </div>
                         {% endif %}
                         <div class="bg-white rounded-[2rem] border border-gray-100 p-4 shadow-sm transition hover:shadow-2xl hover:-translate-y-2 text-left h-full flex flex-col">
-                            <img src="{{ rp.image_url }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50 p-2">
+                            <img src="{{ cloudinary_card_url(rp.image_url) }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50 p-2">
                             <p class="text-xs md:text-sm font-black text-gray-800 truncate mb-1">{{ rp.name }}</p>
                             <p class="text-[9px] md:text-[11px] text-gray-400 font-bold mb-3">{{ rp.spec or '일반' }}</p>
                             <p class="text-sm md:text-lg font-black text-teal-600 mt-auto">{{ "{:,}".format(rp.price) }}원</p>
@@ -7150,7 +7173,7 @@ def product_detail(pid):
                     </div>
                     {% endif %}
                     <div class="bg-white rounded-[2rem] border border-gray-100 p-4 shadow-sm transition hover:shadow-2xl hover:-translate-y-2 text-left h-full flex flex-col">
-                        <img src="{{ rp.image_url }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50 p-2">
+                        <img src="{{ cloudinary_card_url(rp.image_url) }}" class="w-full aspect-square object-contain mb-4 rounded-2xl bg-gray-50 p-2">
                         <p class="text-xs md:text-sm font-black text-gray-800 truncate mb-1">{{ rp.name }}</p>
                         <p class="text-[9px] md:text-[11px] text-gray-400 font-bold mb-3">{{ rp.spec or '일반' }}</p>
                         <p class="text-sm md:text-lg font-black text-teal-600 mt-auto">{{ "{:,}".format(rp.price) }}원</p>
@@ -7228,7 +7251,8 @@ def product_detail(pid):
                                   product_share_url=request.url_root.rstrip('/') + '/product/' + str(pid),
                                   product_share_title=p.name or '상품',
                                   product_share_image=product_image_url_absolute,
-                                  kakao_js_key=KAKAO_REST_API_KEY or '')
+                                  kakao_js_key=KAKAO_REST_API_KEY or '',
+                                  cloudinary_card_url=_cloudinary_card_thumb_url)
 
 
 @app.route('/admin/debug/product/<int:pid>')
@@ -12492,13 +12516,13 @@ def admin_dashboard():
         {% if tab == 'bulk_register' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-teal-200 bg-teal-50/80 text-left">
                 <p class="font-black text-teal-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📦</span> 상품 대량등록</p>
-                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 채운 뒤 <b>엑셀 파일(.xlsx/.xls)만</b> 업로드하세요. 이미지는 아래 <b>「이미지 올리기」</b>로 먼저 올리거나, 서버 <code class="bg-white px-1 rounded">static/uploads/</code>에 넣고, 엑셀의 대표이미지파일명·상세이미지파일명에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=_1, 상세=_2~_10. <span class="text-amber-700 font-bold">한 번에 이미지 30개·파일당 5MB, 엑셀 200건·10MB 이하로 올리면 서버가 안정적입니다.</span></p>
+                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 채운 뒤 <b>엑셀 파일(.xlsx/.xls)만</b> 업로드하세요. 이미지는 아래 <b>「이미지 올리기」</b>로 먼저 올리거나, 로컬 개발 시에만 <code class="bg-white px-1 rounded">static/uploads/</code>에 넣고, 엑셀의 대표이미지파일명·상세이미지파일명에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=_1, 상세=_2~_10. <span class="text-amber-700 font-bold">배포 서버에는 static/uploads/ 폴더가 없을 수 있으므로 이미지는 반드시 「이미지 올리기」로 올리세요.</span> 한 번에 이미지 30개·파일당 5MB, 엑셀 200건·10MB 이하로 올리면 서버가 안정적입니다.</p>
                 <div class="flex flex-wrap items-center gap-3 mb-4">
                     <a href="/admin/product/bulk_upload_template" class="bg-white text-teal-600 border-2 border-teal-300 px-5 py-3 rounded-xl font-black text-xs shadow-sm hover:bg-teal-50 transition">📥 엑셀 업로드 양식 다운로드</a>
                 </div>
                 <div class="mb-5 p-5 bg-white rounded-2xl border border-teal-100">
                     <p class="font-black text-gray-800 text-[11px] mb-3">🖼 대량등록용 이미지 올리기</p>
-                    <p class="text-[11px] text-gray-600 mb-3">아래에서 이미지를 선택해 올리면 <code class="bg-gray-100 px-1 rounded">static/uploads/</code>에 저장됩니다. 저장된 <b>파일명 그대로</b> 엑셀의 대표이미지파일명·상세이미지파일명에 입력하세요.</p>
+                    <p class="text-[11px] text-gray-600 mb-3">아래에서 이미지를 선택해 올리면 <strong>로컬/개발 환경</strong>에서는 <code class="bg-gray-100 px-1 rounded">static/uploads/</code>에 저장되고, <strong>Cloudinary가 설정된 배포 서버</strong>에서는 Cloudinary의 기본 업로드 폴더(<code class="bg-gray-100 px-1 rounded">https://res.cloudinary.com/dxgpevdgv/image/upload/</code>)에 저장됩니다. 배포 서버에서는 서버 디스크에 static/uploads/ 폴더가 없거나 재시작 시 비워질 수 있으므로, 이미지는 Cloudinary 콘솔에서 확인하세요.</p>
                     <form action="/admin/product/bulk_upload_images" method="POST" enctype="multipart/form-data" class="flex flex-wrap items-end gap-3">
                         <div class="flex-1 min-w-[200px]">
                             <label class="block text-[10px] font-black text-gray-600 mb-1">이미지 파일 선택 (여러 개 가능)</label>
@@ -12516,8 +12540,8 @@ def admin_dashboard():
                 </form>
                 <div class="mt-5 p-5 bg-white/70 rounded-xl border border-teal-100 text-left text-[11px] text-gray-700 space-y-2">
                     <p class="font-black text-gray-800 mb-2">📋 이미지 사용 방법</p>
-                    <p>· <b>방법 1</b>: 위 「이미지 올리기」에서 파일을 선택해 올리면 <code class="bg-white px-1 rounded">static/uploads/</code>에 저장됩니다. 엑셀에는 저장된 <b>파일명 그대로</b> 입력하세요.</p>
-                    <p>· <b>방법 2</b>: 서버의 <code class="bg-white px-1 rounded">static/uploads/</code> 폴더에 직접 이미지 파일을 넣은 경우에도, 엑셀의 대표이미지파일명·상세이미지파일명란에 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg).</p>
+                    <p>· <b>방법 1</b>: 위 「이미지 올리기」에서 파일을 선택해 올리면 로컬에서는 <code class="bg-white px-1 rounded">static/uploads/</code>에 저장되고, Cloudinary 설정 시 Cloudinary에도 저장됩니다. 엑셀에는 저장된 <b>파일명 그대로</b> 입력하세요.</p>
+                    <p>· <b>방법 2</b>: 로컬/개발 PC의 <code class="bg-white px-1 rounded">static/uploads/</code> 폴더에 직접 이미지 파일을 넣은 경우에도, 엑셀의 대표이미지파일명·상세이미지파일명란에 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). <span class="text-amber-700 font-bold">배포 서버에는 이 폴더가 없거나 재시작 시 사라질 수 있으므로, 이미지는 반드시 「이미지 올리기」로 올리거나 Cloudinary를 사용하세요.</span></p>
                     <p>· 대표=접미사 _1, 상세=_2~_10. 상세이미지파일명은 쉼표로 구분해 여러 개 입력 가능.</p>
                     <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼</p>
                     <p>· <b>필수</b>: 카테고리, 상품명, 가격. 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
@@ -12544,7 +12568,7 @@ def admin_dashboard():
                         {% endfor %}
                     </ul>
                     {% else %}
-                    <p class="text-gray-400">static/uploads/에 이미지가 없거나 조회되지 않습니다. 위 「이미지 올리기」로 먼저 올리세요.</p>
+                    <p class="text-gray-400">static/uploads/에 이미지가 없거나 조회되지 않습니다. 위 「이미지 올리기」로 먼저 올리세요. (배포 서버에서는 이 폴더가 없을 수 있으며, 이미지는 Cloudinary에 저장됩니다.)</p>
                     {% endif %}
                 </div>
             </div>
@@ -17142,8 +17166,6 @@ def admin_bulk_upload_images():
                     try:
                         upload_res = cloudinary.uploader.upload(
                             data,
-                            folder="basket-uncle/bulk",
-                            public_id=None,
                         )
                         url = upload_res.get("secure_url") or upload_res.get("url")
                         if url:
@@ -17309,97 +17331,43 @@ def admin_product_bulk_upload():
             tax_type = _cell_str(row.get('세금', '')) or (cat.tax_type or '과세')
             if tax_type not in ('과세', '면세'):
                 tax_type = '과세'
+            # 이미지 URL (Cloudinary 전용)
             image_url = ""
             detail_image_url = ""
             missing_main = None
             missing_details = []
+
+            # 1) 메인 이미지: 엑셀에 Cloudinary URL이 있으면 그대로 사용
             main_img_raw = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
-            image_url = (_bulk_try_copy_from_absolute_path(main_img_raw, upload_dir) if main_img_raw else None) or ""
-            if not image_url:
-                if not main_img_raw or _bulk_is_placeholder_image(main_img_raw):
-                    # 품명+1 = 메인이미지 (우선 검색: 품명1, 품명+1, 품명_1)
-                    for suffix in ("1", "+1", "_1"):
-                        found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
-                        if found:
-                            image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
-                            break
-                    if not image_url:
-                        name_no_spaces = name_val.replace(" ", "")
-                        if name_no_spaces != name_val:
-                            for suffix in ("1", "+1", "_1"):
-                                found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
-                                if found:
-                                    image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
-                                    break
-                    if not image_url:
-                        for base in (name_val + "1", name_val + "+1", name_val + "_1", name_val.replace(" ", "") + "1", name_val.replace(" ", "") + "+1", name_val.replace(" ", "") + "_1"):
-                            found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
-                            if found:
-                                image_url = _bulk_resolve_image_url(upload_dir, found) or f"/static/uploads/{found.replace(chr(92), '/')}"
-                                break
-                if not image_url:
-                    main_img = _bulk_image_filename_only(main_img_raw)
-                    if main_img and not _bulk_is_placeholder_image(main_img):
-                        resolved_main = _bulk_resolve_image_url(upload_dir, main_img)
-                        if resolved_main:
-                            image_url = resolved_main
-                        else:
-                            missing_main = main_img
-            path_for_same_folder = (main_img_raw or '').strip().strip('"').strip("'").strip()
-            is_abs = path_for_same_folder and ((len(path_for_same_folder) >= 2 and path_for_same_folder[1] == ':') or path_for_same_folder.startswith('/') or '\\' in path_for_same_folder)
-            if is_abs and os.path.isfile(path_for_same_folder):
-                detail_from_folder = _bulk_copy_detail_2_to_10_from_same_folder(path_for_same_folder, upload_dir)
-                if detail_from_folder:
-                    detail_image_url = ",".join(detail_from_folder)
-            if not detail_image_url:
-                detail_imgs_raw = _cell_str(row.get('상세이미지파일명', ''))
-                if detail_imgs_raw and not _bulk_is_placeholder_image(detail_imgs_raw):
-                    parts = [p.strip().lstrip('/').strip('"').strip("'") for p in detail_imgs_raw.split(',') if p.strip() and not _bulk_is_placeholder_image(p.strip())]
-                    detail_parts = []
-                    for p in parts:
-                        u = _bulk_try_copy_from_absolute_path(p, upload_dir)
-                        if u:
-                            detail_parts.append(u)
-                        else:
-                            fn_img = _bulk_image_filename_only(p)
-                            if fn_img:
-                                u = _bulk_resolve_image_url(upload_dir, fn_img)
-                                if u:
-                                    detail_parts.append(u)
-                                else:
-                                    missing_details.append(fn_img)
-                    if detail_parts:
-                        detail_image_url = ",".join(detail_parts)
-                else:
-                    # 품명+2 ~ 품명+10 = 상세이미지 (우선 검색)
-                    detail_parts = []
-                    for num in range(2, 11):
-                        suffix_str = str(num)
-                        found = None
-                        for suffix in (suffix_str, "+" + suffix_str, "_" + suffix_str):
-                            found = _bulk_find_upload_by_basename(upload_dir, name_val + suffix)
-                            if found:
-                                break
-                        if not found:
-                            name_no_spaces = name_val.replace(" ", "")
-                            if name_no_spaces != name_val:
-                                for suffix in (suffix_str, "+" + suffix_str, "_" + suffix_str):
-                                    found = _bulk_find_upload_by_basename(upload_dir, name_no_spaces + suffix)
-                                    if found:
-                                        break
-                        if not found:
-                            for base in (name_val + suffix_str, name_val + "+" + suffix_str, name_val + "_" + suffix_str,
-                                         name_val.replace(" ", "") + suffix_str, name_val.replace(" ", "") + "+" + suffix_str, name_val.replace(" ", "") + "_" + suffix_str):
-                                found = _bulk_find_upload_by_basename_fuzzy(upload_dir, base)
-                                if found:
-                                    break
-                        if found:
-                            u = _bulk_resolve_image_url(upload_dir, found)
-                            detail_parts.append(u if u else f"/static/uploads/{found.replace(chr(92), '/')}")
-                    if detail_parts:
-                        detail_image_url = ",".join(detail_parts)
-            if missing_main or missing_details:
-                missing_images.append((name_val, missing_main or '', list(missing_details)))
+            main_img_raw = main_img_raw.strip() if main_img_raw else ""
+            if main_img_raw and not _bulk_is_placeholder_image(main_img_raw):
+                if main_img_raw.startswith("http://") or main_img_raw.startswith("https://"):
+                    image_url = main_img_raw
+
+            # 2) 상세 이미지: 엑셀에 Cloudinary URL 목록이 있으면 그대로 사용
+            detail_imgs_raw = _cell_str(row.get('상세이미지파일명', ''))
+            detail_imgs_raw = detail_imgs_raw.strip() if detail_imgs_raw else ""
+            if detail_imgs_raw and not _bulk_is_placeholder_image(detail_imgs_raw):
+                parts = [
+                    p.strip()
+                    for p in detail_imgs_raw.split(',')
+                    if p.strip() and not _bulk_is_placeholder_image(p.strip())
+                ]
+                detail_parts = [
+                    p for p in parts
+                    if p.startswith("http://") or p.startswith("https://")
+                ]
+                if detail_parts:
+                    detail_image_url = ",".join(detail_parts)
+
+            # 3) Cloudinary 상품명 기반 자동 매칭 (엑셀 칸이 비어 있을 때만)
+            if (not image_url or not detail_image_url) and cloudinary_url:
+                main_url, detail_list = _bulk_cloudinary_find_images_by_product_name(name_val)
+                if not image_url and main_url:
+                    image_url = main_url
+                if not detail_image_url and detail_list:
+                    detail_image_url = ",".join(detail_list)
+
             if not detail_image_url:
                 detail_image_url = image_url or ""
             new_p = Product(
@@ -17442,7 +17410,7 @@ def admin_product_bulk_upload():
                 lines.append(f"{name} ({'; '.join(parts)})")
             n = len(missing_images)
             flash(f"이미지가 없는 {n}건: {' | '.join(lines[:10])}{' ...' if len(lines) > 10 else ''}")
-            flash("→ 엑셀의 대표·상세이미지파일명을 '저장된 이미지 목록'에 보이는 파일명과 똑같이 쓰거나, 칸을 비우면 품명+1=메인이미지, 품명+2~품명+10=상세이미지로 자동 검색합니다. (파일명 예: 상품명1.jpg, 상품명2.jpg)")
+            flash("→ 엑셀의 대표·상세이미지파일명 칸에 Cloudinary 이미지 URL을 직접 쓰거나, 칸을 비우면 상품명을 기준으로 Cloudinary에서 '상품명+번호' 형식 이미지를 자동 검색합니다. (예: 한입쏙삼겹살250g1..., 한입쏙삼겹살250g2...)")
         return redirect('/admin?tab=bulk_register')
     except Exception as e:
         db.session.rollback()
@@ -17473,6 +17441,53 @@ def _bulk_normalize_for_fuzzy_match(s):
     for c in " \t._-\u00a0\u200b\u200c\u200d\ufeff":
         t = t.replace(c, "")
     return t
+
+
+def _bulk_cloudinary_find_images_by_product_name(product_name):
+    """Cloudinary 업로드 폴더(res.cloudinary.com/.../image/upload)에서 상품명으로 이미지 검색.
+    public_id 형식: 상품명+숫자 (예: 한입쏙삼겹살250g9_jvcms5) → 1=메인, 2~10=상세 순서.
+    반환: (main_url 또는 None, [detail_url2, detail_url3, ...])"""
+    if not product_name or not cloudinary_url:
+        return (None, [])
+    try:
+        collected = {}  # index -> secure_url
+        for prefix in (product_name, product_name.replace(" ", "")):
+            if not prefix:
+                continue
+            next_cursor = None
+            for _ in range(5):  # 최대 5페이지
+                res = cloudinary.api.resources(
+                    type="upload",
+                    prefix=prefix,
+                    max_results=100,
+                    next_cursor=next_cursor,
+                )
+                for r in (res.get("resources") or []):
+                    pid = (r.get("public_id") or "").strip()
+                    url = r.get("secure_url") or r.get("url")
+                    if not pid or not url:
+                        continue
+                    if not pid.startswith(prefix):
+                        continue
+                    rest = pid[len(prefix):].lstrip("_+ ")
+                    m = re.match(r"^[\+_]?(\d+)", rest)
+                    if not m:
+                        if rest == "" or rest in ("1", "_1", "+1"):
+                            num = 1
+                        else:
+                            continue
+                    else:
+                        num = int(m.group(1))
+                    if 1 <= num <= 10 and num not in collected:
+                        collected[num] = url
+                next_cursor = res.get("next_cursor")
+                if not next_cursor:
+                    break
+        main_url = collected.get(1)
+        detail_list = [collected[i] for i in range(2, 11) if i in collected]
+        return (main_url, detail_list)
+    except Exception:
+        return (None, [])
 
 
 def _bulk_is_placeholder_image(s):
