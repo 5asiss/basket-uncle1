@@ -68,7 +68,17 @@ def store_utm_in_session():
 @app.context_processor
 def inject_getattr():
     """Jinja2 템플릿에서 getattr 사용 가능하도록 전역 주입"""
-    return {'getattr': getattr}
+    return {'getattr': getattr, 'cloudinary_thumbnail_url': cloudinary_thumbnail_url}
+
+
+def cloudinary_thumbnail_url(url):
+    """Cloudinary 원본 URL을 카드/리스트용 정사각 썸네일 URL로 변환. 비 Cloudinary는 그대로 반환."""
+    if not url or not isinstance(url, str) or 'res.cloudinary.com' not in url or '/image/upload/' not in url:
+        return url or ''
+    u = url.strip()
+    if '/upload/w_' in u or '/upload/h_' in u:
+        return u
+    return re.sub(r'(/image/upload/)(v\d+/)', r'\1w_800,h_800,c_fill/\2', u, count=1)
 
 
 def admin_logi_redirect():
@@ -1111,18 +1121,15 @@ def save_uploaded_file(file):
                 if not url:
                     print(f"[save_uploaded_file] Cloudinary returned no URL: {upload_res}")
                 else:
-                    if "/upload/" in url:
-                        url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
+                    # 원본 URL 저장 (세로 긴 이미지 전체 노출). 카드/리스트는 썸네일 URL로 표시
                     return url
             except Exception as ce:
                 print(f"[save_uploaded_file] Cloudinary upload failed, fallback to local: {ce}")
                 import traceback; traceback.print_exc()
 
-        # 2) 로컬 저장 (Cloudinary 미설정이거나 실패 시)
+        # 2) 로컬 저장 (Cloudinary 미설정이거나 실패 시) — 사이즈 고정 해제, 원본 그대로 저장
         img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
-        size = (800, 800)
-        img = ImageOps.fit(img, size, Image.Resampling.LANCZOS)
         new_filename = f"uncle_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
         img.save(save_path, "WEBP", quality=85)
@@ -1134,7 +1141,7 @@ def save_uploaded_file(file):
 
 
 def save_detail_image(file):
-    """상세이미지 업로드. Cloudinary 시 원본 업로드 후 URL에 w_1200,c_limit 변환 적용. 로컬 시 가로 1200px 리사이즈."""
+    """상세이미지 업로드. Cloudinary/로컬 모두 사이즈 고정 없이 원본 그대로 저장."""
     if not file or not getattr(file, 'filename', None):
         return None
     if getattr(file, 'stream', None) and hasattr(file.stream, 'seek'):
@@ -1158,15 +1165,10 @@ def save_detail_image(file):
                 folder="basket-uncle/detail",
             )
             url = upload_res.get("secure_url") or upload_res.get("url")
-            if url and "/upload/" in url:
-                url = url.replace("/upload/", "/upload/w_1200,c_limit/")
-            return url
+            if url:
+                return url
         img = Image.open(BytesIO(file_bytes))
         img = ImageOps.exif_transpose(img)
-        w, h = img.size
-        if w > 1200:
-            ratio = 1200 / w
-            img = img.resize((1200, int(h * ratio)), Image.Resampling.LANCZOS)
         new_filename = f"detail_{now_kst().strftime('%Y%m%d_%H%M%S_%f')}.webp"
         save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
         img.save(save_path, "WEBP", quality=88)
@@ -2606,6 +2608,18 @@ def api_popup_current():
     })
 
 
+@app.route('/api/utm_check')
+def api_utm_check():
+    """UTM 링크 작동 확인: 현재 세션에 저장된 utm_source, utm_medium, utm_campaign 반환.
+    예: basam.co.kr/?utm_source=kakao&utm_medium=local&utm_campaign=songdo 방문 후 이 URL 호출하면 저장 여부 확인 가능."""
+    return jsonify({
+        'utm_source': session.get('utm_source') or None,
+        'utm_medium': session.get('utm_medium') or None,
+        'utm_campaign': session.get('utm_campaign') or None,
+        'ok': bool(session.get('utm_source') or session.get('utm_medium') or session.get('utm_campaign')),
+    })
+
+
 @login_required
 def admin_popup_save():
     """알림 팝업 저장. id 있으면 수정, 없으면 신규."""
@@ -3021,6 +3035,7 @@ def api_search():
     products = query.offset(offset).limit(limit).all()
     return jsonify([{
         "id": p.id, "name": p.name, "price": p.price, "image_url": p.image_url,
+        "image_url_thumb": cloudinary_thumbnail_url(p.image_url) or p.image_url,
         "description": p.description or "", "stock": p.stock,
         "is_sold_out": (p.deadline and p.deadline < now_kst()) or p.stock <= 0,
     } for p in products])
@@ -3053,7 +3068,7 @@ def search_view():
             {% for p in search_products %}
             <div class="product-card bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-2xl {% if p.stock <= 0 %}sold-out{% endif %}">
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-white overflow-hidden">
-                    <img src="{{ p.image_url }}" loading="lazy" class="w-full h-full object-cover p-2 md:p-6">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover p-2 md:p-6">
                 </a>
                 <div class="p-3 md:p-8 flex flex-col flex-1">
                     <h3 class="font-black text-gray-800 text-[11px] md:text-base mb-1 truncate">{{ p.name }}</h3>
@@ -3083,7 +3098,7 @@ def search_view():
                 <h3 class="text-xl font-black mb-6">{{ cat.name }} <a href="/category/{{ cat.name }}" class="text-xs text-gray-400 ml-2">더보기 ></a></h3>
                 <div class="grid grid-cols-2 gap-4">
                     {% for cp in prods %}
-                    <a href="/product/{{ cp.id }}" class="bg-white p-3 rounded-2xl shadow-sm hover:scale-105 transition"><img src="{{ cp.image_url }}" class="w-full aspect-square object-contain"></a>
+                    <a href="/product/{{ cp.id }}" class="bg-white p-3 rounded-2xl shadow-sm hover:scale-105 transition"><img src="{{ cloudinary_thumbnail_url(cp.image_url) or cp.image_url }}" class="w-full aspect-square object-contain"></a>
                     {% endfor %}
                 </div>
             </div>
@@ -3116,7 +3131,7 @@ def search_view():
                             var sold = p.is_sold_out ? ' sold-out' : '';
                             grid.insertAdjacentHTML('beforeend',
                                 '<div class="product-card bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden relative flex flex-col transition-all hover:shadow-2xl' + sold + '">'
-                                + '<a href="/product/' + p.id + '" class="relative aspect-square block bg-white overflow-hidden"><img src="' + p.image_url + '" loading="lazy" class="w-full h-full object-cover p-2 md:p-6"></a>'
+                                + '<a href="/product/' + p.id + '" class="relative aspect-square block bg-white overflow-hidden"><img src="' + (p.image_url_thumb || p.image_url) + '" loading="lazy" class="w-full h-full object-cover p-2 md:p-6"></a>'
                                 + '<div class="p-3 md:p-8 flex flex-col flex-1"><h3 class="font-black text-gray-800 text-[11px] md:text-base mb-1 truncate">' + p.name + '</h3>'
                                 + '<div class="mt-auto flex justify-between items-end"><span class="text-[13px] md:text-2xl font-black text-teal-600">' + (p.price || 0).toLocaleString() + '원</span>'
                                 + '<button onclick="addToCart(\\'' + p.id + '\\')" class="bg-teal-600 w-8 h-8 md:w-14 md:h-14 rounded-xl text-white flex items-center justify-center transition active:scale-90"><i class="fas fa-plus text-[10px] md:text-xl"></i></button></div></div></div>');
@@ -3519,7 +3534,7 @@ def index():
             <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
                 {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-900 text-white text-[9px] px-2 py-1 rounded-full font-medium">판매마감</div>{% endif %}
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                    <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
                     <p class="countdown-timer text-[9px] md:text-[11px] font-medium text-red-500 mb-1" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
@@ -3557,7 +3572,7 @@ def index():
                 </div>
                 {% endif %}
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                    <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
                     <p class="countdown-timer text-[9px] md:text-[11px] font-medium text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
@@ -3595,7 +3610,7 @@ def index():
                 </div>
                 {% endif %}
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                    <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
                     <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
@@ -3802,7 +3817,7 @@ def index():
                     </div>
                     {% endif %}
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                        <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                        <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
                     <div class="p-3 md:p-4 flex flex-col flex-1">
                         <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
@@ -3841,7 +3856,7 @@ def index():
                     </div>
                     {% endif %}
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                        <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                        <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
                     <div class="p-3 md:p-4 flex flex-col flex-1">
                         <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
@@ -3883,7 +3898,7 @@ def index():
                     </div>
                     {% endif %}
                     <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                        <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                        <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                     </a>
                     <div class="p-3 md:p-4 flex flex-col flex-1">
                         <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
@@ -5590,7 +5605,7 @@ def category_view(cat_name):
                 </div>
                 {% endif %}
                 <a href="/product/{{p.id}}" class="relative aspect-square block bg-slate-50 overflow-hidden">
-                    <img src="{{ p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
                 </a>
                 <div class="p-3 md:p-4 flex flex-col flex-1">
                     <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}"></p>
@@ -5935,7 +5950,8 @@ def product_detail(pid):
     if (not detail_images) and getattr(p, 'image_url', None):
         detail_images = [p.image_url]
 
-    # 배포 환경에서 모바일에서 이미지가 안 나오는 현상 방지: 상대 경로를 절대 URL로 변환 (SITE_URL 또는 request 기준)
+    # URL 처리: 서버(배포)는 Cloudinary URL, 로컬은 DB에 저장된 경로(/static/uploads/ 또는 상대경로) 사용.
+    # 상대 경로는 절대 URL로 변환 (SITE_URL 또는 request.url_root 기준).
     _base_url = (os.getenv('SITE_URL') or request.url_root or '').strip().rstrip('/')
     def _abs_url(url):
         if not url or not url.strip():
@@ -5944,8 +5960,24 @@ def product_detail(pid):
         if u.startswith('http://') or u.startswith('https://'):
             return u
         return _base_url + (u if u.startswith('/') else '/' + u)
-    product_image_url_absolute = _abs_url(getattr(p, 'image_url', None))
-    detail_images_absolute = [_abs_url(img) for img in detail_images]
+    def _cloudinary_full_display_url(url, use_original=False):
+        """서버(Cloudinary URL)일 때만 고정 크롭 제거. use_original=True면 변환 제거(원본 그대로, 세로 긴 상세 이미지 전체 노출)."""
+        u = _abs_url(url)
+        if 'res.cloudinary.com' not in u or '/image/upload/' not in u:
+            return u
+        m = re.search(r'(/image/upload/)([^/]+)(/)', u)
+        if not m:
+            return u
+        prefix, transform, suffix = m.groups()
+        if 'c_fill' in transform or (',' in transform and ('w_' in transform and 'h_' in transform)):
+            if use_original:
+                u = u.replace(prefix + transform + suffix, prefix + '', 1)
+            else:
+                u = u.replace(prefix + transform + suffix, prefix + 'w_1200,c_scale' + suffix, 1)
+        return u
+    # 대표 이미지: w_1200,c_scale. 상세 이미지: 원본(변환 제거) so 세로 긴 이미지 끝까지 노출
+    product_image_url_absolute = _cloudinary_full_display_url(getattr(p, 'image_url', None))
+    detail_images_absolute = [_cloudinary_full_display_url(img, use_original=True) for img in detail_images]
     product_base_url = _base_url
 
     _record_page_view('product')
@@ -6006,10 +6038,30 @@ def product_detail(pid):
         seller_category = fallback
 
     content = """
-    <div class="max-w-5xl xl:max-w-[1400px] 2xl:max-w-[1600px] mx-auto px-0 md:px-8 lg:px-12 xl:px-16 2xl:px-20 pb-16 font-black text-left">
+    <style>
+    /* 상세정보 상세이미지: 업로드된 사이즈(원본 비율) 상태로 무조건 전체 표시 */
+    .product-detail-page .product-grid { grid-auto-rows: minmax(min-content, auto); }
+    .product-detail-page .product-main-img-wrap { overflow: visible; display: block; }
+    .product-detail-page .product-main-img-wrap img { max-height: none !important; height: auto !important; }
+    .product-detail-page,
+    .product-detail-page .product-detail-section,
+    .product-detail-page #details,
+    .product-detail-page #details .detail-images-wrap,
+    .product-detail-page #details .detail-img-item { overflow: visible !important; max-height: none !important; }
+    .product-detail-page #details .detail-images-wrap { display: block; }
+    .product-detail-page #details .detail-img-item { display: block; min-height: 0; }
+    .product-detail-page #details .detail-img-item img,
+    .product-detail-page #details img.detail-full-img {
+      width: 100% !important; height: auto !important; max-width: 100% !important; max-height: none !important;
+      display: block !important; vertical-align: top; flex-shrink: 0; contain: none !important;
+      object-fit: contain !important; object-position: top center;
+      min-height: 0; aspect-ratio: unset !important;
+    }
+    </style>
+    <div class="product-detail-page max-w-5xl xl:max-w-[1400px] 2xl:max-w-[1600px] mx-auto px-0 md:px-8 lg:px-12 xl:px-16 2xl:px-20 pb-16 font-black text-left">
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-12 lg:gap-16 xl:gap-20 items-start">
-            <div class="relative w-full min-h-[280px] md:min-h-0 bg-white overflow-hidden md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100 flex items-center justify-center">
+        <div class="product-grid grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-12 lg:gap-16 xl:gap-20 items-start">
+            <div class="product-main-img-wrap relative w-full min-h-[280px] md:min-h-0 bg-white md:rounded-[3rem] md:shadow-xl border-b md:border border-gray-100 p-6 md:p-12">
                 {% if p.description %}
                 <div class="absolute top-6 left-0 z-20">
                     <span class="px-5 py-2 text-xs md:text-sm font-black text-white shadow-xl rounded-r-full 
@@ -6022,10 +6074,10 @@ def product_detail(pid):
                 </div>
                 {% endif %}
 
-                <img src="{{ product_image_url_absolute }}" alt="{{ p.name }}" class="w-full h-auto max-h-[70vh] md:max-h-none object-contain p-6 md:p-12" loading="lazy" onerror="this.onerror=null; this.src='https://placehold.co/600x600/f1f5f9/94a3b8?text=상품';">
+                <img src="{{ product_image_url_absolute }}" alt="{{ p.name }}" class="w-full h-auto object-contain" style="max-height: none !important;" loading="lazy" onerror="this.onerror=null; this.src='https://placehold.co/600x600/f1f5f9/94a3b8?text=상품';">
                 
                 {% if is_expired or p.stock <= 0 %}
-                <div class="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px]">
+                <div class="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-[2px] pointer-events-none">
                     <span class="text-white font-black text-2xl border-4 border-white px-8 py-3 rounded-2xl rotate-[-5deg]">판매마감</span>
                 </div>
                 {% endif %}
@@ -6215,7 +6267,7 @@ def product_detail(pid):
                         {% for cp in same_category_products[:4] %}
                         <a href="/product/{{ cp.id }}" class="group block bg-white rounded-2xl border border-gray-100 p-3 shadow-sm hover:shadow-lg hover:border-teal-200 transition-all text-left">
                             <div class="aspect-square rounded-xl overflow-hidden bg-gray-50 mb-2">
-                                <img src="{{ (product_base_url + (cp.image_url if cp.image_url.startswith('/') else '/' + cp.image_url)) if (cp.image_url and not cp.image_url.startswith('http')) else (cp.image_url or 'https://placehold.co/400x400/f1f5f9/94a3b8?text=상품') }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" onerror="this.src='https://placehold.co/400x400/f1f5f9/94a3b8?text=상품'">
+                                <img src="{{ (product_base_url + (cp.image_url if cp.image_url.startswith('/') else '/' + cp.image_url)) if (cp.image_url and not cp.image_url.startswith('http')) else (cloudinary_thumbnail_url(cp.image_url) or cp.image_url or 'https://placehold.co/400x400/f1f5f9/94a3b8?text=상품') }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" onerror="this.src='https://placehold.co/400x400/f1f5f9/94a3b8?text=상품'">
                             </div>
                             <p class="text-[11px] font-black text-gray-800 truncate leading-tight">{{ cp.name }}</p>
                             <p class="text-[10px] font-bold text-teal-600 mt-0.5">{{ "{:,}".format(cp.price) }}원</p>
@@ -6231,14 +6283,14 @@ def product_detail(pid):
             </div>
         </div>
 
-        <div class="mt-20 md:mt-32">
+        <div class="product-detail-section mt-20 md:mt-32" style="overflow:visible!important;">
             <div class="sticky top-16 md:top-20 bg-white/90 backdrop-blur-md z-30 border-y border-gray-100 flex justify-around mb-12 shadow-sm">
                 <a href="#details" class="py-5 px-4 text-sm font-black text-gray-800 border-b-4 border-teal-600 transition-all">상세정보</a>
                 <a href="#reviews" class="py-5 px-4 text-sm font-black text-gray-400 hover:text-orange-500 transition-all">구매후기 ({{ reviews_total_count }})</a>
                 <a href="#related" class="py-5 px-4 text-sm font-black text-gray-400 hover:text-blue-500 transition-all">추천상품</a>
             </div>
 
-            <div id="details" class="space-y-12 px-4 md:px-0">
+            <div id="details" class="space-y-12 px-4 md:px-0 overflow-visible" style="overflow:visible!important;">
                 <div class="bg-teal-50/50 p-10 md:p-20 rounded-[2.5rem] md:rounded-[4.5rem] text-center border-none shadow-inner">
                     <i class="fas fa-quote-left text-teal-200 text-4xl mb-6"></i>
                     <p class="text-xl md:text-3xl font-black text-gray-800 leading-relaxed break-keep">
@@ -6246,15 +6298,30 @@ def product_detail(pid):
                     </p>
                     <i class="fas fa-quote-right text-teal-200 text-4xl mt-6"></i>
                 </div>
-                <div class="flex flex-col gap-0 max-w-4xl xl:max-w-6xl 2xl:max-w-7xl mx-auto">
+                <div class="detail-images-wrap max-w-4xl xl:max-w-6xl 2xl:max-w-7xl mx-auto">
                     {% if detail_images_absolute %}
                         {% for img in detail_images_absolute %}
-                        <img src="{{ img }}" alt="" class="w-full min-h-[200px] md:min-h-0 shadow-sm object-contain bg-gray-50" loading="lazy" onerror="this.onerror=null; this.src='https://placehold.co/800x400/f1f5f9/94a3b8?text=이미지';">
+                        <div class="detail-img-item" style="overflow:visible!important;max-height:none!important;">
+                        <img src="{{ img }}" alt="" class="detail-full-img w-full shadow-sm bg-gray-50" style="width:100%;height:auto;max-height:none;max-width:100%;display:block;object-fit:contain;" loading="{{ 'eager' if loop.first else 'lazy' }}" onerror="this.onerror=null; this.src='https://placehold.co/800x400/f1f5f9/94a3b8?text=이미지';" onload="this.style.maxHeight='none';this.style.height='auto';this.style.width='100%';">
+                        </div>
                         {% endfor %}
                     {% else %}
-                        <img src="{{ product_image_url_absolute }}" alt="" class="w-full rounded-3xl opacity-60 grayscale p-10 object-contain" onerror="this.onerror=null; this.src='https://placehold.co/600x600/f1f5f9/94a3b8?text=상품';">
+                        <div class="detail-img-item" style="overflow:visible!important;max-height:none!important;">
+                        <img src="{{ product_image_url_absolute }}" alt="" class="detail-full-img w-full rounded-3xl opacity-60 grayscale p-10" style="width:100%;height:auto;max-height:none;max-width:100%;display:block;object-fit:contain;" onerror="this.onerror=null; this.src='https://placehold.co/600x600/f1f5f9/94a3b8?text=상품';" onload="this.style.maxHeight='none';this.style.height='auto';this.style.width='100%';">
+                        </div>
                     {% endif %}
                 </div>
+    <script>
+    (function(){
+      document.querySelectorAll('.product-detail-page #details .detail-full-img').forEach(function(img){
+        img.style.setProperty('max-height','none','important');
+        img.style.setProperty('height','auto','important');
+        img.style.setProperty('width','100%','important');
+        img.style.setProperty('max-width','100%','important');
+        if (img.complete) { img.style.maxHeight='none'; img.style.height='auto'; img.style.width='100%'; }
+      });
+    })();
+    </script>
             </div>
         </div>
 
@@ -11267,8 +11334,10 @@ def admin_dashboard():
 
     admin_restaurant_requests = []
     admin_partnership_inquiries = []
+    admin_free_posts = []
     restaurant_recommend_counts = {}  # tab==restaurant_request 또는 board_manage일 때 채움
     board_manage_r_limit = board_manage_d_limit = board_manage_p_limit = 5
+    board_manage_f_limit = 5
     if (tab == 'restaurant_request' or tab == 'board_manage') and is_master:
         if tab == 'board_manage':
             _allowed = (5, 20, 50, 100)
@@ -11309,6 +11378,17 @@ def admin_dashboard():
             q = q.limit(board_manage_p_limit)
         admin_partnership_inquiries = q.all()
 
+    # 자유게시판(FreeBoard) — 게시판 관리 전용 목록
+    if tab == 'board_manage' and is_master:
+        _allowed = (5, 20, 50, 100)
+        try:
+            board_manage_f_limit = int(request.args.get('f_limit', '5').strip())
+        except (ValueError, TypeError):
+            board_manage_f_limit = 5
+        if board_manage_f_limit not in _allowed:
+            board_manage_f_limit = 5
+        admin_free_posts = FreeBoard.query.order_by(FreeBoard.id.desc()).limit(board_manage_f_limit).all()
+
     admin_event_notices = []
     admin_event_posts = []
     board_manage_e_limit = 50
@@ -11335,6 +11415,9 @@ def admin_dashboard():
     share_links = []
     share_link_total_issued = 0
     share_link_total_clicks = 0
+    utm_detail_aggregates = []
+    recent_utm_users = []
+    recent_utm_orders = []
     if tab == 'utm' and is_master:
         # 주문 기준: utm_source별 주문 수, 매출, 구매자 수(결제 완료 주문의 distinct user_id)
         from sqlalchemy import distinct
@@ -11377,6 +11460,35 @@ def admin_dashboard():
             share_link_total_clicks = db.session.query(db.func.coalesce(db.func.sum(ShareLink.visit_count), 0)).filter_by(source='event_share').scalar() or 0
         except Exception:
             pass
+        # 상세 유입: source + medium + campaign 조합별 집계
+        order_detail = db.session.query(
+            Order.utm_source, Order.utm_medium, Order.utm_campaign,
+            db.func.count(Order.id).label('order_count'),
+            db.func.coalesce(db.func.sum(Order.total_price), 0).label('revenue'),
+            db.func.count(distinct(Order.user_id)).label('buyer_count')
+        ).filter(Order.status != '결제취소').group_by(Order.utm_source, Order.utm_medium, Order.utm_campaign).all()
+        signup_detail = db.session.query(
+            User.utm_source, User.utm_medium, User.utm_campaign,
+            db.func.count(User.id).label('signup_count')
+        ).group_by(User.utm_source, User.utm_medium, User.utm_campaign).all()
+        signup_detail_map = {}
+        for r in signup_detail:
+            key = (_src(r.utm_source), (r.utm_medium or '').strip() or '-', (r.utm_campaign or '').strip() or '-')
+            signup_detail_map[key] = r.signup_count
+        utm_detail_aggregates = []
+        for r in order_detail:
+            src, med, camp = _src(r.utm_source), (r.utm_medium or '').strip() or '-', (r.utm_campaign or '').strip() or '-'
+            utm_detail_aggregates.append({
+                'source': src, 'medium': med, 'campaign': camp,
+                'order_count': r.order_count, 'revenue': int(r.revenue or 0), 'buyer_count': r.buyer_count or 0,
+                'signup_count': signup_detail_map.get((src, med, camp), 0)
+            })
+        for (src, med, camp), cnt in signup_detail_map.items():
+            if not any(d['source'] == src and d['medium'] == med and d['campaign'] == camp for d in utm_detail_aggregates):
+                utm_detail_aggregates.append({'source': src, 'medium': med, 'campaign': camp, 'order_count': 0, 'revenue': 0, 'buyer_count': 0, 'signup_count': cnt})
+        utm_detail_aggregates.sort(key=lambda x: (-x['revenue'], -x['order_count'], -x['signup_count']))
+        recent_utm_users = User.query.filter(User.utm_source.isnot(None)).order_by(User.id.desc()).limit(50).all()
+        recent_utm_orders = Order.query.filter(Order.utm_source.isnot(None), Order.status != '결제취소').order_by(Order.id.desc()).limit(50).all()
 
     solapi_status = {}
     if tab == 'solapi_check' and is_master:
@@ -12576,6 +12688,53 @@ def admin_dashboard():
                                         </tr>
                                         {% else %}
                                         <tr><td colspan="8" class="p-8 text-center text-gray-400">등록된 글이 없습니다.</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div>
+                            <h5 class="text-sm font-black text-gray-700 mb-3">자유게시판</h5>
+                            <div class="flex flex-wrap items-center gap-2 mb-4">
+                                <span class="text-[11px] text-gray-500 font-bold mr-1">표시:</span>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&f_limit=5{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_f_limit == 5 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">5</a>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&f_limit=20{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_f_limit == 20 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">20</a>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&f_limit=50{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_f_limit == 50 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">50</a>
+                                <a href="/admin?tab=board_manage&r_limit={{ board_manage_r_limit }}&d_limit={{ board_manage_d_limit }}&p_limit={{ board_manage_p_limit }}&f_limit=100{% if board_comment_board_type %}&board_type={{ board_comment_board_type }}{% endif %}" class="px-3 py-1.5 rounded-lg text-[11px] font-black {% if board_manage_f_limit == 100 %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">100</a>
+                            </div>
+                            <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-x-auto -mx-3 md:mx-0">
+                                <table class="w-full text-left text-[11px] min-w-[700px]">
+                                    <thead class="bg-gray-50 border-b border-gray-100">
+                                        <tr>
+                                            <th class="p-4">ID</th>
+                                            <th class="p-4">제목</th>
+                                            <th class="p-4">공지</th>
+                                            <th class="p-4">작성자</th>
+                                            <th class="p-4">작성일</th>
+                                            <th class="p-4">관리</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for p in admin_free_posts %}
+                                        <tr class="border-b border-gray-50 hover:bg-gray-50/50">
+                                            <td class="p-4">{{ p.id }}</td>
+                                            <td class="p-4 font-bold">{{ p.title }}</td>
+                                            <td class="p-4">
+                                                <form action="/admin/board/free/{{ p.id }}/notice" method="POST" class="inline">
+                                                    <button type="submit" class="px-2 py-1 rounded text-[10px] font-black {% if p.is_notice %}bg-amber-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ '공지 해제' if p.is_notice else '공지로' }}</button>
+                                                </form>
+                                            </td>
+                                            <td class="p-4">{{ p.user_name or '-' }}</td>
+                                            <td class="p-4">{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '-' }}</td>
+                                            <td class="p-4">
+                                                <a href="/board/free/{{ p.id }}" target="_blank" class="text-teal-600 font-black mr-2">보기</a>
+                                                <form action="/admin/board/free/{{ p.id }}/hide" method="POST" class="inline" onsubmit="return confirm('숨기시겠습니까?');">
+                                                    <button type="submit" class="text-amber-600 font-black">{{ '숨김해제' if p.is_hidden else '숨기기' }}</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        {% else %}
+                                        <tr><td colspan="6" class="p-8 text-center text-gray-400">등록된 글이 없습니다.</td></tr>
                                         {% endfor %}
                                     </tbody>
                                 </table>
@@ -15301,6 +15460,26 @@ def admin_dashboard():
             </script>
 
         {% elif tab == 'utm' %}
+            <div class="bg-white p-8 rounded-[2.5rem] border border-teal-100 shadow-sm mb-6">
+                <h2 class="text-lg font-black text-teal-800 mb-2">🔗 UTM 링크 작동 확인</h2>
+                <p class="text-[11px] text-gray-600 mb-3">아래 주소로 방문한 뒤 «현재 세션 UTM 확인»을 누르면 저장된 값을 볼 수 있습니다.</p>
+                <p class="mb-2"><a href="/?utm_source=kakao&utm_medium=local&utm_campaign=songdo" target="_blank" rel="noopener" class="text-teal-600 font-mono text-xs break-all hover:underline">https://basam.co.kr/?utm_source=kakao&utm_medium=local&utm_campaign=songdo</a></p>
+                <div class="flex flex-wrap items-center gap-3">
+                    <button type="button" id="utm-check-btn" class="px-4 py-2 bg-teal-100 text-teal-700 rounded-xl font-bold text-xs hover:bg-teal-200">현재 세션 UTM 확인</button>
+                    <span id="utm-check-result" class="text-xs font-mono text-gray-600"></span>
+                </div>
+                <script>
+                (function(){
+                    document.getElementById('utm-check-btn').addEventListener('click', function(){
+                        fetch('/api/utm_check', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){
+                            var el = document.getElementById('utm-check-result');
+                            if (d.ok) el.textContent = 'source=' + (d.utm_source || '-') + ' · medium=' + (d.utm_medium || '-') + ' · campaign=' + (d.utm_campaign || '-');
+                            else el.textContent = '저장된 UTM 없음 (위 링크로 먼저 방문 후 이 페이지에서 다시 확인)';
+                        });
+                    });
+                })();
+                </script>
+            </div>
             <div class="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mb-8">
                 <h2 class="text-xl font-black text-gray-800 mb-2">🎯 광고별 유입·주문 집계</h2>
                 <p class="text-[11px] text-gray-500 font-bold mb-6">광고 링크에 UTM을 붙이면 여기서 집계됩니다. 광고비를 입력하면 CPA·ROAS가 자동 계산됩니다.</p>
@@ -15355,6 +15534,72 @@ def admin_dashboard():
                     추가/기타: <code class="bg-white px-1 rounded">?utm_source=extra&utm_medium=cpc&utm_campaign=basam</code>
                 </div>
                 <p class="mt-4 text-[10px] text-gray-500">CPA = 광고비 ÷ 구매자 수 · ROAS = 매출 ÷ 광고비 × 100 (광고비 입력 시만 표시)</p>
+            </div>
+            <div class="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mb-8">
+                <h2 class="text-xl font-black text-gray-800 mb-2">📊 상세 유입 (source · medium · campaign)</h2>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">유입경로를 source + medium + campaign 조합별로 집계합니다.</p>
+                <div class="overflow-x-auto -mx-3 md:mx-0">
+                    <table class="w-full text-left min-w-[700px] text-[11px] font-bold">
+                        <thead class="bg-gray-700 text-white">
+                            <tr>
+                                <th class="p-3">source</th>
+                                <th class="p-3">medium</th>
+                                <th class="p-3">campaign</th>
+                                <th class="p-3 text-center">회원가입</th>
+                                <th class="p-3 text-center">구매자</th>
+                                <th class="p-3 text-center">주문 수</th>
+                                <th class="p-3 text-right">매출</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for d in utm_detail_aggregates %}
+                            <tr class="border-b border-gray-100 hover:bg-teal-50/30">
+                                <td class="p-3 font-black text-gray-800">{{ d.source }}</td>
+                                <td class="p-3 text-gray-600">{{ d.medium }}</td>
+                                <td class="p-3 text-gray-600">{{ d.campaign }}</td>
+                                <td class="p-3 text-center">{{ d.signup_count }}</td>
+                                <td class="p-3 text-center">{{ d.buyer_count }}</td>
+                                <td class="p-3 text-center">{{ d.order_count }}</td>
+                                <td class="p-3 text-right font-black text-teal-600">{{ "{:,}".format(d.revenue) }}원</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="7" class="p-6 text-center text-gray-400">상세 유입 데이터가 없습니다.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
+                    <h2 class="text-lg font-black text-gray-800 mb-3">👤 최근 유입 회원 (UTM 있는 가입)</h2>
+                    <div class="overflow-x-auto max-h-80 overflow-y-auto">
+                        <table class="w-full text-[10px] font-bold">
+                            <thead class="bg-gray-100 sticky top-0"><tr><th class="p-2 text-left">가입일</th><th class="p-2 text-left">이메일</th><th class="p-2">source</th><th class="p-2">medium</th><th class="p-2">campaign</th></tr></thead>
+                            <tbody>
+                                {% for u in recent_utm_users %}
+                                <tr class="border-b border-gray-50"><td class="p-2 text-gray-600">{{ getattr(u, 'created_at', None).strftime('%Y-%m-%d %H:%M') if getattr(u, 'created_at', None) else '-' }}</td><td class="p-2 truncate max-w-[120px]" title="{{ (u.email or '')|e }}">{{ (u.email or '-')|truncate(18) }}</td><td class="p-2">{{ (u.utm_source or '-')|truncate(10) }}</td><td class="p-2">{{ (u.utm_medium or '-')|truncate(8) }}</td><td class="p-2">{{ (u.utm_campaign or '-')|truncate(10) }}</td></tr>
+                                {% else %}
+                                <tr><td colspan="5" class="p-4 text-center text-gray-400">유입 정보가 있는 회원이 없습니다.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm">
+                    <h2 class="text-lg font-black text-gray-800 mb-3">🛒 최근 유입 주문 (UTM 있는 주문)</h2>
+                    <div class="overflow-x-auto max-h-80 overflow-y-auto">
+                        <table class="w-full text-[10px] font-bold">
+                            <thead class="bg-gray-100 sticky top-0"><tr><th class="p-2 text-left">주문일</th><th class="p-2 text-left">주문번호</th><th class="p-2 text-right">금액</th><th class="p-2">source</th><th class="p-2">medium</th><th class="p-2">campaign</th></tr></thead>
+                            <tbody>
+                                {% for o in recent_utm_orders %}
+                                <tr class="border-b border-gray-50"><td class="p-2 text-gray-600">{{ o.created_at.strftime('%Y-%m-%d %H:%M') if o.created_at else '-' }}</td><td class="p-2 font-mono">{{ (o.order_id or '-')|truncate(12) }}</td><td class="p-2 text-right">{{ "{:,}".format(o.total_price or 0) }}원</td><td class="p-2">{{ (o.utm_source or '-')|truncate(10) }}</td><td class="p-2">{{ (o.utm_medium or '-')|truncate(8) }}</td><td class="p-2">{{ (o.utm_campaign or '-')|truncate(10) }}</td></tr>
+                                {% else %}
+                                <tr><td colspan="6" class="p-4 text-center text-gray-400">유입 정보가 있는 주문이 없습니다.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
             <div class="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mb-8 mt-8">
                 <h2 class="text-xl font-black text-gray-800 mb-2">📤 이벤트 공유 링크 성과</h2>
@@ -16236,8 +16481,6 @@ def admin_bulk_upload_images():
                             public_id=None,
                         )
                         url = upload_res.get("secure_url") or upload_res.get("url")
-                        if url and "/upload/" in url:
-                            url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
                         if url:
                             existing = BulkImageMap.query.filter_by(file_name=safe_name).first()
                             if existing:
@@ -16691,9 +16934,8 @@ def _bulk_try_copy_from_absolute_path(raw_value, upload_dir):
                 file_bytes = fh.read()
             res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main")
             url = res.get("secure_url") or res.get("url")
-            if url and "/upload/" in url:
-                url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
-            return url
+            if url:
+                return url
         ext = (os.path.splitext(path)[1] or '.jpg').lower()
         if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'):
             ext = '.jpg'
@@ -16760,8 +17002,6 @@ def _bulk_copy_detail_2_to_10_from_same_folder(main_absolute_path, upload_dir):
                 res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail")
                 url = res.get("secure_url") or res.get("url")
                 if url:
-                    if "/upload/" in url:
-                        url = url.replace("/upload/", "/upload/w_1200,c_limit/")
                     urls.append(url)
             else:
                 ext = os.path.splitext(candidate)[1].lower()
@@ -16896,13 +17136,9 @@ def _bulk_collect_images_from_folder(images_root, product_name, upload_dir):
                 if num == 1:
                     res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/main")
                     url = res.get("secure_url") or res.get("url") or ""
-                    if url and "/upload/" in url:
-                        url = url.replace("/upload/", "/upload/w_800,h_800,c_fill/")
                 else:
                     res = cloudinary.uploader.upload(file_bytes, folder="basket-uncle/detail")
                     url = res.get("secure_url") or res.get("url") or ""
-                    if url and "/upload/" in url:
-                        url = url.replace("/upload/", "/upload/w_1200,c_limit/")
             else:
                 new_name = f"bulk_{num}_{ts}_{uuid.uuid4().hex[:8]}{ext}"
                 dest = os.path.join(upload_dir_abs, new_name)
@@ -17041,6 +17277,30 @@ def admin_partnership_notice_toggle(pid):
     db.session.commit()
     flash("공지로 설정되었습니다." if p.is_notice else "공지가 해제되었습니다.")
     return redirect('/admin?tab=partnership')
+
+
+@login_required
+def admin_free_board_hide(fid):
+    """관리자: 자유게시판 글 숨김/해제."""
+    if not current_user.is_admin:
+        return redirect('/')
+    p = FreeBoard.query.get_or_404(fid)
+    p.is_hidden = not p.is_hidden
+    db.session.commit()
+    flash("숨김 상태가 변경되었습니다." if p.is_hidden else "다시 노출됩니다.")
+    return redirect('/admin?tab=board_manage&board_type=free')
+
+
+@login_required
+def admin_free_board_notice_toggle(fid):
+    """관리자: 자유게시판 글 공지 설정/해제."""
+    if not current_user.is_admin:
+        return redirect('/')
+    p = FreeBoard.query.get_or_404(fid)
+    p.is_notice = not p.is_notice
+    db.session.commit()
+    flash("공지로 설정되었습니다." if p.is_notice else "공지가 해제되었습니다.")
+    return redirect('/admin?tab=board_manage&board_type=free')
 
 
 @login_required
