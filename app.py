@@ -73,13 +73,17 @@ def inject_getattr():
 
 
 def cloudinary_thumbnail_url(url):
-    """Cloudinary 원본 URL을 카드/리스트용 정사각 썸네일 URL로 변환. 비 Cloudinary는 그대로 반환."""
+    """Cloudinary 원본 URL을 메인/검색 카드용 정사각 썸네일로 변환.
+    - 모바일에 최적화된 크기 (가로 600, 세로 600) + 자동 포맷/퀄리티.
+    - 비 Cloudinary는 그대로 반환."""
     if not url or not isinstance(url, str) or 'res.cloudinary.com' not in url or '/image/upload/' not in url:
         return url or ''
     u = url.strip()
+    # 이미 썸네일 변환이 붙어 있으면 그대로 사용
     if '/upload/w_' in u or '/upload/h_' in u:
         return u
-    return re.sub(r'(/image/upload/)(v\d+/)', r'\1w_800,h_800,c_fill/\2', u, count=1)
+    # /image/upload/ 뒤에 변환 세그먼트 삽입 (v버전 앞)
+    return re.sub(r'(/image/upload/)(v\d+/)', r'\1w_600,h_600,c_fill,f_auto,q_auto/\2', u, count=1)
 
 
 def admin_logi_redirect():
@@ -6630,19 +6634,29 @@ def product_detail(pid):
             return u
         return _base_url + (u if u.startswith('/') else '/' + u)
     def _cloudinary_full_display_url(url, use_original=False):
-        """서버(Cloudinary URL)일 때만 고정 크롭 제거. use_original=True면 변환 제거(원본 그대로, 세로 긴 상세 이미지 전체 노출)."""
+        """Cloudinary URL일 때 상세페이지용 변환 적용.
+        - use_original=True: 기존 변환 제거 (원본 크기)
+        - use_original=False: 가로 1000px, 세로 비율 유지 + 자동 포맷/퀄리티"""
         u = _abs_url(url)
         if 'res.cloudinary.com' not in u or '/image/upload/' not in u:
             return u
         m = re.search(r'(/image/upload/)([^/]+)(/)', u)
         if not m:
-            return u
+            # 변환 세그먼트가 없는 기본 URL인 경우: /image/upload/ 뒤에 변환 삽입
+            if use_original:
+                return u
+            try:
+                prefix, rest = u.split('/image/upload/', 1)
+            except ValueError:
+                return u
+            return f"{prefix}/image/upload/w_1000,c_scale,f_auto,q_auto/{rest}"
         prefix, transform, suffix = m.groups()
         if 'c_fill' in transform or (',' in transform and ('w_' in transform and 'h_' in transform)):
             if use_original:
                 u = u.replace(prefix + transform + suffix, prefix + '', 1)
             else:
-                u = u.replace(prefix + transform + suffix, prefix + 'w_1200,c_scale' + suffix, 1)
+                # 상세 화면 메인/상세 이미지: 가로 1000px, 세로는 비율 유지 (FREE), 자동 포맷/퀄리티
+                u = u.replace(prefix + transform + suffix, prefix + 'w_1000,c_scale,f_auto,q_auto' + suffix, 1)
         return u
 
     def _cloudinary_card_thumb_url(url):
@@ -6663,9 +6677,9 @@ def product_detail(pid):
             return u
         after = rest[slash + 1 :]
         return f"{prefix}/image/upload/w_600,h_600,c_fill,g_auto,f_auto,q_auto/{after}"
-    # 대표 이미지: w_1200,c_scale. 상세 이미지: 원본(변환 제거) so 세로 긴 이미지 끝까지 노출
+    # 대표/상세 이미지: w_1000,c_scale,f_auto,q_auto (가로 1000, 세로 비율 유지, 자동 포맷/퀄리티)
     product_image_url_absolute = _cloudinary_full_display_url(getattr(p, 'image_url', None))
-    detail_images_absolute = [_cloudinary_full_display_url(img, use_original=True) for img in detail_images]
+    detail_images_absolute = [_cloudinary_full_display_url(img, use_original=False) for img in detail_images]
     product_base_url = _base_url
 
     _record_page_view('product')
