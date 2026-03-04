@@ -95,6 +95,7 @@ class Product(db.Model):
     description = db.Column(db.String(200))
     name = db.Column(db.String(200))
     price = db.Column(db.Integer)
+    consumer_price = db.Column(db.Integer, nullable=True)
     supply_price = db.Column(db.Integer, nullable=True)
     spec = db.Column(db.String(100))
     origin = db.Column(db.String(100))
@@ -110,6 +111,13 @@ class Product(db.Model):
     tax_type = db.Column(db.String(20), default='과세')
     badge = db.Column(db.String(50), default='')
     view_count = db.Column(db.Integer, default=0)
+    # 네이버 쇼핑 최저가 정보 (선택 저장, 실시간 호출 부담 줄이기용)
+    naver_lowest_price = db.Column(db.Integer, nullable=True)
+    naver_lowest_link = db.Column(db.String(500), nullable=True)
+    naver_lowest_mall = db.Column(db.String(200), nullable=True)
+    naver_lowest_updated_at = db.Column(db.DateTime, nullable=True)
+    # 구매 제한: 0이면 제한 없음, N이면 1인당(1주문당) 최대 N개까지 구매 가능
+    max_purchase_quantity = db.Column(db.Integer, default=0)
 
 
 class Cart(db.Model):
@@ -312,6 +320,28 @@ class EventBoardPost(db.Model):
     content = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=_now_kst)
     is_notice = db.Column(db.Boolean, default=False)
+
+
+class EventWinnerPost(db.Model):
+    """이벤트 당첨 게시판 — 이벤트 공지·당첨자 발표용. 관리자만 작성, 사진·영상 첨부 가능."""
+    __tablename__ = "event_winner_post"
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=True)
+    post_type = db.Column(db.String(20), default='notice')  # 'notice' = 이벤트 공지, 'winner' = 당첨자 발표
+    is_notice = db.Column(db.Boolean, default=False)  # True면 목록 상단 고정
+    created_at = db.Column(db.DateTime, default=_now_kst)
+    updated_at = db.Column(db.DateTime, default=_now_kst, onupdate=_now_kst)
+
+
+class EventWinnerAttachment(db.Model):
+    """이벤트 당첨 게시판 첨부 (사진·동영상)."""
+    __tablename__ = "event_winner_attachment"
+    id = db.Column(db.Integer, primary_key=True)
+    event_winner_post_id = db.Column(db.Integer, db.ForeignKey('event_winner_post.id', ondelete='CASCADE'), nullable=False)
+    file_url = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(20), nullable=False)  # 'image' | 'video'
+    sort_order = db.Column(db.Integer, default=0)
 
 
 class ShareLink(db.Model):

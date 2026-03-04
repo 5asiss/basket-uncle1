@@ -44,6 +44,9 @@ def register_admin_routes(app):
         admin_member_send_message,
         admin_member_delete,
         admin_dashboard,
+        admin_price_compare_post,
+        admin_price_compare_excel,
+        admin_price_compare_apply,
         admin_product_bulk_upload_template,
         admin_bulk_upload_images,
         admin_upload_delete,
@@ -65,6 +68,10 @@ def register_admin_routes(app):
         admin_event_notice_edit,
         admin_event_notice_toggle,
         admin_event_post_delete,
+        admin_event_winner_write,
+        admin_event_winner_edit,
+        admin_event_winner_delete,
+        admin_event_winner_notice_toggle,
         admin_email_setup,
         admin_seller_order_preview,
         admin_seller_send_manual_email,
@@ -190,7 +197,10 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/board/event/notice/<int:eid>/edit', view_func=login_required(admin_event_notice_edit), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/board/event/<int:eid>/notice', view_func=login_required(admin_event_notice_toggle), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/event/<int:eid>/delete', view_func=login_required(admin_event_post_delete), methods=['POST'])
-    # email / seller
+    admin_bp.add_url_rule('/admin/board/event-winners/write', view_func=login_required(admin_event_winner_write), methods=['GET', 'POST'])
+    admin_bp.add_url_rule('/admin/board/event-winners/<int:wid>/edit', view_func=login_required(admin_event_winner_edit), methods=['GET', 'POST'])
+    admin_bp.add_url_rule('/admin/board/event-winners/<int:wid>/delete', view_func=login_required(admin_event_winner_delete), methods=['POST'])
+    admin_bp.add_url_rule('/admin/board/event-winners/<int:wid>/notice', view_func=login_required(admin_event_winner_notice_toggle), methods=['POST'])
     admin_bp.add_url_rule('/admin/email_setup', view_func=login_required(admin_email_setup))
     admin_bp.add_url_rule('/admin/seller/order_preview', view_func=login_required(admin_seller_order_preview))
     admin_bp.add_url_rule('/admin/seller/send_manual_email', view_func=login_required(admin_seller_send_manual_email), methods=['POST'])
@@ -240,6 +250,11 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/orders/settlement_detail_excel', view_func=login_required(admin_orders_settlement_detail_excel))
     admin_bp.add_url_rule('/admin/settlement/category_excel', view_func=login_required(admin_settlement_category_excel))
     admin_bp.add_url_rule('/admin/orders/excel', view_func=login_required(admin_orders_excel))
+
+    # 가격비교 (네이버 쇼핑 최저가 조사)
+    admin_bp.add_url_rule('/admin/price_compare', view_func=login_required(admin_price_compare_post), methods=['POST'])
+    admin_bp.add_url_rule('/admin/price_compare/excel', view_func=login_required(admin_price_compare_excel))
+    admin_bp.add_url_rule('/admin/price_compare/apply', view_func=login_required(admin_price_compare_apply), methods=['POST'])
 
     # 대시보드: /admin, /admin/, /admin/<path> (맨 마지막에 등록해 나머지 경로만 처리)
     def _admin_dashboard_with_path(path=''):
