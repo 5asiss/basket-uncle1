@@ -3522,21 +3522,14 @@ def search_view():
                     
                     <div class="mt-auto flex justify-between items-end gap-2">
                         <div class="flex flex-col items-start">
-                            <span class="price text-[12px] md:text-lg font-black text-teal-700">
-                                {{ "{:,}".format(p.price) }}원
-                            </span>
-                            {% if p.naver_lowest_price %}
-                            <div class="mt-1 text-[10px] md:text-xs text-gray-500">
-                                <span class="font-bold text-emerald-700">
-                                    네이버 최저가 {{ "{:,}".format(p.naver_lowest_price|int) }}원
-                                </span>
-                                {% if p.naver_lowest_link %}
-                                <a href="{{ p.naver_lowest_link }}" target="_blank" rel="noopener"
-                                   class="ml-1 text-[10px] md:text-xs font-black text-teal-600 underline">
-                                    최저가 확인하기
-                                </a>
-                                {% endif %}
-                            </div>
+                            {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                                {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                                <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
+                                <div class="flex items-baseline gap-2 flex-nowrap">
+                                    <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
+                                </div>
+                            {% else %}
+                                <span class="price text-[12px] md:text-lg font-black text-teal-700">{{ "{:,}".format(p.price) }}원</span>
                             {% endif %}
                         </div>
                         {% if not is_expired and p.stock > 0 %}
@@ -3636,10 +3629,9 @@ def search_view():
                                     if (p.naver_lowest_price && p.naver_lowest_price > p.price) {
                                         var discount = Math.floor((p.naver_lowest_price - p.price) * 100 / p.naver_lowest_price);
                                         priceHtml = '<div class="flex flex-col items-start">'
-                                            + '<span class="text-[11px] md:text-xs text-gray-400 font-bold line-through">네이버 최저가 ' + p.naver_lowest_price.toLocaleString() + '원</span>'
+                                            + '<span class="text-[11px] md:text-xs text-gray-400 font-bold line-through">' + p.naver_lowest_price.toLocaleString() + '원</span>'
                                             + '<div class="flex items-baseline gap-1">'
                                             + '<span class="price text-[12px] md:text-lg font-black text-teal-700">' + (p.price || 0).toLocaleString() + '원</span>'
-                                            + '<span class="text-[10px] font-black text-rose-500">-' + discount + '%</span>'
                                             + '</div></div>';
                                     } else {
                                         priceHtml = '<div class="flex flex-col items-start"><span class="price text-[12px] md:text-lg font-black text-teal-700">' + (p.price || 0).toLocaleString() + '원</span></div>';
@@ -4160,7 +4152,6 @@ def index():
                                 <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
                                 <div class="flex items-baseline gap-2 flex-nowrap">
                                     <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
-                                    <span class="text-[11px] md:text-sm font-bold text-rose-600 shrink-0">-{{ discount }}%</span>
                                 </div>
                             {% else %}
                                 <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(p.price) }}원</span>
@@ -4219,7 +4210,6 @@ def index():
                                 <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
                                 <div class="flex items-baseline gap-2 flex-nowrap">
                                     <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
-                                    <span class="text-[11px] md:text-sm font-bold text-rose-600 shrink-0">-{{ discount }}%</span>
                                 </div>
                             {% else %}
                                 <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(p.price) }}원</span>
@@ -4278,7 +4268,6 @@ def index():
                                 <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
                                 <div class="flex items-baseline gap-2 flex-nowrap">
                                     <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
-                                    <span class="text-[11px] md:text-sm font-bold text-rose-600 shrink-0">-{{ discount }}%</span>
                                 </div>
                             {% else %}
                                 <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(p.price) }}원</span>
@@ -6809,7 +6798,6 @@ def category_view(cat_name):
                                 <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
                                 <div class="flex items-baseline gap-2 flex-nowrap">
                                     <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
-                                    <span class="text-[11px] md:text-sm font-bold text-rose-600 shrink-0">-{{ discount }}%</span>
                                 </div>
                             {% else %}
                                 <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(p.price) }}원</span>
@@ -6873,7 +6861,6 @@ def category_view(cat_name):
                                         <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(cp.naver_lowest_price) }}원</span>
                                         <div class="flex items-baseline gap-2 flex-nowrap">
                                             <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(cp.price) }}원</span>
-                                            <span class="text-[11px] md:text-sm font-bold text-rose-600 shrink-0">-{{ discount }}%</span>
                                         </div>
                                     {% else %}
                                         <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(cp.price) }}원</span>
@@ -6955,7 +6942,6 @@ def category_view(cat_name):
                             + '<span class="text-[11px] md:text-sm text-slate-500 line-through">' + p.naver_lowest_price.toLocaleString() + '원</span>'
                             + '<div class="flex items-baseline gap-2 flex-nowrap">'
                             + '<span class="price text-[15px] md:text-xl font-bold text-rose-600">' + (p.price || 0).toLocaleString() + '원</span>'
-                            + '<span class="text-[11px] md:text-sm font-bold text-rose-600 shrink-0">-' + discount + '%</span>'
                             + '</div></div>';
                     })()
                     : '<div class="flex flex-col items-start"><span class="price text-[12px] md:text-lg font-semibold text-slate-800">' + (p.price || 0).toLocaleString() + '원</span></div>';
@@ -7384,7 +7370,7 @@ def product_detail(pid):
                     <div class="flex flex-col gap-2">
                         {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
                         <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <span class="text-sm md:text-base text-slate-500">인터넷 최저가 {{ "{:,}".format(p.naver_lowest_price) }}원</span>
+                            <span class="text-sm md:text-base text-slate-500">인터넷 최저가 <span class="line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span></span>
                             {% if p.naver_lowest_link %}
                             <a href="{{ p.naver_lowest_link }}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-700 font-bold text-sm underline">
                                 가격확인하기
@@ -12047,7 +12033,7 @@ def admin_price_compare_excel():
 
 @login_required
 def admin_price_compare_apply():
-    """가격비교 탭에서 선택한 조사 결과의 최저가/링크를 해당 상품에 적용하고 상품 수정 페이지로 이동."""
+    """가격비교 탭에서 선택한 조사 결과의 최저가/링크를 해당 상품에 적용하고, 같은 탭에 머물며 목록 정보가 갱신되도록 리다이렉트."""
     categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
     managers = [c.manager_email for c in categories if c.manager_email]
     if not (current_user.is_admin or current_user.email in managers):
@@ -12085,7 +12071,14 @@ def admin_price_compare_apply():
         applied_ids.append(product.id)
     if applied_ids:
         flash(f"{len(applied_ids)}개 상품에 최저가를 적용했습니다.")
-        return redirect(url_for("admin.admin_product_edit", pid=applied_ids[0]))
+        pc_cat = request.form.get("pc_cat", "전체")
+        pc_q = (request.form.get("pc_q") or "").strip()
+        redirect_url = "/admin?tab=price_compare"
+        if pc_cat and pc_cat != "전체":
+            redirect_url += "&pc_cat=" + quote(pc_cat)
+        if pc_q:
+            redirect_url += "&pc_q=" + quote(pc_q)
+        return redirect(redirect_url)
     flash("매칭되는 상품을 찾지 못했습니다. 품명이 동일한 상품이 있는지 확인해 주세요.")
     return redirect("/admin?tab=price_compare")
 
@@ -13353,6 +13346,7 @@ def admin_dashboard():
                         <table class="w-full text-left text-xs">
                             <thead class="bg-gray-50 border-b border-gray-100 sticky top-0">
                                 <tr>
+                                    <th class="p-3 w-10"><input type="checkbox" id="pc-product-select-all" class="rounded" title="전체 선택"></th>
                                     <th class="p-3 font-black text-gray-600">카테고리</th>
                                     <th class="p-3 font-black text-gray-600">상품명</th>
                                     <th class="p-3 font-black text-gray-600">현재 최저가</th>
@@ -13362,6 +13356,7 @@ def admin_dashboard():
                             <tbody>
                                 {% for pp in price_compare_products %}
                                 <tr class="border-b border-gray-50 hover:bg-gray-50/50">
+                                    <td class="p-3"><input type="checkbox" class="pc-product-cb rounded" data-name="{{ pp.name }}" value="{{ pp.name }}"></td>
                                     <td class="p-3 text-gray-600">{{ pp.category }}</td>
                                     <td class="p-3 font-semibold text-gray-800">{{ pp.name }}</td>
                                     <td class="p-3">{% if pp.naver_lowest_price %}{{ "{:,}".format(pp.naver_lowest_price) }}원{% else %}-{% endif %}</td>
@@ -13373,7 +13368,10 @@ def admin_dashboard():
                             </tbody>
                         </table>
                     </div>
-                    <p class="text-[10px] text-gray-500 mt-2">총 {{ price_compare_products|length }}건 (최대 200건). 「목록에 추가」를 누르면 아래 품명 목록에 해당 상품명이 추가됩니다.</p>
+                    <div class="flex flex-wrap items-center gap-3 mt-2">
+                        <button type="button" id="pc-add-selected-btn" class="px-4 py-2 bg-teal-600 text-white rounded-xl font-black text-[10px] hover:bg-teal-700">선택 항목 목록에 추가</button>
+                        <span class="text-[10px] text-gray-500">총 {{ price_compare_products|length }}건 (최대 200건). 「목록에 추가」 또는 체크 후 「선택 항목 목록에 추가」로 품명 목록에 넣을 수 있습니다.</span>
+                    </div>
                     {% elif pc_cat or pc_q %}
                     <p class="text-gray-500 text-sm py-4">검색 결과가 없습니다.</p>
                     {% else %}
@@ -13396,22 +13394,39 @@ def admin_dashboard():
                 <script>
                 (function(){
                     var ta = document.getElementById('price_compare_raw_text');
-                    if (ta) document.querySelectorAll('.price-compare-add-name').forEach(function(btn){
-                        btn.addEventListener('click', function(){
-                            var name = (this.getAttribute('data-name') || '').trim();
-                            if (!name) return;
-                            var v = (ta.value || '').trim();
-                            if (v) ta.value = v + '\n' + name;
-                            else ta.value = name;
+                    if (ta) {
+                        document.querySelectorAll('.price-compare-add-name').forEach(function(btn){
+                            btn.addEventListener('click', function(){
+                                var name = (this.getAttribute('data-name') || '').trim();
+                                if (!name) return;
+                                var v = (ta.value || '').trim();
+                                if (v) ta.value = v + '\n' + name;
+                                else ta.value = name;
+                            });
                         });
-                    });
+                        var selectAll = document.getElementById('pc-product-select-all');
+                        if (selectAll) selectAll.addEventListener('change', function(){ document.querySelectorAll('.pc-product-cb').forEach(function(cb){ cb.checked = selectAll.checked; }); });
+                        var addSelectedBtn = document.getElementById('pc-add-selected-btn');
+                        if (addSelectedBtn) addSelectedBtn.addEventListener('click', function(){
+                            var names = [];
+                            document.querySelectorAll('.pc-product-cb:checked').forEach(function(cb){ var n = (cb.getAttribute('data-name') || '').trim(); if (n) names.push(n); });
+                            if (names.length === 0) { alert('목록에 넣을 상품을 선택해 주세요.'); return; }
+                            var v = (ta.value || '').trim();
+                            var add = names.join('\n');
+                            ta.value = v ? v + '\n' + add : add;
+                            document.querySelectorAll('.pc-product-cb').forEach(function(cb){ cb.checked = false; });
+                            if (selectAll) selectAll.checked = false;
+                        });
+                    }
                 })();
                 </script>
                 {% if price_compare_results %}
                 <form action="/admin/price_compare/apply" method="POST" class="mb-3">
+                    <input type="hidden" name="pc_cat" value="{{ pc_cat or '전체' }}">
+                    <input type="hidden" name="pc_q" value="{{ pc_q or '' }}">
                     <div class="flex flex-wrap items-center gap-3">
-                        <button type="submit" class="bg-rose-500 text-white px-5 py-2.5 rounded-xl font-black text-xs hover:bg-rose-600">선택 항목을 상품에 적용 후 상품정보로 이동</button>
-                        <span class="text-[11px] text-gray-500">체크한 행의 최저가·링크가 품명과 일치하는 상품에 저장되고, 해당 상품 수정 페이지로 이동합니다.</span>
+                        <button type="submit" class="bg-rose-500 text-white px-5 py-2.5 rounded-xl font-black text-xs hover:bg-rose-600">선택 항목을 상품에 적용</button>
+                        <span class="text-[11px] text-gray-500">체크한 행의 최저가·링크가 품명과 일치하는 상품에 저장됩니다. 적용 후 이 탭에 머물며 상품 목록의 최저가가 갱신됩니다.</span>
                     </div>
                 <div class="overflow-x-auto rounded-2xl border border-teal-100 bg-white mt-3">
                     <table class="w-full text-left text-xs md:text-sm">
