@@ -47,6 +47,7 @@ def register_admin_routes(app):
         admin_price_compare_post,
         admin_price_compare_excel,
         admin_price_compare_apply,
+        admin_price_compare_clear,
         admin_product_bulk_upload_template,
         admin_bulk_upload_images,
         admin_upload_delete,
@@ -255,6 +256,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/price_compare', view_func=login_required(admin_price_compare_post), methods=['POST'])
     admin_bp.add_url_rule('/admin/price_compare/excel', view_func=login_required(admin_price_compare_excel))
     admin_bp.add_url_rule('/admin/price_compare/apply', view_func=login_required(admin_price_compare_apply), methods=['POST'])
+    admin_bp.add_url_rule('/admin/price_compare/clear', view_func=login_required(admin_price_compare_clear))
 
     # 대시보드: /admin, /admin/, /admin/<path> (맨 마지막에 등록해 나머지 경로만 처리)
     def _admin_dashboard_with_path(path=''):

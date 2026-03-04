@@ -11,6 +11,7 @@ import random
 import uuid
 import unicodedata
 import time
+import tempfile
 from urllib.parse import quote
 
 import pandas as pd
@@ -92,15 +93,96 @@ def _clean_product_name(name: str) -> str:
     return cleaned
 
 
+def _item_title_matches_product(item_title: str, product_name: str, min_ratio: float = 0.8) -> bool:
+    """품명(띄어쓰기 원상태) 기준으로, 검색 결과 제목과 80% 이상 일치하면 True.
+    비교 시 공백 제거한 문자열로 품명 문자가 제목에 순서대로 등장하는 비율을 계산."""
+    if not product_name or not item_title:
+        return False
+    title_clean = (item_title or "").replace("<b>", "").replace("</b>", "").strip()
+    # 품명·제목 공백 제거한 버전으로 '품명 문자가 제목에 순서대로 등장하는 비율' 계산
+    a = re.sub(r"\s+", "", str(product_name).strip())
+    b = re.sub(r"\s+", "", title_clean)
+    if len(a) < 2:
+        return False
+    pos = 0
+    count = 0
+    for c in a:
+        idx = b.find(c, pos)
+        if idx >= 0:
+            count += 1
+            pos = idx + 1
+    ratio = count / len(a)
+    return ratio >= min_ratio
+
+
 def get_lowest_price(product_name: str):
     """
-    네이버 쇼핑 API를 호출해 해당 상품명의 최저가 정보를 반환.
+    네이버 쇼핑 API를 호출해 해당 상품명의 최저가 정보 1건 반환.
     반환값 예: {"price": 12500, "link": "...", "mall_name": "네이버스토어"}
-    검색 실패/오류 시 모든 값이 None.
     """
     cleaned = _clean_product_name(product_name)
     if not cleaned or not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
         return {"price": None, "link": None, "mall_name": None}
+    try:
+        headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
+        params = {"query": cleaned, "display": 1, "start": 1, "sort": "sim"}
+        resp = requests.get("https://openapi.naver.com/v1/search/shop.json", headers=headers, params=params, timeout=2.5)
+        if resp.status_code != 200:
+            return {"price": None, "link": None, "mall_name": None}
+        try:
+            data = resp.json()
+        except (ValueError, TypeError):
+            return {"price": None, "link": None, "mall_name": None}
+        items = data.get("items") or []
+        if not items:
+            return {"price": None, "link": None, "mall_name": None}
+        first = items[0]
+        title = (first.get("title") or "").replace("<b>", "").replace("</b>", "")
+        if not _item_title_matches_product(title, product_name):
+            return {"price": None, "link": None, "mall_name": None}
+        lprice, link, mall_name = first.get("lprice"), first.get("link"), first.get("mallName")
+        try:
+            p = str(lprice).strip() if lprice is not None else ""
+            price_int = int(float(p)) if p else None
+        except (TypeError, ValueError):
+            price_int = None
+        return {"price": price_int, "link": link, "mall_name": mall_name}
+    except Exception:
+        return {"price": None, "link": None, "mall_name": None}
+
+
+def get_lowest_price_list(product_name: str, max_results: int = 3):
+    """최저가순(asc)으로 최대 max_results건 반환. 품명과 일치하는 검색 결과만 포함. 상세 페이지용."""
+    cleaned = _clean_product_name(product_name)
+    if not cleaned or not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET or max_results < 1:
+        return []
+    try:
+        headers = {"X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET}
+        params = {"query": cleaned, "display": min(max_results * 10, 100), "start": 1, "sort": "asc"}
+        resp = requests.get("https://openapi.naver.com/v1/search/shop.json", headers=headers, params=params, timeout=4)
+        if resp.status_code != 200:
+            return []
+        try:
+            items = (resp.json().get("items") or [])
+        except (ValueError, TypeError):
+            items = []
+        out = []
+        for item in items:
+            if len(out) >= max_results:
+                break
+            title = (item.get("title") or "").replace("<b>", "").replace("</b>", "")
+            if not _item_title_matches_product(title, product_name):
+                continue
+            lprice, link = item.get("lprice"), item.get("link")
+            try:
+                p = str(lprice).strip() if lprice is not None else ""
+                price_int = int(float(p)) if p else None
+            except (TypeError, ValueError):
+                price_int = None
+            out.append({"price": price_int, "link": link, "mall_name": item.get("mallName"), "title": title})
+        return out
+    except Exception:
+        return []
 
 
 def get_lowest_price_raw(search_query: str):
@@ -139,90 +221,101 @@ def get_lowest_price_raw(search_query: str):
         link = first.get("link")
         mall_name = first.get("mallName")
         try:
-            price_int = int(lprice) if lprice is not None else None
+            p = str(lprice).strip() if lprice is not None else ""
+            price_int = int(float(p)) if p else None
         except (TypeError, ValueError):
             price_int = None
         return {"price": price_int, "link": link, "mall_name": mall_name}
     except Exception:
-        return {"price": None, "link": None, "mall_name": None}
-
-    try:
-        headers = {
-            "X-Naver-Client-Id": NAVER_CLIENT_ID,
-            "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
-        }
-        params = {
-            "query": cleaned,
-            "display": 1,
-            "start": 1,
-            "sort": "sim",  # 관련도 순
-        }
-        resp = requests.get(
-            "https://openapi.naver.com/v1/search/shop.json",
-            headers=headers,
-            params=params,
-            timeout=2.5,
-        )
-        if resp.status_code != 200:
-            return {"price": None, "link": None, "mall_name": None}
-        data = resp.json()
-        items = data.get("items") or []
-        if not items:
-            return {"price": None, "link": None, "mall_name": None}
-        first = items[0]
-        lprice = first.get("lprice")
-        link = first.get("link")
-        mall_name = first.get("mallName")
-        try:
-            price_int = int(lprice) if lprice is not None else None
-        except (TypeError, ValueError):
-            price_int = None
-        return {"price": price_int, "link": link, "mall_name": mall_name}
-    except Exception:
-        # API 오류 시에도 페이지가 정상 동작하도록 None 반환
         return {"price": None, "link": None, "mall_name": None}
 
 
 def get_naver_shop_compare(raw_text):
-    """관리자 비교검색 탭용. 금창권 님 스크립트와 동일: strip 후 split('\\n'), f-string URL, requests.get(api_url, headers)."""
+    """관리자 비교검색 탭용. 줄 단위로 분리, 각 줄은 앞뒤 공백만 제거(띄어쓰기 유지). 네이버 쇼핑 API 호출. 입력한 품목 전부 처리. 반환: (results, truncated, total_lines)."""
     raw_cleaned = (raw_text or "").strip().replace("\r", "")
-    product_names = [name.strip() for name in raw_cleaned.split("\n") if name.strip()]
+    product_names = [line.strip() for line in raw_cleaned.split("\n") if line.strip()]
+    total_lines = len(product_names)
     results = []
+    if not product_names:
+        return results, False, 0
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        for name in product_names:
+            product = Product.query.filter_by(name=name).first() or Product.query.filter(Product.name.ilike("%" + name + "%")).first()
+            current_price = product.price if product else None
+            current_price_str = "{:,}원".format(current_price) if current_price is not None else "-"
+            results.append({"품명": name, "네이버 상품명": "API 키 미설정", "최저가": "-", "최저가_숫자": None, "현재_판매가": current_price, "현재_판매가_표시": current_price_str, "상품링크": None, "규격": "-", "택배비 포함 여부": "-"})
+        return results, False, total_lines
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
     }
+    min_ratio = 0.8
     for name in product_names:
-        api_url = f"https://openapi.naver.com/v1/search/shop.json?query={name}&display=1&sort=sim"
+        encoded_query = quote(name)
+        api_url = f"https://openapi.naver.com/v1/search/shop.json?query={encoded_query}&display=30&sort=asc"
         try:
+            product = Product.query.filter_by(name=name).first()
+            if not product:
+                product = Product.query.filter(Product.name.ilike("%" + name + "%")).first()
+            current_price = product.price if product else None
+            current_price_str = "{:,}원".format(current_price) if current_price is not None else "-"
             resp = requests.get(api_url, headers=headers, timeout=30)
             if resp.status_code == 200:
-                data = resp.json()
-                if data.get("items"):
-                    item = data["items"][0]
-                    clean_title = (item.get("title") or "").replace("<b>", "").replace("</b>", "")
-                    price = item.get("lprice")
-                    link = item.get("link") or "-"
-                    try:
-                        price_int = int(price) if price is not None else None
-                    except (TypeError, ValueError):
-                        price_int = None
-                    price_str = "{:,}원".format(price_int) if price_int is not None else "-"
-                    results.append({
-                        "품명": name,
-                        "네이버 상품명": clean_title,
-                        "최저가": price_str,
-                        "최저가_숫자": price_int,
-                        "상품링크": link if link and link != "-" else None,
-                    })
-                else:
-                    results.append({"품명": name, "네이버 상품명": "검색 결과 없음", "최저가": "-", "최저가_숫자": None, "상품링크": None})
+                try:
+                    data = resp.json()
+                except (ValueError, TypeError):
+                    data = {}
+                items = data.get("items") or []
+                matched_any = False
+                count_for_name = 0
+                if items:
+                    for item in items:
+                        if count_for_name >= 3:
+                            break
+                        clean_title = (item.get("title") or "").replace("<b>", "").replace("</b>", "")
+                        if not _item_title_matches_product(clean_title, name, min_ratio=min_ratio):
+                            continue
+                        matched_any = True
+                        count_for_name += 1
+                        price = item.get("lprice")
+                        link = item.get("link") or "-"
+                        try:
+                            if price is None:
+                                price_int = None
+                            else:
+                                p = str(price).strip()
+                                price_int = int(float(p)) if p else None
+                        except (TypeError, ValueError):
+                            price_int = None
+                        price_str = "{:,}원".format(price_int) if price_int is not None else "-"
+                        cat_parts = [item.get("category1"), item.get("category2"), item.get("category3"), item.get("category4")]
+                        cat_parts = [str(x).strip() for x in cat_parts if x]
+                        spec_str = " > ".join(cat_parts) if cat_parts else (item.get("maker") or item.get("brand") or "").strip() or "-"
+                        results.append({
+                            "품명": name,
+                            "네이버 상품명": clean_title,
+                            "최저가": price_str,
+                            "최저가_숫자": price_int,
+                            "현재_판매가": current_price,
+                            "현재_판매가_표시": current_price_str,
+                            "상품링크": link if link and link != "-" else None,
+                            "규격": spec_str,
+                            "택배비 포함 여부": "상품페이지 참고",
+                        })
+                if not matched_any:
+                    msg = "검색 결과 없음(품목 불일치)" if items else "검색 결과 없음"
+                    results.append({"품명": name, "네이버 상품명": msg, "최저가": "-", "최저가_숫자": None, "현재_판매가": current_price, "현재_판매가_표시": current_price_str, "상품링크": None, "규격": "-", "택배비 포함 여부": "-"})
             else:
-                results.append({"품명": name, "네이버 상품명": "API 오류", "최저가": "-", "최저가_숫자": None, "상품링크": None})
+                results.append({"품명": name, "네이버 상품명": "API 오류", "최저가": "-", "최저가_숫자": None, "현재_판매가": current_price, "현재_판매가_표시": current_price_str, "상품링크": None, "규격": "-", "택배비 포함 여부": "-"})
         except Exception:
-            results.append({"품명": name, "네이버 상품명": "에러", "최저가": "-", "최저가_숫자": None, "상품링크": None})
+            product = Product.query.filter_by(name=name).first()
+            if not product:
+                product = Product.query.filter(Product.name.ilike("%" + name + "%")).first()
+            current_price = product.price if product else None
+            current_price_str = "{:,}원".format(current_price) if current_price is not None else "-"
+            results.append({"품명": name, "네이버 상품명": "에러", "최저가": "-", "최저가_숫자": None, "현재_판매가": current_price, "현재_판매가_표시": current_price_str, "상품링크": None, "규격": "-", "택배비 포함 여부": "-"})
         time.sleep(0.1)
-    return results
+    return results, False, total_lines
 
 
 @app.context_processor
@@ -7282,6 +7375,11 @@ def product_detail(pid):
     )
     category_delivery_desc = get_category_delivery_description(p.category) if p.category else "배송료 문의"
 
+    # 인터넷 최저가: API로 최저가순 최대 3건 조회. 없으면 DB 저장값 1건으로 대체
+    naver_lowest_list = get_lowest_price_list(p.name, 3)
+    if not naver_lowest_list and getattr(p, "naver_lowest_price", None) and getattr(p, "naver_lowest_link", None):
+        naver_lowest_list = [{"price": p.naver_lowest_price, "link": p.naver_lowest_link, "mall_name": getattr(p, "naver_lowest_mall", None), "title": None}]
+
     # 동일 카테고리 상품 (현재 상품 제외, 판매중·재고 있음 우선, 최대 8개)
     same_category_products = Product.query.filter(
         Product.category == p.category,
@@ -7368,28 +7466,40 @@ def product_detail(pid):
 
                 <div class="mb-6">
                     <div class="flex flex-col gap-2">
-                        {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
-                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <span class="text-sm md:text-base text-slate-500">인터넷 최저가 <span class="line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span></span>
-                            {% if p.naver_lowest_link %}
-                            <a href="{{ p.naver_lowest_link }}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-700 font-bold text-sm underline">
-                                가격확인하기
-                            </a>
-                            {% endif %}
+                        {% if naver_lowest_list %}
+                        <div class="flex flex-col gap-3">
+                            {% for nav in naver_lowest_list %}
+                            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                {% if nav.price %}
+                                <span class="text-sm md:text-base text-slate-500">인터넷 최저가 <span class="line-through">{{ "{:,}".format(nav.price) }}원</span></span>
+                                {% if nav.link %}
+                                <a href="{{ nav.link }}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-700 font-bold text-sm underline">가격확인하기</a>
+                                {% endif %}
+                                {% else %}
+                                <span class="text-sm md:text-base text-slate-500">인터넷 최저가 -</span>
+                                {% if nav.link %}
+                                <a href="{{ nav.link }}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-700 font-bold text-sm underline">가격확인하기</a>
+                                {% endif %}
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                            <p class="text-[11px] text-slate-400 mt-0.5">검색 시점에 따라 값이 다를 수 있습니다.</p>
                         </div>
+                        {% set first_price = naver_lowest_list[0].price if naver_lowest_list and naver_lowest_list[0].price else none %}
+                        {% if first_price and first_price > p.price %}
                         <div class="flex items-baseline gap-3 flex-wrap">
                             <span class="text-2xl md:text-4xl font-black text-gray-900">판매가격 {{ "{:,}".format(p.price) }}원</span>
-                            <span class="text-lg md:text-xl font-bold text-rose-600">최저가 -{{ ((p.naver_lowest_price - p.price) * 100 / p.naver_lowest_price)|int }}%</span>
+                            <span class="text-lg md:text-xl font-bold text-rose-600">최저가 -{{ ((first_price - p.price) * 100 / first_price)|int }}%</span>
                         </div>
                         {% else %}
                         <div class="flex items-baseline gap-3 flex-wrap">
                             <span class="text-2xl md:text-4xl font-black text-gray-900">판매가격 {{ "{:,}".format(p.price) }}원</span>
                         </div>
-                        {% if p.naver_lowest_price and p.naver_lowest_link %}
-                        <a href="{{ p.naver_lowest_link }}" target="_blank" rel="noopener" class="text-teal-600 hover:text-teal-700 font-bold text-sm underline">
-                            가격확인하기
-                        </a>
                         {% endif %}
+                        {% else %}
+                        <div class="flex items-baseline gap-3 flex-wrap">
+                            <span class="text-2xl md:text-4xl font-black text-gray-900">판매가격 {{ "{:,}".format(p.price) }}원</span>
+                        </div>
                         {% endif %}
                     </div>
                 </div>
@@ -7856,6 +7966,7 @@ def product_detail(pid):
                                   recommend_cats_detail=recommend_cats_detail,
                                   cat_previews_detail=cat_previews_detail,
                                   category_delivery_desc=category_delivery_desc,
+                                  naver_lowest_list=naver_lowest_list,
                                   product_base_url=product_base_url,
                                   seller_category=seller_category,
                                   product_share_url=request.url_root.rstrip('/') + '/product/' + str(pid),
@@ -11996,7 +12107,8 @@ def admin_revenue_report_download():
 
 @login_required
 def admin_price_compare_post():
-    """관리자 비교검색: 품명 목록을 받아 네이버 쇼핑 API로 최저가 조회 후 세션에 저장하고 비교검색 탭으로 리다이렉트."""
+    """관리자 비교검색: 품명 목록을 받아 네이버 쇼핑 API로 최저가 조회 후 저장하고 비교검색 탭으로 리다이렉트.
+    대량 결과는 세션(쿠키) 용량 한계를 피하기 위해 서버 파일에 저장하고, 세션에는 파일 키만 둠."""
     categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
     managers = [c.manager_email for c in categories if c.manager_email]
     if not (current_user.is_admin or current_user.email in managers):
@@ -12006,9 +12118,52 @@ def admin_price_compare_post():
     if not raw_text:
         flash("품명을 한 줄에 하나씩 입력해 주세요.")
         return redirect("/admin?tab=price_compare")
-    results = get_naver_shop_compare(raw_text)
-    session["price_compare_results"] = results
+    session["price_compare_raw_text"] = raw_text
+    results, truncated, total_lines = get_naver_shop_compare(raw_text)
+    session["price_compare_truncated"] = False
+    session["price_compare_total_lines"] = total_lines
+    # 대량 결과는 세션 쿠키 한계(약 4KB)로 저장 실패 → 파일에 저장하고 세션에는 키만
+    if results:
+        cache_dir = os.path.join(app.instance_path, "price_compare_cache")
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+        except OSError:
+            cache_dir = os.path.join(tempfile.gettempdir(), "basket_uncle_price_compare")
+            os.makedirs(cache_dir, exist_ok=True)
+        file_key = "pc_{}_{}.json".format(getattr(current_user, "id", 0), int(time.time() * 1000))
+        path = os.path.join(cache_dir, file_key)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"results": results, "total_lines": total_lines}, f, ensure_ascii=False)
+            session["price_compare_file"] = file_key
+            session.pop("price_compare_results", None)
+        except Exception:
+            if len(results) <= 20:
+                session["price_compare_results"] = results
+            session.pop("price_compare_file", None)
+    else:
+        session.pop("price_compare_file", None)
+        session.pop("price_compare_results", None)
     return redirect("/admin?tab=price_compare")
+
+
+def _load_price_compare_results():
+    """세션 또는 파일에서 최저가 조사 결과 로드. 대량 결과는 파일에 저장되어 있어 세션 용량 초과를 피함."""
+    file_key = session.get("price_compare_file")
+    if file_key:
+        cache_dir = os.path.join(app.instance_path, "price_compare_cache")
+        path = os.path.join(cache_dir, file_key)
+        if not os.path.isfile(path):
+            path = os.path.join(tempfile.gettempdir(), "basket_uncle_price_compare", file_key)
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data.get("results", [])
+            except Exception:
+                pass
+        return []
+    return session.get("price_compare_results") or []
 
 
 @login_required
@@ -12018,11 +12173,11 @@ def admin_price_compare_excel():
     managers = [c.manager_email for c in categories if c.manager_email]
     if not (current_user.is_admin or current_user.email in managers):
         abort(403)
-    results = session.get("price_compare_results") or []
+    results = _load_price_compare_results()
     if not results:
         flash("조회 결과가 없습니다. 먼저 품명을 입력하고 검색해 주세요.")
         return redirect("/admin?tab=price_compare")
-    rows = [{"품명": r.get("품명", ""), "네이버 상품명": r.get("네이버 상품명", ""), "최저가": r.get("최저가", ""), "상품링크": r.get("상품링크") or "-"} for r in results]
+    rows = [{"품명": r.get("품명", ""), "현재 상품 판매가": r.get("현재_판매가_표시", ""), "네이버 상품명": r.get("네이버 상품명", ""), "최저가": r.get("최저가", ""), "규격": r.get("규격", ""), "택배비 포함 여부": r.get("택배비 포함 여부", ""), "상품링크": r.get("상품링크") or "-"} for r in results]
     df = pd.DataFrame(rows)
     buf = BytesIO()
     df.to_excel(buf, index=False, engine="openpyxl")
@@ -12043,7 +12198,7 @@ def admin_price_compare_apply():
     if not indices:
         flash("적용할 항목을 선택해 주세요.")
         return redirect("/admin?tab=price_compare")
-    results = session.get("price_compare_results") or []
+    results = _load_price_compare_results()
     applied_ids = []
     for i in indices:
         try:
@@ -12080,6 +12235,34 @@ def admin_price_compare_apply():
             redirect_url += "&pc_q=" + quote(pc_q)
         return redirect(redirect_url)
     flash("매칭되는 상품을 찾지 못했습니다. 품명이 동일한 상품이 있는지 확인해 주세요.")
+    return redirect("/admin?tab=price_compare")
+
+
+@login_required
+def admin_price_compare_clear():
+    """최저가 검색 결과(세션)를 초기화하고 가격비교 탭으로 리다이렉트."""
+    categories = Category.query.order_by(Category.order.asc(), Category.id.asc()).all()
+    managers = [c.manager_email for c in categories if c.manager_email]
+    if not (current_user.is_admin or current_user.email in managers):
+        flash("관리자 권한이 없습니다.")
+        return redirect("/")
+    session.pop("price_compare_results", None)
+    session.pop("price_compare_truncated", None)
+    session.pop("price_compare_total_lines", None)
+    file_key = session.pop("price_compare_file", None)
+    if file_key:
+        for cache_dir in [
+            os.path.join(app.instance_path, "price_compare_cache"),
+            os.path.join(tempfile.gettempdir(), "basket_uncle_price_compare"),
+        ]:
+            path = os.path.join(cache_dir, file_key)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                break
+    flash("최저가 검색 결과를 초기화했습니다.")
     return redirect("/admin?tab=price_compare")
 
 
@@ -12147,7 +12330,14 @@ def admin_dashboard():
     settlement_supplier_totals = {}
     settlement_summary = None  # 검색 기간 기준 총 수익/지출/받을돈/나갈돈 (tab == 'settlement'일 때 채움)
     list_uploaded_images = []  # 대량등록 탭에서 static/uploads/ 이미지 목록 (확인용)
-    price_compare_results = session.get("price_compare_results", []) if request.args.get("tab") == "price_compare" else []
+    if request.args.get("tab") == "price_compare":
+        price_compare_results = _load_price_compare_results()
+        price_compare_truncated = session.get("price_compare_truncated", False)
+        price_compare_total_lines = session.get("price_compare_total_lines", 0)
+    else:
+        price_compare_results = []
+        price_compare_truncated = False
+        price_compare_total_lines = 0
     price_compare_products = []
     pc_cat = request.args.get("pc_cat", "전체")
     pc_q = (request.args.get("pc_q") or "").strip()
@@ -13189,13 +13379,31 @@ def admin_dashboard():
     # 3. HTML 템플릿 코드 (카테고리 설정 탭 완벽 복구본)
     admin_html = r"""
     <style id="admin-mobile-optimize">
-    /* Admin 공통: 글자체·정렬 통일 */
-    .admin-page, .admin-page * { font-family: inherit; }
-    .admin-page { text-align: left; }
-    .admin-page table { text-align: left; }
-    .admin-page th, .admin-page td { text-align: left; }
+    /* Admin 전체: 심플 폰트·정렬·여백 통일 */
+    .admin-page {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif !important;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #374151;
+        text-align: left;
+    }
+    .admin-page * { font-family: inherit; }
+    .admin-page table { text-align: left; border-collapse: collapse; }
+    .admin-page th, .admin-page td { text-align: left; padding: 10px 12px; font-size: 13px; }
+    .admin-page th { font-weight: 600; color: #4b5563; background: #f9fafb; border-bottom: 1px solid #e5e7eb; }
+    .admin-page td { border-bottom: 1px solid #f3f4f6; }
     .admin-page .admin-tab-row { text-align: left; }
-    /* Admin 모바일 최적화: safe-area, 터치 영역, 테이블 가로 스크롤 */
+    .admin-page h2, .admin-page h3 { font-weight: 600; font-size: 1.125rem; color: #1f2937; }
+    .admin-page h2 { font-size: 1.25rem; }
+    .admin-page a:not([class*="bg-"]) { font-weight: 500; }
+    .admin-page button, .admin-page [type="submit"] { font-weight: 500; font-size: 13px; }
+    .admin-page input, .admin-page select, .admin-page textarea { font-size: 14px; border-radius: 6px; }
+    .admin-page .rounded-2xl, .admin-page .rounded-\[2rem\], .admin-page .rounded-\[2\.5rem\] { border-radius: 8px; }
+    .admin-page .rounded-xl { border-radius: 6px; }
+    .admin-page .font-black { font-weight: 600; }
+    .admin-page .font-extrabold { font-weight: 600; }
+    .admin-page .font-bold { font-weight: 600; }
+    .admin-page .italic { font-style: normal; }
     @media (max-width: 768px) {
         .admin-page { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); padding-bottom: max(24px, env(safe-area-inset-bottom)); }
         .admin-page .overflow-x-auto { -webkit-overflow-scrolling: touch; }
@@ -13205,18 +13413,18 @@ def admin_dashboard():
         .admin-page button[type="submit"], .admin-page a[href].min-h-\[44px\] { min-height: 44px; touch-action: manipulation; }
     }
     </style>
-    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-6 md:py-10 xl:py-12 px-3 md:px-6 xl:px-8 font-sans font-medium text-xs md:text-sm text-left min-h-screen bg-gray-50/30 admin-page">
-        <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 md:mb-8 text-left">
-            <h2 class="text-xl md:text-3xl font-bold text-orange-700 italic">Admin Panel</h2>
+    <div class="max-w-6xl xl:max-w-[1400px] mx-auto py-6 md:py-8 px-4 md:px-6 min-h-screen bg-gray-50 admin-page">
+        <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4 mb-6 text-left">
+            <h2 class="text-lg font-semibold text-gray-800">Admin Panel</h2>
             <div class="flex gap-2 flex-shrink-0">
-                 <a href="/" class="min-h-[44px] min-w-[44px] flex items-center justify-center px-4 py-3 bg-gray-100 rounded-xl text-xs md:text-sm hover:bg-gray-200 transition">홈으로</a>
-                 <a href="/logout" class="min-h-[44px] min-w-[44px] flex items-center justify-center px-4 py-3 bg-red-50 text-red-500 rounded-xl text-xs md:text-sm hover:bg-red-100 transition">로그아웃</a>
+                 <a href="/" class="min-h-[40px] flex items-center justify-center px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">홈으로</a>
+                 <a href="/logout" class="min-h-[40px] flex items-center justify-center px-4 py-2 bg-white border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50">로그아웃</a>
             </div>
         </div>
         
-        <div class="flex flex-col gap-4 p-3 md:p-4 mb-8 md:mb-10 bg-white rounded-2xl border border-gray-100 shadow-sm -mx-3 md:mx-0 overflow-x-auto text-left">
-            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
-                <span class="text-[10px] text-amber-600 font-bold uppercase w-32 shrink-0">상품·카테고리</span>
+        <div class="flex flex-col gap-3 p-4 mb-6 bg-white rounded-lg border border-gray-200 -mx-2 md:mx-0 overflow-x-auto text-left">
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[40px] [&>a]:inline-flex [&>a]:items-center [&>a]:px-3 [&>a]:py-2 [&>a]:text-sm [&>a]:rounded-lg [&>a]:border">
+                <span class="text-xs text-gray-500 font-medium w-28 shrink-0">상품·카테고리</span>
                 <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
                 <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
                 <a href="/admin?tab=price_compare" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'price_compare' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">가격비교</a>
@@ -13356,12 +13564,12 @@ def admin_dashboard():
                             <tbody>
                                 {% for pp in price_compare_products %}
                                 <tr class="border-b border-gray-50 hover:bg-gray-50/50">
-                                    <td class="p-3"><input type="checkbox" class="pc-product-cb rounded" data-name="{{ pp.name }}" value="{{ pp.name }}"></td>
+                                    <td class="p-3"><input type="checkbox" class="pc-product-cb rounded" data-name="{{ pp.name|e }}" value="{{ pp.name|e }}"></td>
                                     <td class="p-3 text-gray-600">{{ pp.category }}</td>
                                     <td class="p-3 font-semibold text-gray-800">{{ pp.name }}</td>
                                     <td class="p-3">{% if pp.naver_lowest_price %}{{ "{:,}".format(pp.naver_lowest_price) }}원{% else %}-{% endif %}</td>
                                     <td class="p-3">
-                                        <button type="button" class="price-compare-add-name px-3 py-1.5 bg-teal-100 text-teal-700 rounded-lg font-black text-[10px] hover:bg-teal-200" data-name="{{ pp.name }}">목록에 추가</button>
+                                        <button type="button" class="price-compare-add-name px-3 py-1.5 bg-teal-100 text-teal-700 rounded-lg font-black text-[10px] hover:bg-teal-200" data-name="{{ pp.name|e }}">목록에 추가</button>
                                     </td>
                                 </tr>
                                 {% endfor %}
@@ -13382,11 +13590,12 @@ def admin_dashboard():
                 <form action="/admin/price_compare" method="POST" class="mb-6">
                     <div class="p-5 bg-white rounded-2xl border border-teal-100">
                         <label class="block text-[10px] font-black text-gray-600 mb-2">품명 목록 (한 줄에 하나씩)</label>
-                        <textarea id="price_compare_raw_text" name="price_compare_raw_text" rows="12" class="w-full border border-gray-200 rounded-xl p-4 text-sm font-medium placeholder-gray-400" placeholder="예:&#10;간장오리주물럭300g&#10;고추장오돌뼈200G&#10;한입쏙삼겹살250g">{{ request.form.get('price_compare_raw_text', '') }}</textarea>
+                        <textarea id="price_compare_raw_text" name="price_compare_raw_text" rows="12" class="w-full border border-gray-200 rounded-xl p-4 text-sm font-medium placeholder-gray-400" placeholder="예:&#10;간장오리주물럭300g&#10;고추장오돌뼈200G&#10;한입쏙 삼겹살 250g">{{ request.form.get('price_compare_raw_text', session.get('price_compare_raw_text', '')) }}</textarea>
                         <div class="mt-4 flex flex-wrap items-center gap-3">
                             <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-teal-700 transition">🔍 최저가 조사 실행</button>
                             {% if price_compare_results %}
                             <a href="/admin/price_compare/excel" class="bg-amber-500 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-amber-600 transition">📥 엑셀 다운로드</a>
+                            <a href="/admin/price_compare/clear" class="bg-gray-500 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-gray-600 transition">결과 초기화</a>
                             {% endif %}
                         </div>
                     </div>
@@ -13434,8 +13643,11 @@ def admin_dashboard():
                             <tr>
                                 <th class="p-4 w-10"><input type="checkbox" id="price-compare-select-all" class="rounded" title="전체 선택"></th>
                                 <th class="p-4 font-black text-gray-600">품명</th>
+                                <th class="p-4 font-black text-gray-600">현재 상품 판매가</th>
                                 <th class="p-4 font-black text-gray-600">네이버 상품명</th>
                                 <th class="p-4 font-black text-gray-600">최저가</th>
+                                <th class="p-4 font-black text-gray-600">규격</th>
+                                <th class="p-4 font-black text-gray-600">택배비 포함 여부</th>
                                 <th class="p-4 font-black text-gray-600">상품링크</th>
                             </tr>
                         </thead>
@@ -13444,8 +13656,11 @@ def admin_dashboard():
                             <tr class="border-b border-gray-50 hover:bg-gray-50/50">
                                 <td class="p-4">{% if r.get('최저가_숫자') is not none or r.get('상품링크') %}<input type="checkbox" name="apply_index" value="{{ loop.index0 }}" class="price-apply-cb rounded">{% else %}-{% endif %}</td>
                                 <td class="p-4 font-semibold text-gray-800">{{ r.get('품명', '-') }}</td>
+                                <td class="p-4 font-black text-gray-700">{{ r.get('현재_판매가_표시', '-') }}</td>
                                 <td class="p-4 text-gray-700">{{ r.get('네이버 상품명', '-') }}</td>
                                 <td class="p-4 font-black text-teal-600">{{ r.get('최저가', '-') }}</td>
+                                <td class="p-4 text-gray-600">{{ r.get('규격', '-') }}</td>
+                                <td class="p-4 text-gray-600 text-[11px]">{{ r.get('택배비 포함 여부', '-') }}</td>
                                 <td class="p-4">{% if r.get('상품링크') %}<a href="{{ r.get('상품링크') }}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">링크</a>{% else %}-{% endif %}</td>
                             </tr>
                             {% endfor %}
@@ -13621,7 +13836,7 @@ def admin_dashboard():
             <div class="bg-white rounded-[2rem] shadow-sm border border-gray-50 overflow-hidden overflow-x-auto -mx-3 md:mx-0">
                 <table class="w-full text-left min-w-[560px]">
                     <thead class="bg-gray-50 border-b border-gray-100 text-gray-400 text-[10px]">
-                        <tr><th class="p-4 w-10"><input type="checkbox" id="product-select-all" class="rounded product-select-all" title="전체 선택"></th><th class="p-6 w-20">사진</th><th class="p-6">상품정보</th><th class="p-6 text-center">재고</th><th class="p-6 text-center">상태</th><th class="p-6 text-center">관리</th></tr>
+                        <tr><th class="p-4 w-10"><input type="checkbox" id="product-select-all" class="rounded product-select-all" title="전체 선택"></th><th class="p-6 w-20">사진</th><th class="p-6">상품정보</th><th class="p-4 text-right">가격</th><th class="p-4 text-right">인터넷 최저가</th><th class="p-4">규격</th><th class="p-6 text-center">재고</th><th class="p-6 text-center">상태</th><th class="p-6 text-center">관리</th></tr>
                     </thead>
                     <tbody>
                         {% for p in products %}
@@ -13634,7 +13849,10 @@ def admin_dashboard():
                                 <span class="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400 text-[9px] font-bold">없음</span>
                                 {% endif %}
                             </td>
-                            <td class="p-6"><b class="text-gray-800 text-sm">{{ p.name }}</b><br><span class="text-teal-600 text-[10px]">{{ p.description or '' }}</span></td>
+                            <td class="p-6"><a href="/product/{{ p.id }}" class="text-teal-600 hover:text-teal-700 font-bold text-sm hover:underline">{{ p.name }}</a><br><span class="text-teal-600 text-[10px]">{{ p.description or '' }}</span></td>
+                            <td class="p-4 text-right font-bold text-[11px]">{{ "{:,}".format(p.price) }}원</td>
+                            <td class="p-4 text-right text-[11px]">{% if p.naver_lowest_price %}{{ "{:,}".format(p.naver_lowest_price) }}원{% else %}-{% endif %}</td>
+                            <td class="p-4 text-[11px] text-gray-600">{{ p.spec or '-' }}</td>
                             <td class="p-6 text-center font-black">{{ p.stock }}개</td>
                             <td class="p-6 text-center">
                                 {% if p.is_active %}<span class="inline-block px-2.5 py-1 rounded-lg bg-teal-100 text-teal-700 text-[10px] font-black">판매중</span>{% else %}<span class="inline-block px-2.5 py-1 rounded-lg bg-gray-200 text-gray-600 text-[10px] font-black">판매종료</span>{% endif %}
@@ -13651,7 +13869,7 @@ def admin_dashboard():
                         </tr>
                         {% endfor %}
                         {% if not products %}
-                        <tr><td colspan="6" class="p-10 text-center text-gray-400 font-bold">조회된 상품이 없습니다.</td></tr>
+                        <tr><td colspan="9" class="p-10 text-center text-gray-400 font-bold">조회된 상품이 없습니다.</td></tr>
                         {% endif %}
                     </tbody>
                 </table>
@@ -17530,15 +17748,15 @@ def admin_dashboard():
         <p class="text-xl font-black text-white">{{ "{:,}".format(stats.grand_total) }}원</p>
     </div>
 </div>
-    <div class="max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto py-10 xl:py-12 px-4 md:px-6 xl:px-8 font-sans font-medium text-xs md:text-sm text-left min-h-screen bg-gray-50/30 admin-page">
-        <div class="flex justify-between items-center mb-8 md:mb-10 text-left">
-            <h2 class="text-2xl md:text-3xl font-bold text-orange-700 italic text-left">Admin Panel</h2>
-            <div class="flex gap-4 text-left"><a href="/logout" class="absolute top-6 right-6 z-[9999] text-xs md:text-sm bg-gray-100 px-6 py-3 md:px-5 md:py-2 rounded-full text-gray-500 font-semibold hover:bg-red-50 hover:text-red-500 transition-all shadow-md border border-gray-200 text-center">LOGOUT</a></div>
+    <div class="max-w-6xl xl:max-w-[1400px] mx-auto py-6 md:py-8 px-4 md:px-6 min-h-screen bg-gray-50 admin-page">
+        <div class="flex justify-between items-center mb-6 text-left">
+            <h2 class="text-lg font-semibold text-gray-800">Admin Panel</h2>
+            <div class="flex gap-2 text-left"><a href="/logout" class="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-red-50 hover:text-red-600">LOGOUT</a></div>
         </div>
         
-        <div class="flex flex-col gap-4 p-4 mb-10 bg-white rounded-2xl border border-gray-100 shadow-sm text-left">
-            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[44px] [&>a]:inline-flex [&>a]:items-center [&>a]:justify-center [&>a]:whitespace-nowrap [&>a]:text-xs [&>a]:md:text-sm [&>a]:font-semibold">
-                <span class="text-[10px] text-amber-600 font-bold uppercase w-32 shrink-0">상품·카테고리</span>
+        <div class="flex flex-col gap-3 p-4 mb-6 bg-white rounded-lg border border-gray-200 text-left">
+            <div class="flex flex-wrap gap-2 items-center admin-tab-row [&>a]:flex-shrink-0 [&>a]:min-h-[40px] [&>a]:inline-flex [&>a]:items-center [&>a]:px-3 [&>a]:py-2 [&>a]:text-sm [&>a]:rounded-lg [&>a]:border">
+                <span class="text-xs text-gray-500 font-medium w-28 shrink-0">상품·카테고리</span>
                 <a href="/admin?tab=products" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'products' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품관리</a>
                 <a href="/admin?tab=bulk_register" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'bulk_register' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">대량등록</a>
                 <a href="/admin?tab=price_compare" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'price_compare' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">가격비교</a>
@@ -17629,17 +17847,19 @@ def admin_dashboard():
             <div class="bg-white rounded-[2rem] shadow-sm border border-gray-50 overflow-hidden text-left">
                 <table class="w-full text-left">
                     <thead class="bg-gray-50 border-b border-gray-100 text-gray-400 uppercase text-[10px] md:text-xs">
-                        <tr><th class="p-4 w-10"><input type="checkbox" id="product-select-all-2" class="rounded product-select-all-2" title="전체 선택"></th><th class="p-6">상품 기본 정보</th><th class="p-6 text-center">재고</th><th class="p-6 text-center">상태</th><th class="p-6 text-center">관리</th></tr>
+                        <tr><th class="p-4 w-10"><input type="checkbox" id="product-select-all-2" class="rounded product-select-all-2" title="전체 선택"></th><th class="p-6">상품 기본 정보</th><th class="p-4 text-right">가격</th><th class="p-4 text-right">인터넷 최저가</th><th class="p-4">규격</th><th class="p-6 text-center">재고</th><th class="p-6 text-center">상태</th><th class="p-6 text-center">관리</th></tr>
                     </thead>
                     <tbody class="text-left">
                         {% for p in products %}
                         <tr class="border-b border-gray-50 hover:bg-gray-50/50 transition {% if not p.is_active %}bg-gray-50/70{% endif %}">
                             <td class="p-4"><input type="checkbox" name="product_ids" value="{{ p.id }}" class="product-row-cb-2 rounded" form="products-bulk-form-2"></td>
                             <td class="p-6 text-left">
-                                <b class="text-gray-800 text-sm md:text-base">{{ p.name }}</b> <span class="text-orange-500 text-[9px] md:text-[10px] font-black ml-2">{{ p.badge }}</span><br>
-                                <span class="text-teal-600 font-bold text-[10px] md:text-xs">{{ p.description or '설명 없음' }}</span><br>
-                                <span class="text-gray-400 text-[10px] md:text-xs">{{ "{:,}".format(p.price) }}원 / {{ p.spec or '일반' }}</span>
+                                <a href="/product/{{ p.id }}" class="text-teal-600 hover:text-teal-700 font-bold text-sm md:text-base hover:underline">{{ p.name }}</a> <span class="text-orange-500 text-[9px] md:text-[10px] font-black ml-2">{{ p.badge }}</span><br>
+                                <span class="text-teal-600 font-bold text-[10px] md:text-xs">{{ p.description or '설명 없음' }}</span>
                             </td>
+                            <td class="p-4 text-right font-bold text-[11px] md:text-xs">{{ "{:,}".format(p.price) }}원</td>
+                            <td class="p-4 text-right text-[11px] md:text-xs">{% if p.naver_lowest_price %}{{ "{:,}".format(p.naver_lowest_price) }}원{% else %}-{% endif %}</td>
+                            <td class="p-4 text-[11px] md:text-xs text-gray-600">{{ p.spec or '-' }}</td>
                             <td class="p-6 text-center font-black text-gray-500">{{ p.stock }}개</td>
                             <td class="p-6 text-center">
                                 {% if p.is_active %}<span class="inline-block px-2.5 py-1 rounded-lg bg-teal-100 text-teal-700 text-[10px] font-black">판매중</span>{% else %}<span class="inline-block px-2.5 py-1 rounded-lg bg-gray-200 text-gray-600 text-[10px] font-black">판매종료</span>{% endif %}
@@ -18222,7 +18442,8 @@ def admin_product_bulk_upload():
             if not name_val or name_val.startswith('('):
                 continue
             name_val = name_val.strip().replace('\ufeff', '').strip()
-            name_val = _bulk_normalize_name(name_val)
+            if not name_val:
+                continue
             try:
                 price_val = int(float(row.get('가격', 0)))
             except (ValueError, TypeError):
