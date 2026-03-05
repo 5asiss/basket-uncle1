@@ -173,7 +173,7 @@ def register_admin_routes(app):
     # 수익통계 리포트 다운로드 (catch-all 전에 등록)
     admin_bp.add_url_rule('/admin/revenue_report/download', view_func=login_required(admin_revenue_report_download))
 
-    # product bulk (catch-all 전에 등록해야 404 방지)
+    # product bulk (대량등록) - 404 방지용으로 여기서 등록
     admin_bp.add_url_rule('/admin/product/bulk_upload_template', view_func=login_required(admin_product_bulk_upload_template))
     admin_bp.add_url_rule('/admin/product/bulk_upload_images', view_func=login_required(admin_bulk_upload_images), methods=['POST'])
     admin_bp.add_url_rule('/admin/product/upload_delete', view_func=login_required(admin_upload_delete), methods=['POST'])

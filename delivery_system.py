@@ -252,6 +252,7 @@ def logi_admin_login():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>B.UNCLE LOGI - 로그인</title>
+        <script>(function(){var w=window.console&&window.console.warn||function(){};window.console.warn=function(m){if(typeof m==='string'&&m.indexOf('cdn.tailwindcss.com')!==-1)return;return w.apply(window.console,arguments);};})();</script>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
     <body class="bg-slate-900 flex items-center justify-center min-h-screen min-h-[100dvh] p-4 sm:p-6 text-white safe-area-pb">
@@ -333,6 +334,7 @@ def logi_admin_dashboard():
     <head>
         <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>바구니삼촌 LOGI - 관제</title>
+        <script>(function(){var w=window.console&&window.console.warn||function(){};window.console.warn=function(m){if(typeof m==='string'&&m.indexOf('cdn.tailwindcss.com')!==-1)return;return w.apply(window.console,arguments);};})();</script>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
         <style>@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
@@ -746,7 +748,8 @@ def logi_driver_work():
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <title>기사 로그인 - B.UNCLE Logi</title>
-            <script src="https://cdn.tailwindcss.com"></script>
+            <script>(function(){var w=window.console&&window.console.warn||function(){};window.console.warn=function(m){if(typeof m==='string'&&m.indexOf('cdn.tailwindcss.com')!==-1)return;return w.apply(window.console,arguments);};})();</script>
+        <script src="https://cdn.tailwindcss.com"></script>
         </head>
         <body class="bg-[#0f172a] text-white flex items-center justify-center min-h-screen min-h-[100dvh] p-6 safe-area-pb text-center">
             <div class="w-full max-w-sm bg-[#1e293b] p-8 sm:p-12 rounded-[3rem] sm:rounded-[3.5rem] shadow-2xl border border-slate-700">
@@ -1455,6 +1458,7 @@ def logi_driver_mgmt():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>기사관리 - B.UNCLE Logi</title>
+        <script>(function(){var w=window.console&&window.console.warn||function(){};window.console.warn=function(m){if(typeof m==='string'&&m.indexOf('cdn.tailwindcss.com')!==-1)return;return w.apply(window.console,arguments);};})();</script>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -1586,6 +1590,7 @@ def logi_driver_payout_page():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>기사 배송료 지급 - B.UNCLE Logi</title>
+        <script>(function(){var w=window.console&&window.console.warn||function(){};window.console.warn=function(m){if(typeof m==='string'&&m.indexOf('cdn.tailwindcss.com')!==-1)return;return w.apply(window.console,arguments);};})();</script>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -1772,6 +1777,7 @@ def logi_admin_users_mgmt():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>ADMIN 설정 - B.UNCLE Logi</title>
+        <script>(function(){var w=window.console&&window.console.warn||function(){};window.console.warn=function(m){if(typeof m==='string'&&m.indexOf('cdn.tailwindcss.com')!==-1)return;return w.apply(window.console,arguments);};})();</script>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>
@@ -1825,6 +1831,7 @@ def logi_driver_path_map():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>배송지도 - B.UNCLE Logi</title>
+        <script>(function(){var w=window.console&&window.console.warn||function(){};window.console.warn=function(m){if(typeof m==='string'&&m.indexOf('cdn.tailwindcss.com')!==-1)return;return w.apply(window.console,arguments);};})();</script>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     </head>

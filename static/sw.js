@@ -35,6 +35,8 @@ self.addEventListener('fetch', function (event) {
     fetch(event.request)
       .then(function (res) {
         if (!res || !res.ok || res.type !== 'basic') return res;
+        var reqUrl = event.request.url;
+        if (reqUrl.indexOf('http://') !== 0 && reqUrl.indexOf('https://') !== 0) return res;
         var clone = res.clone();
         caches.open(CACHE_NAME).then(function (cache) {
           cache.put(event.request, clone);

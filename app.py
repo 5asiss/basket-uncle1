@@ -6805,6 +6805,8 @@ def api_category_products(cat_name):
             "naver_lowest_link": getattr(p, 'naver_lowest_link', None),
         })
     return jsonify(res_data)
+
+
 @app.route('/category/<string:cat_name>')
 def category_view(cat_name):
     """카테고리별 상품 목록 뷰 (무한 스크롤, 50개 단위, 스크롤 시 1초 대기 후 추가 로딩)"""
@@ -7284,10 +7286,12 @@ def product_detail(pid):
 
     # URL 처리: 서버(배포)는 Cloudinary URL, 로컬은 DB에 저장된 경로(/static/uploads/ 또는 상대경로) 사용.
     # 상대 경로는 절대 URL로 변환 (SITE_URL 또는 request.url_root 기준).
+    # 이미지 없을 때 사용할 기본 URL (placeholder.png 파일 없어도 항상 로드됨)
+    _default_placeholder_image_url = 'https://placehold.co/600x600/f1f5f9/94a3b8?text=상품'
     _base_url = (os.getenv('SITE_URL') or request.url_root or '').strip().rstrip('/')
     def _abs_url(url):
         if not url or not url.strip():
-            return _base_url + '/static/uploads/placeholder.png'
+            return _default_placeholder_image_url
         u = url.strip()
         if u.startswith('http://') or u.startswith('https://'):
             return u
@@ -8020,6 +8024,31 @@ def seller_info_page(cid):
         </div>
     </div>"""
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, cat=cat)
+
+
+@app.route('/category/<path:cat_path>')
+def category_view_path(cat_path):
+    """슬래시 포함 URL(예: /category/안주/별미) → 전체 경로가 카테고리명(안주/별미)이면 해당 뷰 표시.
+    전체 경로가 카테고리가 아니면 마지막 세그먼트가 등록된 카테고리명과 일치할 때만 리다이렉트. 없으면 404."""
+    if (cat_path or '').strip().startswith('seller/'):
+        abort(404)
+    raw = (cat_path or '').strip()
+    if not raw:
+        abort(404)
+    # 1) 경로 전체가 카테고리명인 경우 (예: "안주/별미")
+    cat = Category.query.filter_by(name=raw).first()
+    if cat:
+        return category_view(raw)
+    # 2) 마지막 세그먼트만 카테고리명인 경우 (예: 탑/수산/간식 → 간식)
+    parts = [p.strip() for p in raw.split('/') if p.strip()]
+    if not parts:
+        abort(404)
+    cat_name = parts[-1]
+    cat = Category.query.filter_by(name=cat_name).first()
+    if not cat:
+        abort(404)
+    return redirect(url_for('category_view', cat_name=cat_name), code=302)
+
 
 def _find_or_create_social_user(provider, provider_id, email, name):
     """소셜 로그인: provider+provider_id 또는 email로 회원 찾기, 없으면 생성. 반환: User"""
@@ -13470,7 +13499,7 @@ def admin_dashboard():
         {% if tab == 'bulk_register' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-teal-200 bg-teal-50/80 text-left">
                 <p class="font-black text-teal-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">📦</span> 상품 대량등록</p>
-                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 채운 뒤 <b>엑셀 파일(.xlsx/.xls)만</b> 업로드하세요. 이미지는 아래 <b>「이미지 올리기」</b>로 먼저 올리거나, 로컬 개발 시에만 <code class="bg-white px-1 rounded">static/uploads/</code>에 넣고, 엑셀의 대표이미지파일명·상세이미지파일명에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=_1, 상세=_2~_10. <span class="text-amber-700 font-bold">배포 서버에는 static/uploads/ 폴더가 없을 수 있으므로 이미지는 반드시 「이미지 올리기」로 올리세요.</span> 한 번에 이미지 30개·파일당 5MB, 엑셀 200건·10MB 이하로 올리면 서버가 안정적입니다.</p>
+                <p class="text-[11px] text-gray-700 mb-4">엑셀 양식을 다운받아 채운 뒤 <b>엑셀 파일(.xlsx/.xls)만</b> 업로드하세요. 이미지는 아래 <b>「이미지 올리기」</b>로 먼저 올리거나, 로컬 개발 시에만 <code class="bg-white px-1 rounded">static/uploads/</code>에 넣고, 엑셀의 대표이미지파일명·상세이미지파일명에는 <b>파일명만</b> 입력 (예: 간장오리주물럭300g1_moatur.jpg). 대표=품명+1, 상세=품명+2~100. <span class="text-amber-700 font-bold">배포 서버에는 static/uploads/ 폴더가 없을 수 있으므로 이미지는 반드시 「이미지 올리기」로 올리거나 Cloudinary에 두고 파일명만 입력하세요.</span> 한 번에 이미지 30개·파일당 5MB, 엑셀 200건·10MB 이하로 올리면 서버가 안정적입니다.</p>
                 <div class="flex flex-wrap items-center gap-3 mb-4">
                     <a href="/admin/product/bulk_upload_template" class="bg-white text-teal-600 border-2 border-teal-300 px-5 py-3 rounded-xl font-black text-xs shadow-sm hover:bg-teal-50 transition">📥 엑셀 업로드 양식 다운로드</a>
                 </div>
@@ -13495,11 +13524,11 @@ def admin_dashboard():
                 <div class="mt-5 p-5 bg-white/70 rounded-xl border border-teal-100 text-left text-[11px] text-gray-700 space-y-2">
                     <p class="font-black text-gray-800 mb-2">📋 이미지 사용 방법</p>
                     <p>· <b>방법 1</b>: 위 「이미지 올리기」에서 파일을 선택해 올리면 로컬에서는 <code class="bg-white px-1 rounded">static/uploads/</code>에 저장되고, Cloudinary 설정 시 Cloudinary에도 저장됩니다. 엑셀에는 저장된 <b>파일명 그대로</b> 입력하세요.</p>
-                    <p>· <b>방법 2</b>: 로컬/개발 PC의 <code class="bg-white px-1 rounded">static/uploads/</code> 폴더에 직접 이미지 파일을 넣은 경우에도, 엑셀의 대표이미지파일명·상세이미지파일명란에 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). <span class="text-amber-700 font-bold">배포 서버에는 이 폴더가 없거나 재시작 시 사라질 수 있으므로, 이미지는 반드시 「이미지 올리기」로 올리거나 Cloudinary를 사용하세요.</span></p>
-                    <p>· 대표=접미사 _1, 상세=_2~_10. 상세이미지파일명은 쉼표로 구분해 여러 개 입력 가능.</p>
+                    <p>· <b>방법 2</b>: 로컬/개발 PC의 <code class="bg-white px-1 rounded">static/uploads/</code> 폴더에 직접 이미지 파일을 넣은 경우에도, 엑셀의 대표이미지파일명·상세이미지파일명란에 <b>파일명만</b> 입력 (예: 간장오리주물럭300g1_moatur.jpg). <span class="text-amber-700 font-bold">배포 서버에는 이 폴더가 없거나 재시작 시 사라질 수 있으므로, 이미지는 반드시 「이미지 올리기」로 올리거나 Cloudinary를 사용하세요.</span></p>
+                    <p>· 대표=접미사 _1, 상세=_2~_100. 상세이미지파일명은 쉼표로 구분해 여러 개 입력 가능.</p>
                     <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼</p>
                     <p>· <b>필수</b>: 카테고리, 상품명, 가격. 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
-                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, 재고, 마감일시, <b>인터넷 최저가 (원, 선택)</b>, <b>인터넷 최저가 링크 (선택)</b>, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+_1, <b>상세이미지파일명</b>=품명+_2~_10 또는 쉼표 구분.</p>
+                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, 재고, 마감일시, <b>인터넷 최저가 (원, 선택)</b>, <b>인터넷 최저가 링크 (선택)</b>, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+1, <b>상세이미지파일명</b>=품명+2~100 또는 쉼표 구분. (Cloudinary에 올린 파일명만 넣어도 자동 해석)</p>
                 </div>
                 <div class="mt-5 p-5 bg-white rounded-xl border border-teal-200 text-left text-[11px]">
                     <p class="font-black text-teal-800 mb-2">🖼 이미지 대량 업로드 후 확인 방법</p>
@@ -13784,7 +13813,7 @@ def admin_dashboard():
                 <ul class="text-[11px] text-gray-700 space-y-1.5 mb-4">
                     <li><b>엑셀 대량 등록</b>: 아래 「엑셀 업로드」 버튼을 누르면 양식 다운로드와 업로드 창이 나옵니다.</li>
                     <li><b>양식 다운로드</b>: <a href="/admin/product/bulk_upload_template" class="text-blue-600 font-black underline hover:no-underline">📥 상품 엑셀 업로드 양식 다운로드</a></li>
-                    <li><b>필수 컬럼</b>: 카테고리, 상품명, 가격. 대표이미지파일명(품명+_1), 상세이미지파일명(품명+_2~_10) (첫 줄 헤더 이름 정확히)</li>
+                    <li><b>필수 컬럼</b>: 카테고리, 상품명, 가격. 대표이미지파일명(품명+1), 상세이미지파일명(품명+2~100) (첫 줄 헤더 이름 정확히)</li>
                     <li><b>이미지 폴더 위치</b>: 서버의 <code class="bg-white px-1.5 py-0.5 rounded border border-amber-200 font-mono text-[10px]">static/uploads/</code>에 이미지를 넣고 엑셀에는 <b>파일명만</b> 입력 (예: 상품명01_1.jpg)</li>
                     <li>카테고리는 먼저 「카테고리 설정」 탭에서 등록한 이름과 동일해야 합니다. 가격은 숫자만 입력하세요.</li>
                 </ul>
@@ -13801,8 +13830,8 @@ def admin_dashboard():
                 </form>
                 <div class="mt-5 p-5 bg-white/70 rounded-xl border border-blue-100 text-left text-[11px] text-gray-700 space-y-2">
                     <p class="font-black text-gray-800 mb-2">📋 업로드 양식 사용법 (상세)</p>
-                    <p>· <b>필수 컬럼</b>: 카테고리, 상품명, 가격. 대표이미지파일명(품명+_1), 상세이미지파일명(품명+_2~_10 또는 쉼표 구분). 헤더 이름 정확히 일치.</p>
-                    <p>· <b>이미지 파일</b>: <code class="bg-gray-100 px-1 rounded">static/uploads/</code>에 넣고 엑셀에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=접미사 _1, 상세=_2~_10.</p>
+                    <p>· <b>필수 컬럼</b>: 카테고리, 상품명, 가격. 대표이미지파일명(품명+1), 상세이미지파일명(품명+2~100 또는 쉼표 구분). 헤더 이름 정확히 일치.</p>
+                    <p>· <b>이미지 파일</b>: <code class="bg-gray-100 px-1 rounded">static/uploads/</code>에 넣고 엑셀에는 <b>파일명만</b> 입력 (예: 간장 오리주물럭 300g01_1.jpg). 대표=접미사 _1, 상세=_2~_100.</p>
                     <p>· 카테고리는 미리 「카테고리 설정」에서 등록된 이름과 동일해야 합니다. 가격은 숫자만 입력하세요.</p>
                 </div>
             </div>
@@ -18219,7 +18248,7 @@ def admin_dashboard():
 # --------------------------------------------------------------------------------
 @login_required
 def admin_product_bulk_upload_template():
-    """상품 엑셀 업로드용 양식 다운로드. 대표이미지: 품명+접미사_1, 상세이미지: 품명+접미사_2 ~ _10."""
+    """상품 엑셀 업로드용 양식 다운로드. 대표이미지: 품명+접미사_1, 상세이미지: 품명+접미사_2 ~ _100."""
     if not current_user.is_admin:
         return redirect('/')
     columns = [
@@ -18483,14 +18512,18 @@ def admin_product_bulk_upload():
             missing_main = None
             missing_details = []
 
-            # 1) 메인 이미지: 엑셀에 Cloudinary URL이 있으면 그대로 사용
+            # 1) 메인 이미지: 엑셀에 Cloudinary URL이 있으면 그대로 사용. 파일명만 있으면 URL로 해석
             main_img_raw = _cell_str(row.get('대표이미지파일명', '')) or _cell_str(row.get('이미지파일명', ''))
             main_img_raw = main_img_raw.strip() if main_img_raw else ""
             if main_img_raw and not _bulk_is_placeholder_image(main_img_raw):
                 if main_img_raw.startswith("http://") or main_img_raw.startswith("https://"):
                     image_url = main_img_raw
+                else:
+                    fn_main = _bulk_image_filename_only(main_img_raw)
+                    if fn_main:
+                        image_url = _bulk_resolve_image_url(upload_dir, fn_main) or _bulk_resolve_cloudinary_url_from_filename(fn_main) or ""
 
-            # 2) 상세 이미지: 엑셀에 Cloudinary URL 목록이 있으면 그대로 사용
+            # 2) 상세 이미지: 엑셀에 Cloudinary URL 목록이 있으면 그대로 사용. 파일명만 있으면 URL로 해석
             detail_imgs_raw = _cell_str(row.get('상세이미지파일명', ''))
             detail_imgs_raw = detail_imgs_raw.strip() if detail_imgs_raw else ""
             if detail_imgs_raw and not _bulk_is_placeholder_image(detail_imgs_raw):
@@ -18499,10 +18532,16 @@ def admin_product_bulk_upload():
                     for p in detail_imgs_raw.split(',')
                     if p.strip() and not _bulk_is_placeholder_image(p.strip())
                 ]
-                detail_parts = [
-                    p for p in parts
-                    if p.startswith("http://") or p.startswith("https://")
-                ]
+                detail_parts = []
+                for p in parts:
+                    if p.startswith("http://") or p.startswith("https://"):
+                        detail_parts.append(p)
+                    else:
+                        fn_d = _bulk_image_filename_only(p)
+                        if fn_d:
+                            u = _bulk_resolve_image_url(upload_dir, fn_d) or _bulk_resolve_cloudinary_url_from_filename(fn_d)
+                            if u:
+                                detail_parts.append(u)
                 if detail_parts:
                     detail_image_url = ",".join(detail_parts)
 
@@ -18558,7 +18597,7 @@ def admin_product_bulk_upload():
                 lines.append(f"{name} ({'; '.join(parts)})")
             n = len(missing_images)
             flash(f"이미지가 없는 {n}건: {' | '.join(lines[:10])}{' ...' if len(lines) > 10 else ''}")
-            flash("→ 엑셀의 대표·상세이미지파일명 칸에 Cloudinary 이미지 URL을 직접 쓰거나, 칸을 비우면 상품명을 기준으로 Cloudinary에서 '상품명+번호' 형식 이미지를 자동 검색합니다. (예: 한입쏙삼겹살250g1..., 한입쏙삼겹살250g2...)")
+            flash("→ 엑셀의 대표·상세이미지파일명 칸에 Cloudinary 이미지 URL을 직접 쓰거나, 파일명만 넣으면 Cloudinary에서 자동 해석합니다. 칸을 비우면 상품명 기준 '상품명+1'(대표), '상품명+2~100'(상세) 형식 이미지를 자동 검색합니다. (예: 한입쏙삼겹살250g1..., 한입쏙삼겹살250g2...)")
         return redirect('/admin?tab=bulk_register')
     except Exception as e:
         db.session.rollback()
@@ -18593,7 +18632,7 @@ def _bulk_normalize_for_fuzzy_match(s):
 
 def _bulk_cloudinary_find_images_by_product_name(product_name):
     """Cloudinary 업로드 폴더(res.cloudinary.com/.../image/upload)에서 상품명으로 이미지 검색.
-    public_id 형식: 상품명+숫자 (예: 한입쏙삼겹살250g9_jvcms5) → 1=메인, 2~10=상세 순서.
+    public_id 형식: 상품명+숫자 (예: 한입쏙삼겹살250g9_jvcms5) → 1=메인, 2~100=상세 순서.
     반환: (main_url 또는 None, [detail_url2, detail_url3, ...])"""
     if not product_name or not cloudinary_url:
         return (None, [])
@@ -18626,30 +18665,52 @@ def _bulk_cloudinary_find_images_by_product_name(product_name):
                             continue
                     else:
                         num = int(m.group(1))
-                    if 1 <= num <= 10 and num not in collected:
+                    if 1 <= num <= 100 and num not in collected:
                         collected[num] = url
                 next_cursor = res.get("next_cursor")
                 if not next_cursor:
                     break
         main_url = collected.get(1)
-        detail_list = [collected[i] for i in range(2, 11) if i in collected]
+        detail_list = [collected[i] for i in range(2, 101) if i in collected]
         return (main_url, detail_list)
     except Exception:
         return (None, [])
 
 
+def _bulk_resolve_cloudinary_url_from_filename(filename):
+    """엑셀에 Cloudinary 쪽 파일명만 적혀 있을 때(예: 간장오리주물럭300g1_moatur.jpg) secure_url 반환.
+    public_id = 확장자 제거한 파일명. API로 조회해 URL 반환, 실패 시 None."""
+    if not filename or not cloudinary_url:
+        return None
+    fn = _bulk_image_filename_only(filename)
+    if not fn:
+        return None
+    public_id = os.path.splitext(fn)[0].strip()
+    if not public_id:
+        return None
+    try:
+        res = cloudinary.api.resource(public_id)
+        return res.get("secure_url") or res.get("url")
+    except Exception:
+        return None
+
+
 def _bulk_is_placeholder_image(s):
-    """엑셀 양식 placeholder(파일명.jpg 등)이면 True. 실제 파일명만 URL에 쓰기 위해."""
+    """엑셀 양식 placeholder(파일명.jpg 등)이면 True. 실제 파일명만 URL에 쓰기 위해.
+    placehold.co 등 외부 이미지 URL은 placeholder가 아니므로 False."""
     if not s or not isinstance(s, str):
         return True
-    t = s.strip().lower()
+    t = s.strip()
     if not t:
         return True
-    if t.startswith('(') and ')' in t:
+    if (t.startswith('http://') or t.startswith('https://')) and 'placehold.co' in t:
+        return False
+    t_lower = t.lower()
+    if t_lower.startswith('(') and ')' in t_lower:
         return True
-    if '파일명' in t or 'file' in t and 'example' in t:
+    if '파일명' in t_lower or ('file' in t_lower and 'example' in t_lower):
         return True
-    if t in ('(파일명.jpg)', '(파일명)', '파일명.jpg', '파일명', '(a.jpg,b.jpg)', '(예: apple.jpg)'):
+    if t_lower in ('(파일명.jpg)', '(파일명)', '파일명.jpg', '파일명', '(a.jpg,b.jpg)', '(예: apple.jpg)'):
         return True
     return False
 
