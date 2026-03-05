@@ -465,6 +465,23 @@ login_manager.login_view = 'login'
 login_manager.init_app(app)
 
 
+def _login_redirect_target(next_url):
+    """로그인 후 리다이렉트할 URL. POST 전용(cart add/minus 등)이면 GET 가능한 안전한 URL로 변환."""
+    if not next_url or not isinstance(next_url, str):
+        return '/'
+    n = next_url.strip().split('?')[0].split('#')[0]
+    if not n.startswith('/') or n.startswith('//'):
+        return '/'
+    # /cart/add/<pid> → 상품 페이지로 (다시 담기 가능)
+    m = re.match(r'^/cart/add/(\d+)$', n)
+    if m:
+        return '/product/' + m.group(1)
+    # 그 외 cart 관련 POST 전용 → 장바구니
+    if re.match(r'^/cart/(minus|delete|clear)', n):
+        return '/cart'
+    return next_url
+
+
 @app.errorhandler(500)
 def internal_error(e):
     """500 발생 시 콘솔에 traceback 출력 (원인 파악용)."""
@@ -3767,30 +3784,29 @@ def index():
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
     main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
     all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
-    main_categories = all_categories[:main_cat_count]
     grouped_products = {}
-    # 판매 중인 상품만: 마감 전 + 재고 있음
-    available_filter = and_(
-        or_(Product.deadline.is_(None), Product.deadline > now),
-        or_(Product.stock.is_(None), Product.stock > 0)
+    # 상품 노출 유지(판매종료·마감 상품도 표시). 정렬: 판매중 먼저, 마감된 상품 제일 뒤
+    is_sellable = and_(
+        or_(Product.stock.is_(None), Product.stock > 0),
+        or_(Product.deadline.is_(None), Product.deadline > now)
     )
-    order_logic = Product.id.desc()
 
-    latest_all = Product.query.filter_by(is_active=True).filter(available_filter).order_by(Product.id.desc()).limit(latest_count * 2).all()
+    latest_all = Product.query.filter_by(is_active=True).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
     random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
 
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = now.replace(hour=23, minute=59, second=59)
-    # 남은 시간 짧은 순 = 마감일 가까운 순 (deadline 오름차순)
+    # 오늘 마감인 상품 전부(이미 마감된 것 포함). 판매중 먼저, 마감된 건 제일 뒤
     closing_today = Product.query.filter(
         Product.is_active == True,
-        Product.deadline > now,
-        Product.deadline <= today_end,
-        or_(Product.stock.is_(None), Product.stock > 0)
-    ).order_by(Product.deadline.asc()).limit(closing_count).all()
+        Product.deadline >= today_start,
+        Product.deadline <= today_end
+    ).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
 
-    for cat in main_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).filter(available_filter).order_by(Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
-        if prods: grouped_products[cat] = prods
+    for cat in all_categories:
+        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
+        if prods:
+            grouped_products[cat] = prods
 
     latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
     all_pids = set()
@@ -3841,7 +3857,7 @@ def index():
         down_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'down').group_by(DeliveryRequestVote.delivery_request_id).all())
         main_delivery_votes = {did: (up_d.get(did, 0), down_d.get(did, 0)) for did in d_ids}
 
-    has_more_categories = len(all_categories) > main_cat_count
+    has_more_categories = len(all_categories) > len(grouped_products)
     total_categories_count = len(all_categories)
 
     content = """
@@ -3963,6 +3979,26 @@ def index():
     transition: color 0.2s, border-color 0.2s;
 }
 .page-main .hero-link:hover { color: #fff; border-color: rgba(255,255,255,0.5); }
+/* 이벤트 카테고리 대문 영역 (상단 독보 노출, 남은시간·남은수량 크게) */
+.page-main .event-gate { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%); border: 3px solid #0d9488; border-radius: 1.5rem; padding: 1.5rem 1rem 2rem; margin-bottom: 2rem; box-shadow: 0 8px 32px rgba(13, 148, 136, 0.2); }
+.page-main .event-gate .event-gate-title { font-size: clamp(1.25rem, 3vw, 1.75rem); font-weight: 900; color: #134e4a; text-align: center; margin-bottom: 1rem; letter-spacing: -0.02em; }
+.page-main .event-gate .event-gate-title i { margin-right: 0.35rem; }
+.page-main .event-gate .event-cards { display: grid; grid-template-columns: repeat(1, 1fr); gap: 1.25rem; }
+@media (min-width: 640px) { .page-main .event-gate .event-cards { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1024px) { .page-main .event-gate .event-cards { grid-template-columns: repeat(3, 1fr); gap: 1.5rem; } }
+.page-main .event-gate .event-card { position: relative; background: #fff; border-radius: 1.25rem; overflow: hidden; border: 2px solid #14b8a6; box-shadow: 0 4px 20px rgba(0,0,0,0.08); transition: transform 0.2s, box-shadow 0.25s; display: flex; flex-direction: column; }
+.page-main .event-gate .event-card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(13, 148, 136, 0.18); }
+.page-main .event-gate .event-card.sold-out { opacity: 0.75; }
+.page-main .event-gate .event-card > a { display: block; aspect-ratio: 1; overflow: hidden; flex-shrink: 0; }
+.page-main .event-gate .event-card img { width: 100%; height: 100%; object-fit: cover; }
+.page-main .event-gate .event-card .event-body { padding: 1rem 1.25rem 1.25rem; flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.page-main .event-gate .event-card .event-countdown { font-size: clamp(1rem, 2.2vw, 1.35rem); font-weight: 900; color: #dc2626; margin-bottom: 0.5rem; line-height: 1.3; }
+.page-main .event-gate .event-card .event-stock { font-size: clamp(0.95rem, 2vw, 1.2rem); font-weight: 800; color: #1e40af; margin-bottom: 0.5rem; }
+.page-main .event-gate .event-card .event-name { font-size: clamp(0.9rem, 1.5vw, 1.05rem); font-weight: 800; color: #1f2937; line-clamp: 2; -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 0.5rem; }
+.page-main .event-gate .event-card .event-price-row { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.page-main .event-gate .event-card .event-price { font-size: clamp(1rem, 1.8vw, 1.25rem); font-weight: 900; color: #b91c1c; }
+.page-main .event-gate .event-card .event-cta { min-width: 2.5rem; height: 2.5rem; border-radius: 0.75rem; background: #0d9488; color: #fff; border: none; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; cursor: pointer; transition: background 0.2s; }
+.page-main .event-gate .event-card .event-cta:hover { background: #0f766e; }
 .page-main #products {
     max-width: 1120px;
     margin: 0 auto;
@@ -4170,10 +4206,15 @@ def index():
 </div>
 
 <div id="products">
-    <!-- 카테고리 바로가기 (기능별/카테고리별) -->
+    <!-- 보기 방식 + 카테고리 -->
     <section class="mb-6">
-        <div class="flex justify-between items-end border-b border-slate-100 pb-2 mb-3">
+        <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-100 pb-2 mb-3">
             <h2 class="text-sm md:text-base font-semibold text-gray-900">카테고리</h2>
+            <div class="flex items-center gap-2 text-[11px] md:text-xs">
+                <span class="text-slate-500 font-medium">보기 방식</span>
+                <a href="/" class="px-3 py-1.5 rounded-lg bg-teal-100 text-teal-800 font-bold border border-teal-200">세로타입</a>
+                <a href="/horizontal" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-semibold border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition">가로타입</a>
+            </div>
         </div>
         <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2 md:gap-3">
             {% for cat, prods in grouped_products.items() %}
@@ -4200,6 +4241,36 @@ def index():
             {% endif %}
         </div>
     </section>
+
+    <!-- 이벤트 카테고리: 상단 대문 독보 노출, 남은시간·남은수량 크게 -->
+    {% for cat, products in grouped_products.items() %}
+    {% if cat.name == '이벤트' %}
+    <section class="event-gate" aria-label="이벤트">
+        <h2 class="event-gate-title"><i class="fas fa-bolt"></i> 이벤트</h2>
+        <div class="event-cards">
+            {% for p in products %}
+            {% set is_expired = (p.deadline and p.deadline < now) %}
+            <div class="event-card {% if is_expired or p.stock <= 0 %}sold-out{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-3 right-3 z-10 bg-gray-800 text-white text-sm px-3 py-1.5 rounded-lg font-black">판매마감</div>{% endif %}
+                <a href="/product/{{ p.id }}">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" alt="{{ p.name }}" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                </a>
+                <div class="event-body">
+                    <p class="event-countdown countdown-timer" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if p.deadline %}⏱ 마감까지 남은 시간{% else %}상시판매{% endif %}</p>
+                    <p class="event-stock">📦 남은 수량 {% if p.stock is not none %}{{ p.stock }}개{% else %}—{% endif %}</p>
+                    <h3 class="event-name">{{ p.name }}{% if p.badge %} | {{ p.badge }}{% endif %}</h3>
+                    <div class="event-price-row">
+                        <span class="event-price">{{ "{:,}".format(p.price) }}원</span>
+                        {% if not is_expired and p.stock > 0 %}<button type="button" onclick="addToCart('{{ p.id }}')" class="event-cta" aria-label="장바구니 담기"><i class="fas fa-plus"></i></button>{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="text-center mt-4"><a href="/category/이벤트" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 text-white font-black text-sm hover:bg-teal-700 transition">이벤트 전체보기 <i class="fas fa-chevron-right text-xs"></i></a></div>
+    </section>
+    {% endif %}
+    {% endfor %}
 
     {% if closing_today %}
     <section class="mb-10">
@@ -4318,6 +4389,7 @@ def index():
     {% endif %}
 
     {% for cat, products in grouped_products.items() %}
+    {% if cat.name != '이벤트' %}
     <section class="mb-10">
         <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4 gap-2 flex-wrap">
             <div class="min-w-0 flex-1"><h2 class="section-title bar-green"><span class="bar"></span> {{ cat.name }}</h2>{% if cat.description %}<p class="text-[10px] text-slate-400 font-bold mt-1">{{ cat.description }}</p>{% endif %}</div>
@@ -4373,6 +4445,7 @@ def index():
             {% endfor %}
         </div>
     </section>
+    {% endif %}
     {% endfor %}
 
     <!-- 게시판 인기글 (추천순, 각 4개) -->
@@ -4443,6 +4516,334 @@ def index():
                                   main_free_posts=main_free_posts,
                                   main_restaurant_votes=main_restaurant_votes,
                                   main_delivery_votes=main_delivery_votes)
+
+
+@app.route('/horizontal')
+def index_horizontal():
+    """메인 가로타입 보기: 카테고리·상품을 가로 스크롤로 표시."""
+    _record_page_view('main')
+    run_product_stock_reset()
+    now = now_kst()
+    grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
+    main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
+    all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
+    grouped_products = {}
+    # 상품 노출 유지(판매종료·마감 상품도 표시). 정렬: 판매중 먼저, 마감된 상품 제일 뒤
+    is_sellable = and_(
+        or_(Product.stock.is_(None), Product.stock > 0),
+        or_(Product.deadline.is_(None), Product.deadline > now)
+    )
+    latest_all = Product.query.filter_by(is_active=True).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
+    random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = now.replace(hour=23, minute=59, second=59)
+    closing_today = Product.query.filter(
+        Product.is_active == True,
+        Product.deadline >= today_start,
+        Product.deadline <= today_end
+    ).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
+    for cat in all_categories:
+        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
+        if prods:
+            grouped_products[cat] = prods
+    all_pids = set()
+    for p in random_latest:
+        all_pids.add(p.id)
+    for p in closing_today:
+        all_pids.add(p.id)
+    for prods in grouped_products.values():
+        for p in prods:
+            all_pids.add(p.id)
+    review_counts = {}
+    if all_pids:
+        review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
+    has_more_categories = len(all_categories) > len(grouped_products)
+    total_categories_count = len(all_categories)
+
+    content = """
+<style>
+.page-main-h { overflow-x: hidden; }
+.page-main-h .hero-wrap { background: linear-gradient(165deg, #0c1222 0%, #1a2744 35%, #0f172a 70%, #020617 100%); color: #f8fafc; padding: clamp(1.5rem, 4vw, 3rem) 1rem; min-height: 28vh; display: flex; align-items: center; }
+.page-main-h .hero-inner { max-width: 56rem; margin: 0 auto; text-align: center; }
+.page-main-h .scroll-row { display: flex; gap: 0.75rem 1rem; overflow-x: auto; padding: 0.5rem 0 1rem; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+.page-main-h .scroll-row::-webkit-scrollbar { height: 6px; }
+.page-main-h .scroll-row::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.page-main-h .scroll-row .card { flex: 0 0 auto; min-width: 140px; max-width: 160px; }
+.page-main-h .scroll-row .product-card { flex: 0 0 auto; min-width: 180px; width: 180px; }
+/* 세로화면(메인)과 동일한 상품카드 스타일 */
+.page-main-h .product-card { position: relative; border-radius: 0.75rem !important; border: 1px solid #e2e8f0 !important; background: #fff !important; box-shadow: none !important; transition: border-color 0.2s ease, box-shadow 0.2s ease !important; }
+.page-main-h .product-card:hover { border-color: #cbd5e1 !important; box-shadow: 0 2px 8px rgba(0,0,0,0.04) !important; }
+.page-main-h .product-card > a { display: block; width: 100%; aspect-ratio: 1/1; flex-shrink: 0; overflow: hidden; }
+.page-main-h .product-card a img { width: 100%; height: 100%; object-fit: cover; aspect-ratio: 1/1; }
+.page-main-h .product-card .price { font-weight: 700; color: #111827; letter-spacing: -0.02em; white-space: nowrap; }
+.page-main-h .product-card .add-btn { min-width: 2rem !important; height: 2rem !important; border-radius: 0.5rem !important; background: #0d9488 !important; color: #fff !important; border: none !important; box-shadow: none !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; transition: background-color 0.2s ease !important; }
+.page-main-h .product-card .add-btn:hover { background: #0f766e !important; }
+/* 가로타입 이벤트 대문 (가로 스크롤) */
+.page-main-h .event-gate { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%); border: 3px solid #0d9488; border-radius: 1.25rem; padding: 1.25rem 1rem 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 6px 24px rgba(13, 148, 136, 0.18); }
+.page-main-h .event-gate .event-gate-title { font-size: clamp(1.1rem, 2.5vw, 1.5rem); font-weight: 900; color: #134e4a; margin-bottom: 0.75rem; letter-spacing: -0.02em; }
+.page-main-h .event-gate .event-gate-title i { margin-right: 0.3rem; }
+.page-main-h .event-gate .event-cards { display: flex; gap: 1rem; overflow-x: auto; padding: 0.25rem 0 0.75rem; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+.page-main-h .event-gate .event-cards::-webkit-scrollbar { height: 6px; }
+.page-main-h .event-gate .event-cards::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+.page-main-h .event-gate .event-card { flex: 0 0 auto; width: 220px; max-width: 260px; position: relative; background: #fff; border-radius: 1rem; overflow: hidden; border: 2px solid #14b8a6; box-shadow: 0 4px 16px rgba(0,0,0,0.06); transition: transform 0.2s, box-shadow 0.2s; display: flex; flex-direction: column; }
+.page-main-h .event-gate .event-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(13, 148, 136, 0.15); }
+.page-main-h .event-gate .event-card.sold-out { opacity: 0.75; }
+.page-main-h .event-gate .event-card > a { display: block; aspect-ratio: 1; overflow: hidden; flex-shrink: 0; }
+.page-main-h .event-gate .event-card img { width: 100%; height: 100%; object-fit: cover; }
+.page-main-h .event-gate .event-card .event-body { padding: 0.75rem 1rem 1rem; flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.page-main-h .event-gate .event-card .event-countdown { font-size: clamp(0.85rem, 1.8vw, 1.1rem); font-weight: 900; color: #dc2626; margin-bottom: 0.35rem; line-height: 1.25; }
+.page-main-h .event-gate .event-card .event-stock { font-size: clamp(0.8rem, 1.6vw, 1rem); font-weight: 800; color: #1e40af; margin-bottom: 0.35rem; }
+.page-main-h .event-gate .event-card .event-name { font-size: clamp(0.8rem, 1.4vw, 0.95rem); font-weight: 800; color: #1f2937; line-clamp: 2; -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 0.35rem; }
+.page-main-h .event-gate .event-card .event-price-row { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.page-main-h .event-gate .event-card .event-price { font-size: clamp(0.9rem, 1.5vw, 1.1rem); font-weight: 900; color: #b91c1c; }
+.page-main-h .event-gate .event-card .event-cta { min-width: 2.25rem; height: 2.25rem; border-radius: 0.6rem; background: #0d9488; color: #fff; border: none; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; cursor: pointer; transition: background 0.2s; }
+.page-main-h .event-gate .event-card .event-cta:hover { background: #0f766e; }
+.page-main-h .event-gate .event-cta-link { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding: 0.5rem 1rem; border-radius: 0.75rem; background: #0d9488; color: #fff; font-weight: 800; font-size: 0.75rem; text-decoration: none; transition: background 0.2s; }
+.page-main-h .event-gate .event-cta-link:hover { background: #0f766e; color: #fff; }
+</style>
+<div class="page-main-h">
+<div class="hero-wrap">
+    <div class="hero-inner">
+        <span class="text-[11px] md:text-xs tracking-[.16em] uppercase text-slate-100 block mb-2">Bright Local Fresh Delivery</span>
+        <h1 class="text-xl md:text-2xl font-semibold text-white leading-snug mb-2">엄선된 제철 농산물, 당일 배송으로 전해드립니다.</h1>
+        <div class="flex justify-center gap-2 mt-4 text-xs">
+            <span class="text-slate-500 font-medium">보기 방식</span>
+            <a href="/" class="px-3 py-1.5 rounded-lg bg-slate-600/50 text-slate-300 font-semibold border border-slate-500 hover:bg-slate-500 hover:text-white transition">세로타입</a>
+            <a href="/horizontal" class="px-3 py-1.5 rounded-lg bg-teal-500/80 text-white font-bold border border-teal-400">가로타입</a>
+        </div>
+    </div>
+</div>
+
+<div id="products" class="max-w-[1120px] mx-auto px-4 py-6 md:py-8">
+    <section class="mb-6">
+        <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-100 pb-2 mb-3">
+            <h2 class="text-sm md:text-base font-semibold text-gray-900">카테고리</h2>
+            <div class="flex items-center gap-2 text-[11px] md:text-xs">
+                <span class="text-slate-500 font-medium">보기 방식</span>
+                <a href="/" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-semibold border border-slate-200 hover:bg-slate-200 transition">세로타입</a>
+                <a href="/horizontal" class="px-3 py-1.5 rounded-lg bg-teal-100 text-teal-800 font-bold border border-teal-200">가로타입</a>
+            </div>
+        </div>
+        <div class="scroll-row">
+            {% for cat, prods in grouped_products.items() %}
+            <a href="/category/{{ cat.name }}" class="card flex flex-col items-center justify-center p-4 rounded-xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-md transition-all text-center">
+                <span class="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-gray-600 text-lg mb-2"><i class="fas fa-th-large"></i></span>
+                <span class="text-xs font-medium text-slate-800 line-clamp-2">{{ cat.name }}</span>
+                <span class="text-[10px] text-slate-400 mt-0.5">{{ prods|length }}종</span>
+            </a>
+            {% endfor %}
+            <a href="/category/오늘마감" class="card flex flex-col items-center justify-center p-4 rounded-xl border border-slate-200 bg-slate-50 hover:border-teal-200 transition text-center">
+                <span class="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-lg mb-2"><i class="fas fa-clock"></i></span>
+                <span class="text-xs font-medium text-slate-800">오늘 마감</span>
+            </a>
+            <a href="/category/최신상품" class="card flex flex-col items-center justify-center p-4 rounded-xl border border-slate-200 bg-slate-50 hover:border-teal-200 transition text-center">
+                <span class="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-lg mb-2"><i class="fas fa-star"></i></span>
+                <span class="text-xs font-medium text-slate-800">최신 상품</span>
+            </a>
+            {% if has_more_categories %}
+            <a href="/categories" class="card flex flex-col items-center justify-center p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 hover:bg-slate-100 transition text-center min-w-[120px]">
+                <span class="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-lg mb-2"><i class="fas fa-th-list"></i></span>
+                <span class="text-xs font-medium text-slate-800">전체 ({{ total_categories_count }}개)</span>
+            </a>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- 이벤트 카테고리: 가로 스크롤 대문 -->
+    {% for cat, products in grouped_products.items() %}
+    {% if cat.name == '이벤트' %}
+    <section class="event-gate mb-6" aria-label="이벤트">
+        <h2 class="event-gate-title"><i class="fas fa-bolt"></i> 이벤트</h2>
+        <div class="event-cards">
+            {% for p in products %}
+            {% set is_expired = (p.deadline and p.deadline < now) %}
+            <div class="event-card {% if is_expired or p.stock <= 0 %}sold-out{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[10px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                <a href="/product/{{ p.id }}">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" alt="{{ p.name }}" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                </a>
+                <div class="event-body">
+                    <p class="event-countdown countdown-timer" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if p.deadline %}⏱ 마감까지 남은 시간{% else %}상시판매{% endif %}</p>
+                    <p class="event-stock">📦 남은 수량 {% if p.stock is not none %}{{ p.stock }}개{% else %}—{% endif %}</p>
+                    <h3 class="event-name">{{ p.name }}{% if p.badge %} | {{ p.badge }}{% endif %}</h3>
+                    <div class="event-price-row">
+                        <span class="event-price">{{ "{:,}".format(p.price) }}원</span>
+                        {% if not is_expired and p.stock > 0 %}<button type="button" onclick="addToCart('{{ p.id }}')" class="event-cta" aria-label="장바구니 담기"><i class="fas fa-plus"></i></button>{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="flex justify-end mt-2"><a href="/category/이벤트" class="event-cta-link">이벤트 전체보기 <i class="fas fa-chevron-right text-[10px]"></i></a></div>
+    </section>
+    {% endif %}
+    {% endfor %}
+
+    {% if closing_today %}
+    <section class="mb-8">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
+            <h2 class="text-sm font-semibold text-gray-900">오늘 마감 임박</h2>
+            <a href="/category/오늘마감" class="text-xs text-teal-600 font-bold">전체보기 <i class="fas fa-chevron-right"></i></a>
+        </div>
+        <div class="scroll-row">
+            {% for p in closing_today %}
+            {% set is_expired = (p.deadline and p.deadline < now) %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                {% if p.description %}
+                <div class="absolute top-2 left-0 z-20 flex flex-col items-start gap-1">
+                    <span class="inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 text-[8px] md:text-[10px] font-semibold text-white shadow-sm rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1 text-[9px] md:text-[11px]"></i> {{ p.description }}</span>
+                    {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                    {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                    <span class="mt-0.5 inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 rounded-full bg-rose-600 text-white text-[8px] md:text-[10px] font-semibold tracking-tight shadow-sm">할인 {{ discount }}%</span>
+                    {% endif %}
+                </div>
+                {% elif p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                <div class="absolute top-2 left-2 z-20">
+                    <span class="inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 rounded-full bg-rose-600 text-white text-[8px] md:text-[10px] font-semibold tracking-tight shadow-sm">할인 {{ discount }}%</span>
+                </div>
+                {% endif %}
+                <a href="/product/{{ p.id }}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                </a>
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
+                    <div class="mt-auto flex justify-between items-end gap-2">
+                        <div class="flex flex-col items-start">
+                            {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                            {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                            <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
+                            <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
+                            {% else %}
+                            <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(p.price) }}원</span>
+                            {% endif %}
+                        </div>
+                        {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{ p.id }}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if random_latest %}
+    <section class="mb-8">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
+            <h2 class="text-sm font-semibold text-gray-900">최신 상품</h2>
+            <a href="/category/최신상품" class="text-xs text-teal-600 font-bold">전체보기 <i class="fas fa-chevron-right"></i></a>
+        </div>
+        <div class="scroll-row">
+            {% for p in random_latest %}
+            {% set is_expired = (p.deadline and p.deadline < now) %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                {% if p.description %}
+                <div class="absolute top-2 left-0 z-20 flex flex-col items-start gap-1">
+                    <span class="inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 text-[8px] md:text-[10px] font-semibold text-white shadow-sm rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1 text-[9px] md:text-[11px]"></i> {{ p.description }}</span>
+                    {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                    {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                    <span class="mt-0.5 inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 rounded-full bg-slate-800/90 text-white text-[8px] md:text-[10px] font-semibold tracking-tight shadow-sm">할인 {{ discount }}%</span>
+                    {% endif %}
+                </div>
+                {% elif p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                <div class="absolute top-2 left-2 z-20">
+                    <span class="inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 rounded-full bg-slate-800/90 text-white text-[8px] md:text-[10px] font-semibold tracking-tight shadow-sm">할인 {{ discount }}%</span>
+                </div>
+                {% endif %}
+                <a href="/product/{{ p.id }}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                </a>
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
+                    <div class="mt-auto flex justify-between items-end gap-2">
+                        <div class="flex flex-col items-start">
+                            {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                            {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                            <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
+                            <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
+                            {% else %}
+                            <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(p.price) }}원</span>
+                            {% endif %}
+                        </div>
+                        {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{ p.id }}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% for cat, products in grouped_products.items() %}
+    {% if cat.name != '이벤트' %}
+    <section class="mb-8">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-2 mb-2">
+            <h2 class="text-sm font-semibold text-gray-900">{{ cat.name }}</h2>
+            <a href="/category/{{ cat.name }}" class="text-xs text-teal-600 font-bold">전체보기 <i class="fas fa-chevron-right"></i></a>
+        </div>
+        <div class="scroll-row">
+            {% for p in products %}
+            {% set is_expired = (p.deadline and p.deadline < now) %}
+            <div class="product-card flex flex-col overflow-hidden relative rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-lg transition-all {% if is_expired or p.stock <= 0 %}sold-out opacity-80{% endif %}">
+                {% if is_expired or p.stock <= 0 %}<div class="absolute top-2 right-2 z-10 bg-gray-800 text-white text-[9px] px-2 py-1 rounded-lg font-black">판매마감</div>{% endif %}
+                {% if p.description %}
+                <div class="absolute top-2 left-0 z-20 flex flex-col items-start gap-1">
+                    <span class="inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 text-[8px] md:text-[10px] font-semibold text-white shadow-sm rounded-r-full {% if '당일' in p.description %} bg-red-600 {% elif '+1' in p.description %} bg-blue-600 {% elif '+2' in p.description %} bg-emerald-600 {% else %} bg-slate-600 {% endif %}"><i class="fas fa-truck-fast mr-1 text-[9px] md:text-[11px]"></i> {{ p.description }}</span>
+                    {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                    {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                    <span class="mt-0.5 inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 rounded-full bg-slate-800/90 text-white text-[8px] md:text-[10px] font-semibold tracking-tight shadow-sm">할인 {{ discount }}%</span>
+                    {% endif %}
+                </div>
+                {% elif p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                <div class="absolute top-2 left-2 z-20">
+                    <span class="inline-flex items-center justify-center w-[72px] h-6 px-2 py-0.5 rounded-full bg-slate-800/90 text-white text-[8px] md:text-[10px] font-semibold tracking-tight shadow-sm">할인 {{ discount }}%</span>
+                </div>
+                {% endif %}
+                <a href="/product/{{ p.id }}" class="relative aspect-square block bg-slate-50 overflow-hidden">
+                    <img src="{{ cloudinary_thumbnail_url(p.image_url) or p.image_url or 'https://placehold.co/400x400/f1f5f9/64748b?text=상품' }}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://placehold.co/400x400/f1f5f9/64748b?text=상품'">
+                </a>
+                <div class="p-3 md:p-4 flex flex-col flex-1 min-w-0">
+                    <p class="countdown-timer text-[8px] md:text-[10px] font-bold text-red-500 mb-0.5" data-deadline="{{ (p.deadline.strftime('%Y-%m-%dT%H:%M:%S') + '+09:00') if p.deadline else '' }}">{% if not p.deadline %}상시판매{% endif %}</p>
+                    <h3 class="font-black text-slate-800 text-[11px] md:text-sm mb-0.5 line-clamp-2 break-words">{{ p.name }}{% if p.badge %} <span class="text-[9px] text-orange-500 font-bold">| {{ p.badge }}</span>{% endif %}</h3>
+                    <p class="text-[9px] text-slate-400 font-bold mb-1">{{ p.spec or '일반' }}{% if p.stock is not none %} · 잔여 {{ p.stock }}개{% endif %}</p>
+                    <div class="mt-auto flex justify-between items-end gap-2">
+                        <div class="flex flex-col items-start">
+                            {% if p.naver_lowest_price and p.naver_lowest_price > p.price %}
+                            {% set discount = ((p.naver_lowest_price - p.price) * 100) // p.naver_lowest_price %}
+                            <span class="text-[11px] md:text-sm text-slate-500 line-through">{{ "{:,}".format(p.naver_lowest_price) }}원</span>
+                            <span class="price text-[15px] md:text-xl font-bold text-rose-600">{{ "{:,}".format(p.price) }}원</span>
+                            {% else %}
+                            <span class="price text-[12px] md:text-lg font-semibold text-slate-800">{{ "{:,}".format(p.price) }}원</span>
+                            {% endif %}
+                        </div>
+                        {% if not is_expired and p.stock > 0 %}<button onclick="addToCart('{{ p.id }}')" class="add-btn shrink-0"><i class="fas fa-plus text-[10px] md:text-base"></i></button>{% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+    {% endfor %}
+</div>
+</div>
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML,
+                                  grouped_products=grouped_products,
+                                  random_latest=random_latest,
+                                  closing_today=closing_today,
+                                  now=now,
+                                  has_more_categories=has_more_categories,
+                                  total_categories_count=total_categories_count)
+
 
 # --- 상단 HEADER_HTML 내의 검색창 부분도 아래와 같이 반드시 수정되어야 합니다 ---
 # (HEADER_HTML 변수를 찾아서 해당 부분의 action="/"을 action="/search"로 바꾸세요)
@@ -6770,21 +7171,23 @@ def board_comment_add():
 # [추가] 무한 스크롤을 위한 상품 데이터 제공 API
 @app.route('/api/category_products/<string:cat_name>')
 def api_category_products(cat_name):
-    """무한 스크롤용 데이터 제공 API (50개 단위)"""
+    """무한 스크롤용 데이터 제공 API (50개 단위). 마감된 상품도 노출, 제일 뒤에 정렬."""
     page = int(request.args.get('page', 1))
     per_page = 50
     offset = (page - 1) * per_page
-    
+    now = now_kst()
+    order_logic = (Product.stock <= 0) | (Product.deadline < now)
+
     query = Product.query.filter_by(is_active=True)
     if cat_name == '최신상품':
-        query = query.order_by(Product.id.desc())
+        query = query.order_by(order_logic, Product.id.desc())
     elif cat_name == '오늘마감':
-        today_end = now_kst().replace(hour=23, minute=59, second=59)
-        # 남은 시간 짧은 순
-        query = query.filter(Product.deadline > now_kst(), Product.deadline <= today_end).order_by(Product.deadline.asc())
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now.replace(hour=23, minute=59, second=59)
+        query = query.filter(Product.deadline >= today_start, Product.deadline <= today_end).order_by((Product.deadline > now).desc(), Product.deadline.asc())
     else:
-        query = query.filter_by(category=cat_name).order_by(Product.id.desc())
-    
+        query = query.filter_by(category=cat_name).order_by(order_logic, Product.id.desc())
+
     products = query.offset(offset).limit(per_page).all()
     
     res_data = []
@@ -6814,18 +7217,20 @@ def category_view(cat_name):
     order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
     cat = None
     limit_num = 50
-    
+
     if cat_name == '최신상품':
-        products = Product.query.filter_by(is_active=True).order_by(Product.id.desc()).limit(limit_num).all()
+        # 판매중 먼저, 마감된 상품 제일 뒤
+        products = Product.query.filter_by(is_active=True).order_by(order_logic, Product.id.desc()).limit(limit_num).all()
         display_name = "✨ 최신 상품"
     elif cat_name == '오늘마감':
         today_end = now_kst().replace(hour=23, minute=59, second=59)
-        # 남은 시간 짧은 순 = deadline 오름차순
+        today_start = now_kst().replace(hour=0, minute=0, second=0, microsecond=0)
+        # 오늘 마감인 상품 전부(이미 마감된 것 포함). 판매중 먼저, 마감된 건 제일 뒤
         products = Product.query.filter(
             Product.is_active == True,
-            Product.deadline > now_kst(),
+            Product.deadline >= today_start,
             Product.deadline <= today_end
-        ).order_by(Product.deadline.asc()).limit(limit_num).all()
+        ).order_by((Product.deadline > now_kst()).desc(), Product.deadline.asc()).limit(limit_num).all()
         display_name = "🔥 오늘 마감 임박!"
     else:
         cat = Category.query.filter_by(name=cat_name).first_or_404()
@@ -8103,7 +8508,7 @@ def auth_naver():
     redirect_uri = _oauth_redirect_base() + '/auth/naver/callback'
     state = os.urandom(16).hex()
     session['oauth_state'] = state
-    session['oauth_next'] = request.args.get('next') or '/'
+    session['oauth_next'] = _login_redirect_target(request.args.get('next') or '/')
     url = (
         'https://nid.naver.com/oauth2.0/authorize'
         '?response_type=code&client_id={}&redirect_uri={}&state={}'
@@ -8188,7 +8593,7 @@ def auth_google():
     redirect_uri = _oauth_redirect_base() + '/auth/google/callback'
     state = os.urandom(16).hex()
     session['oauth_state'] = state
-    session['oauth_next'] = request.args.get('next') or '/'
+    session['oauth_next'] = _login_redirect_target(request.args.get('next') or '/')
     scope = requests.utils.quote('openid email profile')
     url = (
         'https://accounts.google.com/o/oauth2/v2/auth'
@@ -8269,7 +8674,7 @@ def auth_kakao():
     redirect_uri = _oauth_redirect_base() + '/auth/kakao/callback'
     state = os.urandom(16).hex()
     session['oauth_state'] = state
-    session['oauth_next'] = request.args.get('next') or '/'
+    session['oauth_next'] = _login_redirect_target(request.args.get('next') or '/')
     url = (
         'https://kauth.kakao.com/oauth/authorize'
         '?client_id={}&redirect_uri={}&response_type=code&state={}'
@@ -8427,7 +8832,7 @@ def login():
             session.permanent = True
             login_user(user)
             flash("로그인되었습니다.")
-            resp = redirect(request.args.get('next') or '/')
+            resp = redirect(_login_redirect_target(request.args.get('next') or '/'))
             resp.set_cookie('last_login_method', 'email', max_age=365*24*3600, samesite='Lax')
             return resp
         flash("로그인 정보를 다시 한 번 확인해주세요.")
