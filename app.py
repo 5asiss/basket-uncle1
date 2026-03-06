@@ -55,6 +55,26 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = db_delivery
 db.init_app(app)
 
+
+def _ensure_product_display_start_column():
+    """운영 DB에 product.display_start_at 컬럼이 없으면 자동으로 추가."""
+    try:
+        insp = inspect(db.engine)
+        cols = [c["name"] for c in insp.get_columns("product")]
+        if "display_start_at" in cols:
+            return
+        # PostgreSQL·SQLite 모두에서 동작 가능한 ADD COLUMN (존재 여부는 위에서 검사)
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE product ADD COLUMN display_start_at TIMESTAMP NULL"))
+        print("[DB MIGRATION] product.display_start_at 컬럼을 자동으로 추가했습니다.", flush=True)
+    except Exception as e:
+        # 컬럼 존재/권한 문제 등은 서비스에는 영향 없도록 로깅만
+        print(f"[DB MIGRATION] product.display_start_at 컬럼 점검/추가 중 오류: {e!r}", flush=True)
+
+
+with app.app_context():
+    _ensure_product_display_start_column()
+
 # 3. 배송 관리 시스템 Blueprint 등록 (주소 접두어 /logi 적용됨)
 app.register_blueprint(logi_bp)
 
