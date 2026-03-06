@@ -2094,6 +2094,13 @@ HEADER_HTML = """
                     </a>
                 </div>
 
+                <form action="/search" method="GET" class="hidden md:block flex-1 max-w-xs min-w-0 mx-4">
+                    <div class="relative">
+                        <input name="q" placeholder="상품 검색" class="w-full bg-stone-50 py-2.5 pl-4 pr-10 rounded-xl text-sm font-medium text-stone-800 placeholder-stone-400 border border-stone-100 focus:border-teal-200 focus:ring-2 focus:ring-teal-500/10 outline-none transition">
+                        <button type="submit" class="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg text-stone-400 hover:text-teal-600 hover:bg-teal-50 flex items-center justify-center transition" aria-label="검색"><i class="fas fa-search text-sm"></i></button>
+                    </div>
+                </form>
+
                 <div class="flex items-center gap-2 md:gap-4 flex-1 justify-end max-w-md">
                     {% if current_user.is_authenticated %}
                         <a href="/mypage/points" class="touch-target hidden md:flex items-center gap-1.5 text-stone-500 hover:text-teal-600 text-xs font-bold py-2.5 px-3 rounded-xl hover:bg-stone-50 transition">
@@ -3536,9 +3543,10 @@ def admin_order_print():
 def inject_globals():
     """전역 템플릿 변수 주입 (예외 시 기본값 반환하여 로그인/회원가입 등 모든 페이지 진입 가능)"""
     try:
-        # 비회원(미인증)이면 DB 조회 없이 기본값만 반환 → /register 등에서 에러 방지
+        # 비회원(미인증)이면 장바구니/메시지 수 없음, 카테고리는 등급 1 기준으로 표시 (좌측 메뉴·검색바용)
         if not getattr(current_user, 'is_authenticated', False):
-            return dict(cart_count=0, unread_message_count=0, now=now_kst(), managers=[], nav_categories=[])
+            nav_categories = categories_for_member_grade(1).all()
+            return dict(cart_count=0, unread_message_count=0, now=now_kst(), managers=[], nav_categories=nav_categories)
         cart_count = 0
         unread_message_count = 0
         grade = getattr(current_user, 'member_grade', 1) or 1
@@ -3566,7 +3574,9 @@ def api_search():
         return jsonify([])
     offset = int(request.args.get('offset', 0))
     limit = min(int(request.args.get('limit', 50)), 100)
-    query = Product.query.filter(Product.is_active == True, Product.name.contains(q)).order_by(Product.id.desc())
+    now = now_kst()
+    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
+    query = Product.query.filter(Product.is_active == True, Product.name.contains(q)).filter(displayable).order_by(Product.id.desc())
     products = query.offset(offset).limit(limit).all()
     return jsonify([{
         "id": p.id,
@@ -3593,14 +3603,16 @@ def search_view():
     if not query:
         return redirect(url_for('index'))
 
-    base_query = Product.query.filter(Product.is_active == True, Product.name.contains(query)).order_by(Product.id.desc())
+    now = now_kst()
+    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
+    base_query = Product.query.filter(Product.is_active == True, Product.name.contains(query)).filter(displayable).order_by(Product.id.desc())
     total_count = base_query.count()
     search_products = base_query.limit(50).all()
     search_has_more = total_count > 50
 
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
     recommend_cats = categories_for_member_grade(grade).limit(3).all()
-    cat_previews = {cat: Product.query.filter_by(category=cat.name, is_active=True).limit(4).all() for cat in recommend_cats}
+    cat_previews = {cat: Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).limit(4).all() for cat in recommend_cats}
 
     content = """
     <div class="max-w-7xl mx-auto px-4 md:px-6 py-12 md:py-20 text-left">
@@ -3773,7 +3785,7 @@ def search_view():
     </script>
     {% endif %}
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, query=query, search_products=search_products, total_count=total_count, search_has_more=search_has_more, cat_previews=cat_previews, recommend_cats=recommend_cats, now=now_kst())
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, query=query, search_products=search_products, total_count=total_count, search_has_more=search_has_more, cat_previews=cat_previews, recommend_cats=recommend_cats, now=now)
 
 @app.route('/')
 def index():
@@ -3790,8 +3802,9 @@ def index():
         or_(Product.stock.is_(None), Product.stock > 0),
         or_(Product.deadline.is_(None), Product.deadline > now)
     )
+    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
 
-    latest_all = Product.query.filter_by(is_active=True).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
+    latest_all = Product.query.filter_by(is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
     random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
 
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -3801,10 +3814,10 @@ def index():
         Product.is_active == True,
         Product.deadline >= today_start,
         Product.deadline <= today_end
-    ).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
+    ).filter(displayable).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
 
     for cat in all_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
+        prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
         if prods:
             grouped_products[cat] = prods
 
@@ -3857,7 +3870,7 @@ def index():
         down_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'down').group_by(DeliveryRequestVote.delivery_request_id).all())
         main_delivery_votes = {did: (up_d.get(did, 0), down_d.get(did, 0)) for did in d_ids}
 
-    has_more_categories = len(all_categories) > len(grouped_products)
+    has_more_categories = False
     total_categories_count = len(all_categories)
 
     content = """
@@ -4217,11 +4230,11 @@ def index():
             </div>
         </div>
         <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-2 md:gap-3">
-            {% for cat, prods in grouped_products.items() %}
+            {% for cat in all_categories %}
             <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-slate-100 bg-white hover:border-gray-900 hover:border-opacity-20 hover:shadow-sm active:scale-[0.99] transition-all text-center touch-manipulation">
                 <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-gray-50 flex items-center justify-center text-gray-600 text-base md:text-lg mb-1.5"><i class="fas fa-th-large"></i></span>
                 <span class="text-[10px] md:text-xs font-medium text-slate-800 leading-tight line-clamp-2">{{ cat.name }}</span>
-                <span class="text-[9px] text-slate-400 font-normal mt-0.5">{{ prods|length }}종</span>
+                <span class="text-[9px] text-slate-400 font-normal mt-0.5">{% set prods = grouped_products.get(cat) or [] %}{{ prods|length }}종</span>
             </a>
             {% endfor %}
             <a href="/category/오늘마감" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-slate-200 bg-slate-50 hover:border-gray-900 hover:border-opacity-20 hover:bg-slate-100 active:scale-[0.99] transition-all text-center touch-manipulation">
@@ -4232,13 +4245,6 @@ def index():
                 <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-base md:text-lg mb-1.5"><i class="fas fa-star"></i></span>
                 <span class="text-[10px] md:text-xs font-medium text-slate-800">최신 상품</span>
             </a>
-            {% if has_more_categories %}
-            <a href="/categories" class="flex flex-col items-center justify-center min-h-[88px] md:min-h-0 p-3 md:p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 hover:border-gray-900 hover:border-opacity-20 hover:bg-slate-100 active:scale-[0.99] transition-all text-center col-span-2 sm:col-span-2 md:col-span-2 touch-manipulation">
-                <span class="w-9 h-9 md:w-10 md:h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-base md:text-lg mb-1.5"><i class="fas fa-th-list"></i></span>
-                <span class="text-[10px] md:text-xs font-medium text-slate-800">카테고리 전체보기</span>
-                <span class="text-[9px] text-slate-400 font-normal mt-0.5">총 {{ total_categories_count }}개</span>
-            </a>
-            {% endif %}
         </div>
     </section>
 
@@ -4502,14 +4508,15 @@ def index():
 </div>
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, 
-                                  grouped_products=grouped_products, 
-                                  random_latest=random_latest, 
-                                  closing_today=closing_today, 
+                                  grouped_products=grouped_products,
+                                  random_latest=random_latest,
+                                  closing_today=closing_today,
                                   latest_reviews=latest_reviews,
                                   review_counts=review_counts,
                                   now=now,
                                   has_more_categories=has_more_categories,
                                   total_categories_count=total_categories_count,
+                                  all_categories=all_categories,
                                   main_restaurant_posts=main_restaurant_posts,
                                   main_delivery_posts=main_delivery_posts,
                                   main_partnership_posts=main_partnership_posts,
@@ -4533,7 +4540,8 @@ def index_horizontal():
         or_(Product.stock.is_(None), Product.stock > 0),
         or_(Product.deadline.is_(None), Product.deadline > now)
     )
-    latest_all = Product.query.filter_by(is_active=True).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
+    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
+    latest_all = Product.query.filter_by(is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
     random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = now.replace(hour=23, minute=59, second=59)
@@ -4541,9 +4549,9 @@ def index_horizontal():
         Product.is_active == True,
         Product.deadline >= today_start,
         Product.deadline <= today_end
-    ).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
+    ).filter(displayable).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
     for cat in all_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
+        prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
         if prods:
             grouped_products[cat] = prods
     all_pids = set()
@@ -4557,7 +4565,7 @@ def index_horizontal():
     review_counts = {}
     if all_pids:
         review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
-    has_more_categories = len(all_categories) > len(grouped_products)
+    has_more_categories = False
     total_categories_count = len(all_categories)
 
     content = """
@@ -4565,9 +4573,15 @@ def index_horizontal():
 .page-main-h { overflow-x: hidden; }
 .page-main-h .hero-wrap { background: linear-gradient(165deg, #0c1222 0%, #1a2744 35%, #0f172a 70%, #020617 100%); color: #f8fafc; padding: clamp(1.5rem, 4vw, 3rem) 1rem; min-height: 28vh; display: flex; align-items: center; }
 .page-main-h .hero-inner { max-width: 56rem; margin: 0 auto; text-align: center; }
-.page-main-h .scroll-row { display: flex; gap: 0.75rem 1rem; overflow-x: auto; padding: 0.5rem 0 1rem; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
-.page-main-h .scroll-row::-webkit-scrollbar { height: 6px; }
-.page-main-h .scroll-row::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+/* 가로 스크롤: 스크롤바 숨김 + 좌우 화살표를 상품 영역 위에 투명 오버레이 */
+.page-main-h .scroll-wrap { position: relative; }
+.page-main-h .scroll-wrap .scroll-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 10; width: 2.25rem; height: 2.25rem; border-radius: 50%; background: rgba(255,255,255,0.55); border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 2px 12px rgba(0,0,0,0.06); color: #475569; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s, color 0.2s, box-shadow 0.2s; font-size: 0.7rem; }
+.page-main-h .scroll-wrap .scroll-arrow.scroll-arrow-prev { left: 0.25rem; }
+.page-main-h .scroll-wrap .scroll-arrow.scroll-arrow-next { left: auto; right: 0.25rem; }
+.page-main-h .scroll-wrap .scroll-arrow:hover { background: rgba(13,148,136,0.95); color: #fff; border-color: transparent; box-shadow: 0 4px 16px rgba(13,148,136,0.35); }
+.page-main-h .scroll-wrap .scroll-arrow:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+.page-main-h .scroll-row { display: flex; gap: 0.75rem 1rem; overflow-x: auto; padding: 0.5rem 0 1rem; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; scroll-behavior: smooth; }
+.page-main-h .scroll-row::-webkit-scrollbar { display: none; }
 .page-main-h .scroll-row .card { flex: 0 0 auto; min-width: 140px; max-width: 160px; }
 .page-main-h .scroll-row .product-card { flex: 0 0 auto; min-width: 180px; width: 180px; }
 /* 세로화면(메인)과 동일한 상품카드 스타일 */
@@ -4582,9 +4596,14 @@ def index_horizontal():
 .page-main-h .event-gate { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%); border: 3px solid #0d9488; border-radius: 1.25rem; padding: 1.25rem 1rem 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 6px 24px rgba(13, 148, 136, 0.18); }
 .page-main-h .event-gate .event-gate-title { font-size: clamp(1.1rem, 2.5vw, 1.5rem); font-weight: 900; color: #134e4a; margin-bottom: 0.75rem; letter-spacing: -0.02em; }
 .page-main-h .event-gate .event-gate-title i { margin-right: 0.3rem; }
-.page-main-h .event-gate .event-cards { display: flex; gap: 1rem; overflow-x: auto; padding: 0.25rem 0 0.75rem; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
-.page-main-h .event-gate .event-cards::-webkit-scrollbar { height: 6px; }
-.page-main-h .event-gate .event-cards::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+.page-main-h .event-gate .event-cards-wrap { position: relative; }
+.page-main-h .event-gate .event-cards-wrap .scroll-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 10; width: 2.25rem; height: 2.25rem; border-radius: 50%; background: rgba(255,255,255,0.55); border: 1px solid rgba(13,148,136,0.2); box-shadow: 0 2px 12px rgba(0,0,0,0.06); color: #0d9488; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s, color 0.2s; font-size: 0.7rem; }
+.page-main-h .event-gate .event-cards-wrap .scroll-arrow.scroll-arrow-prev { left: 0.25rem; }
+.page-main-h .event-gate .event-cards-wrap .scroll-arrow.scroll-arrow-next { left: auto; right: 0.25rem; }
+.page-main-h .event-gate .event-cards-wrap .scroll-arrow:hover { background: #0d9488; color: #fff; border-color: #0d9488; }
+.page-main-h .event-gate .event-cards-wrap .scroll-arrow:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+.page-main-h .event-gate .event-cards { display: flex; gap: 1rem; overflow-x: auto; padding: 0.25rem 0 0.75rem; -webkit-overflow-scrolling: touch; scrollbar-width: none; -ms-overflow-style: none; scroll-behavior: smooth; }
+.page-main-h .event-gate .event-cards::-webkit-scrollbar { display: none; }
 .page-main-h .event-gate .event-card { flex: 0 0 auto; width: 220px; max-width: 260px; position: relative; background: #fff; border-radius: 1rem; overflow: hidden; border: 2px solid #14b8a6; box-shadow: 0 4px 16px rgba(0,0,0,0.06); transition: transform 0.2s, box-shadow 0.2s; display: flex; flex-direction: column; }
 .page-main-h .event-gate .event-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(13, 148, 136, 0.15); }
 .page-main-h .event-gate .event-card.sold-out { opacity: 0.75; }
@@ -4624,12 +4643,14 @@ def index_horizontal():
                 <a href="/horizontal" class="px-3 py-1.5 rounded-lg bg-teal-100 text-teal-800 font-bold border border-teal-200">가로타입</a>
             </div>
         </div>
+        <div class="scroll-wrap">
+            <button type="button" class="scroll-arrow scroll-arrow-prev" aria-label="이전"><i class="fas fa-chevron-left"></i></button>
         <div class="scroll-row">
-            {% for cat, prods in grouped_products.items() %}
+            {% for cat in all_categories %}
             <a href="/category/{{ cat.name }}" class="card flex flex-col items-center justify-center p-4 rounded-xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-md transition-all text-center">
                 <span class="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-gray-600 text-lg mb-2"><i class="fas fa-th-large"></i></span>
                 <span class="text-xs font-medium text-slate-800 line-clamp-2">{{ cat.name }}</span>
-                <span class="text-[10px] text-slate-400 mt-0.5">{{ prods|length }}종</span>
+                <span class="text-[10px] text-slate-400 mt-0.5">{% set prods = grouped_products.get(cat) or [] %}{{ prods|length }}종</span>
             </a>
             {% endfor %}
             <a href="/category/오늘마감" class="card flex flex-col items-center justify-center p-4 rounded-xl border border-slate-200 bg-slate-50 hover:border-teal-200 transition text-center">
@@ -4640,12 +4661,8 @@ def index_horizontal():
                 <span class="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-lg mb-2"><i class="fas fa-star"></i></span>
                 <span class="text-xs font-medium text-slate-800">최신 상품</span>
             </a>
-            {% if has_more_categories %}
-            <a href="/categories" class="card flex flex-col items-center justify-center p-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 hover:bg-slate-100 transition text-center min-w-[120px]">
-                <span class="w-10 h-10 rounded-lg bg-white flex items-center justify-center text-gray-700 text-lg mb-2"><i class="fas fa-th-list"></i></span>
-                <span class="text-xs font-medium text-slate-800">전체 ({{ total_categories_count }}개)</span>
-            </a>
-            {% endif %}
+        </div>
+            <button type="button" class="scroll-arrow scroll-arrow-next" aria-label="다음"><i class="fas fa-chevron-right"></i></button>
         </div>
     </section>
 
@@ -4654,6 +4671,8 @@ def index_horizontal():
     {% if cat.name == '이벤트' %}
     <section class="event-gate mb-6" aria-label="이벤트">
         <h2 class="event-gate-title"><i class="fas fa-bolt"></i> 이벤트</h2>
+        <div class="event-cards-wrap">
+            <button type="button" class="scroll-arrow scroll-arrow-prev" aria-label="이전"><i class="fas fa-chevron-left"></i></button>
         <div class="event-cards">
             {% for p in products %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
@@ -4674,6 +4693,8 @@ def index_horizontal():
             </div>
             {% endfor %}
         </div>
+            <button type="button" class="scroll-arrow scroll-arrow-next" aria-label="다음"><i class="fas fa-chevron-right"></i></button>
+        </div>
         <div class="flex justify-end mt-2"><a href="/category/이벤트" class="event-cta-link">이벤트 전체보기 <i class="fas fa-chevron-right text-[10px]"></i></a></div>
     </section>
     {% endif %}
@@ -4685,6 +4706,8 @@ def index_horizontal():
             <h2 class="text-sm font-semibold text-gray-900">오늘 마감 임박</h2>
             <a href="/category/오늘마감" class="text-xs text-teal-600 font-bold">전체보기 <i class="fas fa-chevron-right"></i></a>
         </div>
+        <div class="scroll-wrap">
+            <button type="button" class="scroll-arrow scroll-arrow-prev" aria-label="이전"><i class="fas fa-chevron-left"></i></button>
         <div class="scroll-row">
             {% for p in closing_today %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
@@ -4727,6 +4750,8 @@ def index_horizontal():
             </div>
             {% endfor %}
         </div>
+            <button type="button" class="scroll-arrow scroll-arrow-next" aria-label="다음"><i class="fas fa-chevron-right"></i></button>
+        </div>
     </section>
     {% endif %}
 
@@ -4736,6 +4761,8 @@ def index_horizontal():
             <h2 class="text-sm font-semibold text-gray-900">최신 상품</h2>
             <a href="/category/최신상품" class="text-xs text-teal-600 font-bold">전체보기 <i class="fas fa-chevron-right"></i></a>
         </div>
+        <div class="scroll-wrap">
+            <button type="button" class="scroll-arrow scroll-arrow-prev" aria-label="이전"><i class="fas fa-chevron-left"></i></button>
         <div class="scroll-row">
             {% for p in random_latest %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
@@ -4778,6 +4805,8 @@ def index_horizontal():
             </div>
             {% endfor %}
         </div>
+            <button type="button" class="scroll-arrow scroll-arrow-next" aria-label="다음"><i class="fas fa-chevron-right"></i></button>
+        </div>
     </section>
     {% endif %}
 
@@ -4788,6 +4817,8 @@ def index_horizontal():
             <h2 class="text-sm font-semibold text-gray-900">{{ cat.name }}</h2>
             <a href="/category/{{ cat.name }}" class="text-xs text-teal-600 font-bold">전체보기 <i class="fas fa-chevron-right"></i></a>
         </div>
+        <div class="scroll-wrap">
+            <button type="button" class="scroll-arrow scroll-arrow-prev" aria-label="이전"><i class="fas fa-chevron-left"></i></button>
         <div class="scroll-row">
             {% for p in products %}
             {% set is_expired = (p.deadline and p.deadline < now) %}
@@ -4830,11 +4861,36 @@ def index_horizontal():
             </div>
             {% endfor %}
         </div>
+            <button type="button" class="scroll-arrow scroll-arrow-next" aria-label="다음"><i class="fas fa-chevron-right"></i></button>
+        </div>
     </section>
     {% endif %}
     {% endfor %}
 </div>
 </div>
+<script>
+(function(){
+    function initScrollArrows() {
+        document.querySelectorAll('.page-main-h .scroll-wrap, .page-main-h .event-cards-wrap').forEach(function(wrap) {
+            var scrollEl = wrap.querySelector('.scroll-row, .event-cards');
+            var prev = wrap.querySelector('.scroll-arrow-prev');
+            var next = wrap.querySelector('.scroll-arrow-next');
+            if (!scrollEl || !prev || !next) return;
+            var step = 320;
+            function updateArrows() {
+                prev.disabled = scrollEl.scrollLeft <= 0;
+                next.disabled = scrollEl.scrollLeft >= scrollEl.scrollWidth - scrollEl.clientWidth - 2;
+            }
+            prev.addEventListener('click', function() { scrollEl.scrollBy({ left: -step, behavior: 'smooth' }); });
+            next.addEventListener('click', function() { scrollEl.scrollBy({ left: step, behavior: 'smooth' }); });
+            scrollEl.addEventListener('scroll', updateArrows);
+            updateArrows();
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initScrollArrows);
+    else initScrollArrows();
+})();
+</script>
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML,
                                   grouped_products=grouped_products,
@@ -4842,7 +4898,8 @@ def index_horizontal():
                                   closing_today=closing_today,
                                   now=now,
                                   has_more_categories=has_more_categories,
-                                  total_categories_count=total_categories_count)
+                                  total_categories_count=total_categories_count,
+                                  all_categories=all_categories)
 
 
 # --- 상단 HEADER_HTML 내의 검색창 부분도 아래와 같이 반드시 수정되어야 합니다 ---
@@ -5124,8 +5181,10 @@ def categories_all():
     all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
     grouped_products = {}
     order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
+    now = now_kst()
+    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
     for cat in all_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).order_by(order_logic, Product.id.desc()).limit(20).all()
+        prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(order_logic, Product.id.desc()).limit(20).all()
         if prods:
             grouped_products[cat] = prods
     content = """
@@ -5135,11 +5194,11 @@ def categories_all():
             <h1 class="text-xl md:text-2xl font-black text-slate-800"><span class="w-1 h-8 bg-teal-500 rounded-full inline-block mr-2 align-middle"></span> 카테고리 전체보기</h1>
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            {% for cat, prods in grouped_products.items() %}
+            {% for cat in all_categories %}
             <a href="/category/{{ cat.name }}" class="flex flex-col items-center justify-center p-5 rounded-2xl border border-slate-100 bg-white hover:border-teal-200 hover:shadow-lg transition-all text-center">
                 <span class="w-12 h-12 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 text-xl mb-2"><i class="fas fa-th-large"></i></span>
                 <span class="text-xs md:text-sm font-black text-slate-700">{{ cat.name }}</span>
-                <span class="text-[10px] text-slate-400 font-bold mt-0.5">{{ prods|length }}종</span>
+                <span class="text-[10px] text-slate-400 font-bold mt-0.5">{% set prods = grouped_products.get(cat) or [] %}{{ prods|length }}종</span>
             </a>
             {% endfor %}
             <a href="/category/오늘마감" class="flex flex-col items-center justify-center p-5 rounded-2xl border border-red-100 bg-red-50/50 hover:shadow-lg transition-all text-center">
@@ -5153,7 +5212,7 @@ def categories_all():
         </div>
     </div>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, grouped_products=grouped_products)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, grouped_products=grouped_products, all_categories=all_categories)
 
 
 @app.route('/about')
@@ -7177,8 +7236,8 @@ def api_category_products(cat_name):
     offset = (page - 1) * per_page
     now = now_kst()
     order_logic = (Product.stock <= 0) | (Product.deadline < now)
-
-    query = Product.query.filter_by(is_active=True)
+    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
+    query = Product.query.filter_by(is_active=True).filter(displayable)
     if cat_name == '최신상품':
         query = query.order_by(order_logic, Product.id.desc())
     elif cat_name == '오늘마감':
@@ -7214,39 +7273,40 @@ def api_category_products(cat_name):
 def category_view(cat_name):
     """카테고리별 상품 목록 뷰 (무한 스크롤, 50개 단위, 스크롤 시 1초 대기 후 추가 로딩)"""
     _record_page_view('category')
-    order_logic = (Product.stock <= 0) | (Product.deadline < now_kst())
+    now = now_kst()
+    order_logic = (Product.stock <= 0) | (Product.deadline < now)
+    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
     cat = None
     limit_num = 50
 
     if cat_name == '최신상품':
         # 판매중 먼저, 마감된 상품 제일 뒤
-        products = Product.query.filter_by(is_active=True).order_by(order_logic, Product.id.desc()).limit(limit_num).all()
+        products = Product.query.filter_by(is_active=True).filter(displayable).order_by(order_logic, Product.id.desc()).limit(limit_num).all()
         display_name = "✨ 최신 상품"
     elif cat_name == '오늘마감':
-        today_end = now_kst().replace(hour=23, minute=59, second=59)
-        today_start = now_kst().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now.replace(hour=23, minute=59, second=59)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         # 오늘 마감인 상품 전부(이미 마감된 것 포함). 판매중 먼저, 마감된 건 제일 뒤
         products = Product.query.filter(
             Product.is_active == True,
             Product.deadline >= today_start,
             Product.deadline <= today_end
-        ).order_by((Product.deadline > now_kst()).desc(), Product.deadline.asc()).limit(limit_num).all()
+        ).filter(displayable).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(limit_num).all()
         display_name = "🔥 오늘 마감 임박!"
     else:
         cat = Category.query.filter_by(name=cat_name).first_or_404()
         user_grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
         if getattr(cat, 'min_member_grade', None) is not None and user_grade < cat.min_member_grade:
             abort(404)
-        products = Product.query.filter_by(category=cat_name, is_active=True).order_by(order_logic, Product.id.desc()).limit(limit_num).all()
+        products = Product.query.filter_by(category=cat_name, is_active=True).filter(displayable).order_by(order_logic, Product.id.desc()).limit(limit_num).all()
         display_name = f"{cat_name} 상품 리스트"
 
     # 하단 추천 섹션 데이터 (등급별 카테고리)
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
-    latest_all = Product.query.filter(Product.is_active == True, Product.category != cat_name).order_by(Product.id.desc()).limit(10).all()
+    latest_all = Product.query.filter(Product.is_active == True, Product.category != cat_name).filter(displayable).order_by(Product.id.desc()).limit(10).all()
     recommend_cats = categories_for_member_grade(grade).filter(Category.name != cat_name).limit(3).all()
-    cat_previews = {c: Product.query.filter_by(category=c.name, is_active=True).limit(4).all() for c in recommend_cats}
+    cat_previews = {c: Product.query.filter_by(category=c.name, is_active=True).filter(displayable).limit(4).all() for c in recommend_cats}
     category_delivery_desc = get_category_delivery_description(cat_name) if cat else None
-    now = now_kst()
     all_pids = [p.id for p in products]
     review_counts = {}
     if all_pids:
@@ -8357,6 +8417,55 @@ def product_detail(pid):
             <a href="/" class="bg-white border-2 border-teal-600 text-teal-600 py-6 rounded-2xl text-center text-sm font-black shadow-sm hover:bg-teal-50 transition flex items-center justify-center gap-3">
                 <i class="fas fa-home text-lg"></i> 홈으로
             </a>
+        </div>
+
+        <!-- 상세페이지 하단 공통 안내 (상품정보 제공 고시 · 배송 · 교환/반품 · 법적 고지) -->
+        <div class="mt-20 pt-12 border-t border-gray-200 max-w-4xl xl:max-w-5xl mx-auto px-4 md:px-0 text-left">
+            <h3 class="text-lg font-black text-gray-800 mb-4">상품정보 제공 고시</h3>
+            <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white mb-10">
+                <table class="w-full text-left text-sm border-collapse">
+                    <tbody class="[&>tr]:border-b [&>tr]:border-gray-100 last:[&>tr]:border-0">
+                        <tr><th class="p-4 bg-gray-50 font-bold text-gray-700 w-48 whitespace-nowrap">제품명 / 모델명</th><td class="p-4 text-gray-800">상세페이지 상단 참조</td></tr>
+                        <tr><th class="p-4 bg-gray-50 font-bold text-gray-700">법에 의한 인증/허가</th><td class="p-4 text-gray-800">해당 사항 없음 (상품별 별도 표기)</td></tr>
+                        <tr><th class="p-4 bg-gray-50 font-bold text-gray-700">원산지 / 제조국</th><td class="p-4 text-gray-800">국산 (상품별 별도 표기)</td></tr>
+                        <tr><th class="p-4 bg-gray-50 font-bold text-gray-700">제조사 / 수입자</th><td class="p-4 text-gray-800">바구니삼촌 협력사 및 도매시장 직송</td></tr>
+                        <tr><th class="p-4 bg-gray-50 font-bold text-gray-700">소비자 상담 전화</th><td class="p-4 text-gray-800">1666-8320 (고객센터)</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 class="text-lg font-black text-gray-800 mb-4">배송 안내 (송도 특화)</h3>
+            <p class="text-base font-bold text-teal-700 mb-2">"송도 지역 기사님이 직접 배달하는 신선 배송 시스템"</p>
+            <ul class="list-disc list-inside text-gray-700 text-sm space-y-1 mb-10">
+                <li><strong>배송 지역:</strong> 인천 송도 신도시 전 지역 (일부 구역 제외)</li>
+                <li><strong>배송 시간:</strong> * 농산물   : 밤12시 주문마감  - 오후 배송 
+                                                  일반 상품: 밤12시 마감마감  - 오후배송 </li>
+                <li><strong>배송비:</strong> 기본 1,900원 + 카테고리별 1,900원 추가 + 카테고리별 50,000원이상 1,900원 추가 </li>
+            </ul>
+    
+            <h3 class="text-lg font-black text-gray-800 mb-4">교환 및 반품 안내</h3>
+            <div class="space-y-4 text-sm text-gray-700 mb-10">
+                <div>
+                    <p class="font-bold text-gray-800 mb-1">[신선식품/냉장·냉동식품 안내]</p>
+                    <p>신선식품의 특성상 단순 변심으로 인한 교환 및 반품은 불가합니다. (전자상거래법 제17조 제2항 제3호: 시간이 지나 다시 판매하기 곤란한 경우)</p>
+                    <p class="mt-1">주소 불명, 연락 두절 등 고객님의 사유로 인한 배송 지연 및 상품 변질은 환불이 어렵습니다.</p>
+                </div>
+                <div>
+                    <p class="font-bold text-gray-800 mb-1">[상품 하자 및 오배송]</p>
+                    <p>상품에 문제가 있을 경우, 수령 즉시 사진(최소 3장 이상)을 촬영하여 고객센터로 접수해 주세요.</p>
+                    <p class="mt-1">수령 후 24시간이 지난 상품은 신선도 확인이 어려워 처리가 제한될 수 있습니다.</p>
+                </div>
+                <div>
+                    <p class="font-bold text-gray-800 mb-1">[일반 공산품 안내]</p>
+                    <p>단순 변심의 경우 상품 수령 후 7일 이내 신청 가능하며, 왕복 배송비(4000+4000=8000원)는 고객님 부담입니다. (단, 포장 훼손 시 불가)</p>
+                </div>
+            </div>
+
+            <h3 class="text-lg font-black text-gray-800 mb-4">법적 책임 및 고지</h3>
+            <ul class="list-disc list-inside text-gray-600 text-sm space-y-1 mb-8">
+                <li>본 사이트의 상품 이미지 및 상세페이지 문구는 '바구니삼촌'의 자산으로, 무단 도용 시 법적 책임을 물을 수 있습니다.</li>
+                <li>판매되는 식품의 효능/효과에 대한 설명은 원물 자체의 정보이며, 질병의 예방 및 치료를 목적으로 하는 의약품이 아님을 고지합니다.</li>
+            </ul>
         </div>
     </div>
     """
@@ -12748,8 +12857,12 @@ def admin_dashboard():
     payment_key_search = (request.args.get('payment_key') or '').strip()
 
     # 2. 공통 변수 초기화
-    sel_cat = request.args.get('category', '전체')
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_cats = request.args.getlist('category')
+    if not sel_cats or '전체' in sel_cats:
+        sel_cats = []  # 빈 목록 = 전체 카테고리 (상품관리용)
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []  # 빈 목록 = 모든 카테고리
     products, filtered_orders, summary, daily_stats, reviews = [], [], {}, {}, []
     product_q, product_page, products_total, product_total_pages, per_page = '', 1, 0, 1, 30
     stats = {"sales": 0, "delivery": 0, "count": 0, "grand_total": 0}
@@ -12802,8 +12915,8 @@ def admin_dashboard():
                 Product.category.contains(product_q)
             ))
         else:
-            if sel_cat != '전체':
-                q = q.filter_by(category=sel_cat)
+            if sel_cats:
+                q = q.filter(Product.category.in_(sel_cats))
         q = q.order_by(Product.id.desc())
         products_total = q.count()
         products = q.offset((product_page - 1) * per_page).limit(per_page).all()
@@ -12913,7 +13026,7 @@ def admin_dashboard():
             items = OrderItem.query.filter_by(order_id=o.id).order_by(OrderItem.id.asc()).all()
             if items:
                 for oi in items:
-                    if (is_master or oi.product_category in my_categories) and (sel_order_cat == '전체' or oi.product_category == sel_order_cat):
+                    if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                         is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
                         sales_table_rows.append({
                             'order_date': order_date_str,
@@ -12929,7 +13042,7 @@ def admin_dashboard():
                     match = re.search(r'\[(.*?)\] (.*)', part)
                     if match:
                         cat_n, items_str = match.groups()
-                        if (is_master or cat_n in my_categories) and (sel_order_cat == '전체' or cat_n == sel_order_cat):
+                        if (is_master or cat_n in my_categories) and (not sel_order_cats or cat_n in sel_order_cats):
                             for item in items_str.split(', '):
                                 it_match = re.search(r'(.*?)\((\d+)\)', item)
                                 if it_match:
@@ -13000,8 +13113,8 @@ def admin_dashboard():
         q = Settlement.query.filter(Settlement.sale_dt >= start_dt, Settlement.sale_dt <= end_dt)
         if not is_master:
             q = q.filter(Settlement.category.in_(my_categories))
-        if sel_order_cat != '전체':
-            q = q.filter(Settlement.category == sel_order_cat)
+        if sel_order_cats:
+            q = q.filter(Settlement.category.in_(sel_order_cats))
         if sel_settlement_status and sel_settlement_status != '전체':
             q = q.filter(Settlement.settlement_status == sel_settlement_status)
         for s in q.order_by(Settlement.sale_dt.desc()).all():
@@ -13053,8 +13166,8 @@ def admin_dashboard():
         )
         if not is_master:
             _q_sett_base = _q_sett_base.filter(Settlement.category.in_(my_categories))
-        if sel_order_cat != '전체':
-            _q_sett_base = _q_sett_base.filter(Settlement.category == sel_order_cat)
+        if sel_order_cats:
+            _q_sett_base = _q_sett_base.filter(Settlement.category.in_(sel_order_cats))
         _settlement_paid = int(_q_sett_base.filter(Settlement.settlement_status == '입금완료').with_entities(db.func.coalesce(db.func.sum(Settlement.settlement_total), 0)).scalar() or 0)
         _settlement_pending = int(_q_sett_base.filter(Settlement.settlement_status == '입금대기').with_entities(db.func.coalesce(db.func.sum(Settlement.settlement_total), 0)).scalar() or 0)
         settlement_summary = {
@@ -13933,7 +14046,7 @@ def admin_dashboard():
                     <p>· 대표=접미사 _1, 상세=_2~_100. 상세이미지파일명은 쉼표로 구분해 여러 개 입력 가능.</p>
                     <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼</p>
                     <p>· <b>필수</b>: 카테고리, 상품명, 가격. 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
-                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, 재고, 마감일시, <b>인터넷 최저가 (원, 선택)</b>, <b>인터넷 최저가 링크 (선택)</b>, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+1, <b>상세이미지파일명</b>=품명+2~100 또는 쉼표 구분. (Cloudinary에 올린 파일명만 넣어도 자동 해석)</p>
+                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, 재고, 마감일시, <b>노출시작시간</b>, <b>인터넷 최저가 (원, 선택)</b>, <b>인터넷 최저가 링크 (선택)</b>, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+1, <b>상세이미지파일명</b>=품명+2~100 또는 쉼표 구분. (Cloudinary에 올린 파일명만 넣어도 자동 해석)</p>
                 </div>
                 <div class="mt-5 p-5 bg-white rounded-xl border border-teal-200 text-left text-[11px]">
                     <p class="font-black text-teal-800 mb-2">🖼 이미지 대량 업로드 후 확인 방법</p>
@@ -14245,13 +14358,17 @@ def admin_dashboard():
                     <input type="hidden" name="tab" value="products">
                     <input type="text" name="q" value="{{ product_q or '' }}" placeholder="상품명·설명·카테고리 검색" class="border border-gray-200 rounded-2xl px-4 py-3 text-[11px] font-black w-full sm:w-52 focus:ring-2 focus:ring-teal-500 min-h-[44px]">
                     <div class="flex flex-wrap gap-2 sm:gap-3">
-                        <select name="category" onchange="this.form.submit()" class="border-none bg-white shadow-sm p-3 rounded-2xl text-[11px] font-black min-h-[44px] flex-1 sm:flex-none" title="카테고리 선택 시 해당 카테고리 상품만 조회·전체 삭제 가능">
-                            <option value="전체">전체 카테고리</option>
-                            {% for c in selectable_categories %}<option value="{{c.name}}" {% if sel_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}
-                        </select>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-[10px] font-black text-gray-500">카테고리 (다중 선택)</span>
+                            <div class="flex flex-wrap gap-x-3 gap-y-2 p-3 rounded-2xl bg-gray-50 border border-gray-100 max-h-28 overflow-y-auto">
+                                <label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="category" value="전체" class="rounded product-cat-cb product-cat-all" {% if not sel_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">전체</span></label>
+                                <button type="button" class="product-cat-select-all text-[10px] font-black text-teal-600 hover:underline">전체 선택</button>
+                                {% for c in selectable_categories %}<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="category" value="{{ c.name }}" class="rounded product-cat-cb" {% if c.name in sel_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">{{ c.name }}</span></label>{% endfor %}
+                            </div>
+                        </div>
                         <button type="submit" class="bg-teal-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] min-h-[44px]">검색</button>
-                        {% if sel_cat and sel_cat != '전체' %}<a href="/admin/category/delete_products?category={{ sel_cat | urlencode }}" class="bg-red-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-red-600 min-h-[44px] inline-flex items-center" onclick="return confirm('이 카테고리({{ sel_cat }})의 상품을 모두 삭제합니다. 복구할 수 없습니다. 계속할까요?');">🗑 카테고리 상품 전체 삭제</a>{% endif %}
-                        {% if product_q %}<a href="/admin?tab=products" class="text-gray-500 text-[10px] flex items-center min-h-[44px]">검색초기화</a>{% endif %}
+                        {% for sc in sel_cats %}<a href="/admin/category/delete_products?category={{ sc | urlencode }}" class="bg-red-500 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-red-600 min-h-[44px] inline-flex items-center" onclick="return confirm('이 카테고리({{ sc }})의 상품을 모두 삭제합니다. 복구할 수 없습니다. 계속할까요?');">🗑 {{ sc }} 전체 삭제</a>{% endfor %}
+                        {% if product_q %}<a href="/admin?tab=products{% for sc in sel_cats %}&category={{ sc | urlencode }}{% endfor %}" class="text-gray-500 text-[10px] flex items-center min-h-[44px]">검색초기화</a>{% endif %}
                     </div>
                 </form>
                 <div class="flex flex-wrap gap-2 sm:gap-3 [&>button]:min-h-[44px] [&>a]:min-h-[44px] [&>a]:flex [&>a]:items-center [&>a]:inline-flex">
@@ -14323,10 +14440,10 @@ def admin_dashboard():
                 <p class="text-[11px] text-gray-500 font-bold">총 {{ products_total }}건 · {{ product_page }} / {{ product_total_pages }} 페이지 (30개씩)</p>
                 <div class="flex gap-2">
                     {% if product_page > 1 %}
-                    <a href="/admin?tab=products&page={{ product_page - 1 }}{% if product_q %}&q={{ product_q | e }}{% endif %}{% if sel_cat != '전체' %}&category={{ sel_cat }}{% endif %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-xl font-black text-[10px] hover:bg-gray-300">이전</a>
+                    <a href="/admin?tab=products&page={{ product_page - 1 }}{% if product_q %}&q={{ product_q | e }}{% endif %}{% for sc in sel_cats %}&category={{ sc | urlencode }}{% endfor %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-xl font-black text-[10px] hover:bg-gray-300">이전</a>
                     {% endif %}
                     {% if product_page < product_total_pages %}
-                    <a href="/admin?tab=products&page={{ product_page + 1 }}{% if product_q %}&q={{ product_q | e }}{% endif %}{% if sel_cat != '전체' %}&category={{ sel_cat }}{% endif %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-xl font-black text-[10px] hover:bg-gray-300">다음</a>
+                    <a href="/admin?tab=products&page={{ product_page + 1 }}{% if product_q %}&q={{ product_q | e }}{% endif %}{% for sc in sel_cats %}&category={{ sc | urlencode }}{% endfor %}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-xl font-black text-[10px] hover:bg-gray-300">다음</a>
                     {% endif %}
                 </div>
             </div>
@@ -17098,7 +17215,7 @@ def admin_dashboard():
                     <input type="hidden" name="tab" value="orders">
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">시작 일시</label><input type="datetime-local" name="start_date" id="start_date" value="{{ start_date_str.replace(' ', 'T')[:16] }}" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">종료 일시</label><input type="datetime-local" name="end_date" id="end_date" value="{{ end_date_str.replace(' ', 'T')[:16] }}" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
-                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리</label><select name="order_cat" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs bg-white"><option value="전체">모든 품목 합산</option>{% for c in selectable_categories %}<option value="{{ c.name }}" {% if sel_order_cat == c.name %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리 (다중 선택)</label><div class="flex flex-wrap gap-x-4 gap-y-2 p-4 rounded-2xl bg-gray-50 border border-gray-100 max-h-32 overflow-y-auto"><label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="전체" class="rounded order-cat-cb order-cat-all" {% if not sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">전체</span></label><button type="button" class="order-cat-select-all text-[10px] font-black text-teal-600 hover:underline">전체 선택</button>{% for c in selectable_categories %}<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="{{ c.name }}" class="rounded order-cat-cb" {% if c.name in sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">{{ c.name }}</span></label>{% endfor %}</div></div>
                     <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg">조회하기</button>
                 </form>
             </div>
@@ -17109,8 +17226,8 @@ def admin_dashboard():
                         <h3 class="text-base font-black text-gray-800">판매상품명별 판매수량 총합계</h3>
                         <div class="flex gap-2 flex-wrap">
                             <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-amber-600 inline-flex items-center justify-center" data-table-id="sales-summary-table">복사하기</button>
-                            <a href="/admin/orders/sales_summary_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
-                            <a href="/admin/orders/sales_summary_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
+                            <a href="/admin/orders/sales_summary_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
+                            <a href="/admin/orders/sales_summary_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
                         </div>
                     </div>
                     <div id="sales-summary-table-wrap" class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto overflow-y-auto max-h-[32rem]">
@@ -17147,8 +17264,8 @@ def admin_dashboard():
                         <h3 class="text-base font-black text-gray-800">조회 결과 상세 (주문일시 · 오더아이디 · 품목 · 수량 · 상태)</h3>
                         <div class="flex gap-2 flex-wrap">
                             <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-amber-600 inline-flex items-center justify-center" data-table-id="sales-detail-table">복사하기</button>
-                            <a href="/admin/orders/sales_detail_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
-                            <a href="/admin/orders/sales_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
+                            <a href="/admin/orders/sales_detail_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
+                            <a href="/admin/orders/sales_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
                         </div>
                     </div>
                     <div id="sales-detail-table-wrap" class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto overflow-y-auto max-h-[32rem]">
@@ -17199,7 +17316,7 @@ def admin_dashboard():
                     <input type="hidden" name="tab" value="orders">
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">시작 일시</label><input type="datetime-local" name="start_date" id="start_date_2" value="{{ start_date_str.replace(' ', 'T') }}" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">종료 일시</label><input type="datetime-local" name="end_date" id="end_date_2" value="{{ end_date_str.replace(' ', 'T') }}" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
-                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리</label><select name="order_cat" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs bg-white"><option value="전체">모든 품목 합산</option>{% for c in selectable_categories %}<option value="{{c.name}}" {% if sel_order_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></div>
+                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리</label><div class="flex flex-wrap gap-x-4 gap-y-2 p-4 rounded-2xl bg-gray-50 border border-gray-100 max-h-32 overflow-y-auto"><label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="전체" class="rounded" {% if not sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">전체</span></label><button type="button" class="order-cat-select-all text-[10px] font-black text-teal-600 hover:underline">전체 선택</button>{% for c in selectable_categories %}<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="{{c.name}}" class="rounded" {% if c.name in sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">{{c.name}}</span></label>{% endfor %}</div></div>
                     <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg">조회하기</button>
                 </form>
             </div>
@@ -17208,8 +17325,8 @@ def admin_dashboard():
                 <h3 class="text-base font-black text-gray-800">배송집계 테이블</h3>
                 <div class="flex flex-wrap items-center gap-2">
                     <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-amber-600 inline-flex items-center justify-center" data-table-id="delivery-summary-table">복사하기</button>
-                    <a href="/admin/orders/delivery_summary_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
-                    <a href="/admin/orders/delivery_summary_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}&order_cat={{ sel_order_cat | urlencode }}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
+                            <a href="/admin/orders/delivery_summary_image?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}" class="bg-gray-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-gray-800 inline-flex items-center justify-center">이미지</a>
+                            <a href="/admin/orders/delivery_summary_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}" class="bg-teal-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow hover:bg-teal-700">엑셀</a>
                     <a href="/admin/orders/excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_ids={{ filtered_orders | map(attribute='order_id') | join(',') }}" class="bg-teal-100 text-teal-700 px-5 py-2.5 rounded-2xl font-black text-xs">Excel</a>
                 </div>
             </div>
@@ -17514,11 +17631,11 @@ def admin_dashboard():
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">종료 일시</label><input type="datetime-local" name="end_date" id="end_date" value="{{ end_date_str.replace(' ', 'T') }}" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">주문번호</label><input type="text" name="order_id" value="{{ order_id_search }}" placeholder="오더ID 검색" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">결제ID</label><input type="text" name="payment_key" value="{{ payment_key_search }}" placeholder="토스 결제키 검색" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
-                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리 필터</label><select name="order_cat" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs bg-white"><option value="전체">모든 품목 합산</option>{% for c in selectable_categories %}<option value="{{c.name}}" {% if sel_order_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></div>
+                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리 필터 (다중 선택)</label><div class="flex flex-wrap gap-x-4 gap-y-2 p-4 rounded-2xl bg-gray-50 border border-gray-100 max-h-32 overflow-y-auto"><label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="전체" class="rounded" {% if not sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">전체</span></label><button type="button" class="order-cat-select-all text-[10px] font-black text-teal-600 hover:underline">전체 선택</button>{% for c in selectable_categories %}<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="{{c.name}}" class="rounded" {% if c.name in sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">{{c.name}}</span></label>{% endfor %}</div></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">입금상태</label><select name="settlement_status" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs bg-white"><option value="전체" {% if sel_settlement_status == '전체' %}selected{% endif %}>전체</option><option value="입금대기" {% if sel_settlement_status == '입금대기' %}selected{% endif %}>입금대기</option><option value="입금완료" {% if sel_settlement_status == '입금완료' %}selected{% endif %}>입금완료</option><option value="취소" {% if sel_settlement_status == '취소' %}selected{% endif %}>취소</option><option value="보류" {% if sel_settlement_status == '보류' %}selected{% endif %}>보류</option></select></div>
                     <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg lg:col-span-2">조회하기</button>
                 </form>
-                <p class="mt-3 text-[11px] text-gray-600 font-bold">엑셀: <a href="/admin/orders/settlement_detail_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_cat={{ sel_order_cat | urlencode }}&settlement_status={{ sel_settlement_status | urlencode }}{% if order_id_search %}&order_id={{ order_id_search | urlencode }}{% endif %}{% if payment_key_search %}&payment_key={{ payment_key_search | urlencode }}{% endif %}" class="text-teal-600 hover:underline">정산 상세 (n넘버)</a> · <a href="/admin/settlement/category_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&category={{ sel_order_cat | urlencode }}" class="text-teal-600 hover:underline">카테고리별 판매 품목 (품목·규격·수량)</a></p>
+                <p class="mt-3 text-[11px] text-gray-600 font-bold">엑셀: <a href="/admin/orders/settlement_detail_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}&settlement_status={{ sel_settlement_status | urlencode }}{% if order_id_search %}&order_id={{ order_id_search | urlencode }}{% endif %}{% if payment_key_search %}&payment_key={{ payment_key_search | urlencode }}{% endif %}" class="text-teal-600 hover:underline">정산 상세 (n넘버)</a> · <a href="/admin/settlement/category_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}{% for oc in sel_order_cats %}&category={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&category=전체{% endif %}" class="text-teal-600 hover:underline">카테고리별 판매 품목 (품목·규격·수량)</a></p>
 
                 {% if settlement_summary %}
                 <div class="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -18001,10 +18118,74 @@ def admin_dashboard():
             });
         }
     }
+    function bindOrderCatCheckboxes() {
+        document.querySelectorAll('form').forEach(function(form) {
+            var inputs = form.querySelectorAll('input[name="order_cat"]');
+            if (!inputs.length) return;
+            var allCb = null;
+            var others = [];
+            inputs.forEach(function(inp) {
+                if (inp.value === '전체') allCb = inp; else others.push(inp);
+            });
+            if (!allCb) return;
+            allCb.addEventListener('change', function() {
+                if (this.checked) others.forEach(function(o) { o.checked = false; });
+            });
+            others.forEach(function(o) {
+                o.addEventListener('change', function() {
+                    if (this.checked) allCb.checked = false;
+                    else if (others.every(function(x) { return !x.checked; })) allCb.checked = true;
+                });
+            });
+        });
+        document.querySelectorAll('.order-cat-select-all').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var form = this.closest('form');
+                if (!form) return;
+                form.querySelectorAll('input[name="order_cat"]').forEach(function(inp) {
+                    if (inp.value === '전체') inp.checked = false;
+                    else inp.checked = true;
+                });
+            });
+        });
+    }
+    function bindProductCatCheckboxes() {
+        document.querySelectorAll('form').forEach(function(form) {
+            var inputs = form.querySelectorAll('input[name="category"]');
+            if (!inputs.length) return;
+            var allCb = null;
+            var others = [];
+            inputs.forEach(function(inp) {
+                if (inp.value === '전체') allCb = inp; else others.push(inp);
+            });
+            if (!allCb) return;
+            allCb.addEventListener('change', function() {
+                if (this.checked) others.forEach(function(o) { o.checked = false; });
+            });
+            others.forEach(function(o) {
+                o.addEventListener('change', function() {
+                    if (this.checked) allCb.checked = false;
+                    else if (others.every(function(x) { return !x.checked; })) allCb.checked = true;
+                });
+            });
+        });
+        document.querySelectorAll('.product-cat-select-all').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var form = this.closest('form');
+                if (!form) return;
+                form.querySelectorAll('input[name="category"]').forEach(function(inp) {
+                    if (inp.value === '전체') inp.checked = false;
+                    else inp.checked = true;
+                });
+            });
+        });
+    }
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bindOrderCheckboxes);
+        document.addEventListener('DOMContentLoaded', function() { bindOrderCheckboxes(); bindOrderCatCheckboxes(); bindProductCatCheckboxes(); });
     } else {
         bindOrderCheckboxes();
+        bindOrderCatCheckboxes();
+        bindProductCatCheckboxes();
     }
 
     async function approveSettlement(catName, amt, email) {
@@ -18451,11 +18632,11 @@ def admin_dashboard():
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">종료 일시</label><input type="datetime-local" name="end_date" id="end_date" value="{{ end_date_str.replace(' ', 'T') }}" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">주문번호</label><input type="text" name="order_id" value="{{ order_id_search }}" placeholder="오더ID 검색" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">결제ID</label><input type="text" name="payment_key" value="{{ payment_key_search }}" placeholder="토스 결제키 검색" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
-                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리 필터</label><select name="order_cat" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs bg-white"><option value="전체">모든 품목 합산</option>{% for c in selectable_categories %}<option value="{{c.name}}" {% if sel_order_cat == c.name %}selected{% endif %}>{{c.name}}</option>{% endfor %}</select></div>
+                    <div><label class="text-[10px] text-gray-400 font-black ml-2">카테고리 필터 (다중 선택)</label><div class="flex flex-wrap gap-x-4 gap-y-2 p-4 rounded-2xl bg-gray-50 border border-gray-100 max-h-32 overflow-y-auto"><label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="전체" class="rounded" {% if not sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">전체</span></label><button type="button" class="order-cat-select-all text-[10px] font-black text-teal-600 hover:underline">전체 선택</button>{% for c in selectable_categories %}<label class="inline-flex items-center gap-2 cursor-pointer"><input type="checkbox" name="order_cat" value="{{c.name}}" class="rounded" {% if c.name in sel_order_cats %}checked{% endif %}><span class="text-xs font-black text-gray-700">{{c.name}}</span></label>{% endfor %}</div></div>
                     <div><label class="text-[10px] text-gray-400 font-black ml-2">입금상태</label><select name="settlement_status" class="w-full border-none bg-gray-50 p-4 rounded-2xl font-black text-xs bg-white"><option value="전체" {% if sel_settlement_status == '전체' %}selected{% endif %}>전체</option><option value="입금대기" {% if sel_settlement_status == '입금대기' %}selected{% endif %}>입금대기</option><option value="입금완료" {% if sel_settlement_status == '입금완료' %}selected{% endif %}>입금완료</option><option value="취소" {% if sel_settlement_status == '취소' %}selected{% endif %}>취소</option><option value="보류" {% if sel_settlement_status == '보류' %}selected{% endif %}>보류</option></select></div>
                     <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg lg:col-span-2">조회하기</button>
                 </form>
-                <p class="mt-3 text-[11px] text-gray-600 font-bold">엑셀: <a href="/admin/orders/settlement_detail_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&order_cat={{ sel_order_cat | urlencode }}&settlement_status={{ sel_settlement_status | urlencode }}{% if order_id_search %}&order_id={{ order_id_search | urlencode }}{% endif %}{% if payment_key_search %}&payment_key={{ payment_key_search | urlencode }}{% endif %}" class="text-teal-600 hover:underline">정산 상세 (n넘버)</a> · <a href="/admin/settlement/category_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}&category={{ sel_order_cat | urlencode }}" class="text-teal-600 hover:underline">카테고리별 판매 품목 (품목·규격·수량)</a></p>
+                <p class="mt-3 text-[11px] text-gray-600 font-bold">엑셀: <a href="/admin/orders/settlement_detail_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}{% for oc in sel_order_cats %}&order_cat={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&order_cat=전체{% endif %}&settlement_status={{ sel_settlement_status | urlencode }}{% if order_id_search %}&order_id={{ order_id_search | urlencode }}{% endif %}{% if payment_key_search %}&payment_key={{ payment_key_search | urlencode }}{% endif %}" class="text-teal-600 hover:underline">정산 상세 (n넘버)</a> · <a href="/admin/settlement/category_excel?start_date={{ start_date_str.replace(' ', '%20') }}&end_date={{ end_date_str.replace(' ', '%20') }}{% for oc in sel_order_cats %}&category={{ oc | urlencode }}{% endfor %}{% if not sel_order_cats %}&category=전체{% endif %}" class="text-teal-600 hover:underline">카테고리별 판매 품목 (품목·규격·수량)</a></p>
                 {% if settlement_summary %}
                 <div class="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
@@ -18658,14 +18839,15 @@ def admin_product_bulk_upload_template():
         return redirect('/')
     columns = [
         '카테고리', '상품명', 'Short Intro', '상세문구', '배송', '가격', '규격', '공급가', '재고',
-        '마감일시', '인터넷 최저가 (원, 선택)', '인터넷 최저가 링크 (선택)',
+        '마감일시', '노출시작시간', '인터넷 최저가 (원, 선택)', '인터넷 최저가 링크 (선택)',
         '재고초기화시각', '초기화수량', '대표이미지파일명', '상세이미지파일명'
     ]
     df = pd.DataFrame(columns=columns)
     df.loc[0] = [
         '가공식품', '간장 오리주물럭 300g', '맵지 않아 온 가족이 즐기는 단짠단짠의 정석!',
         '주문 마감당일 오후 배송됩니다!', '+1일', 5900, '300g', 5000, 30,
-        '2026-03-02 23:59', 10800, 'https://search.shopping.naver.com/catalog/12345678',
+        '2026-03-02 23:59', '',
+        10800, 'https://search.shopping.naver.com/catalog/12345678',
         '', 30,
         '간장 오리주물럭 300g01_1', '간장 오리주물럭 300g02_2'
     ]
@@ -18857,21 +19039,27 @@ def admin_product_bulk_upload():
             return redirect('/admin?tab=bulk_register')
         upload_dir = os.path.join(app.root_path, 'static', 'uploads')
         os.makedirs(upload_dir, exist_ok=True)
-        if not Category.query.first():
-            flash("등록된 카테고리가 없습니다. 먼저 [카테고리] 탭에서 카테고리를 추가한 뒤 대량등록을 진행해 주세요.")
-            return redirect('/admin?tab=bulk_register')
         if len(df) > BULK_EXCEL_MAX_ROWS:
             flash(f"한 번에 최대 {BULK_EXCEL_MAX_ROWS}건까지 처리합니다. 처음 {BULK_EXCEL_MAX_ROWS}건만 등록됩니다. 나머지는 엑셀을 나눠 올려 주세요.")
             df = df.head(BULK_EXCEL_MAX_ROWS)
         count = 0
         missing_images = []  # (상품명, 대표파일명, [상세파일명...]) 서버에 없어서 매칭 안 된 경우
+        created_cat_names = set()  # 이번 업로드에서 자동 추가한 카테고리명
         for idx, row in df.iterrows():
             cat_name = _cell_str(row.get('카테고리', ''))
             if not cat_name or cat_name.startswith('('):
                 continue
+            cat_name = cat_name.strip().replace('\ufeff', '').strip()
+            if not cat_name:
+                continue
             cat = Category.query.filter_by(name=cat_name).first()
             if not cat:
-                continue
+                max_order = db.session.query(db.func.max(Category.order)).scalar() or 0
+                new_cat = Category(name=cat_name, order=max_order + 1)
+                db.session.add(new_cat)
+                db.session.flush()
+                cat = new_cat
+                created_cat_names.add(cat_name)
             name_val = _cell_str(row.get('상품명', ''))
             if not name_val or name_val.startswith('('):
                 continue
@@ -18899,6 +19087,16 @@ def admin_product_bulk_upload():
                 for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
                     try:
                         deadline = datetime.strptime(deadline_val.strip()[:19], fmt)
+                        break
+                    except ValueError:
+                        continue
+            display_start_val = _cell_str(row.get('노출시작시간', ''))
+            display_start_at = None
+            if display_start_val:
+                display_start_val = display_start_val.strip().replace(',', ' ')[:19]
+                for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                    try:
+                        display_start_at = datetime.strptime(display_start_val.strip()[:19], fmt)
                         break
                     except ValueError:
                         continue
@@ -18973,6 +19171,7 @@ def admin_product_bulk_upload():
                 detail_image_url=detail_image_url,
                 stock=stock,
                 deadline=deadline,
+                display_start_at=display_start_at,
                 reset_time=reset_time,
                 reset_to_quantity=reset_to_q,
                 badge=badge or "",
@@ -18991,6 +19190,8 @@ def admin_product_bulk_upload():
                     raise
         db.session.commit()
         flash(f"{count}개 상품이 등록되었습니다.")
+        if created_cat_names:
+            flash(f"미등록 카테고리 {len(created_cat_names)}개가 자동 추가되었습니다: {', '.join(sorted(created_cat_names))}")
         if missing_images:
             lines = []
             for name, main_f, detail_fs in missing_images:
@@ -21596,6 +21797,8 @@ def admin_product_add():
             filter(None, [save_uploaded_file(f) for f in detail_files if f and f.filename])
         )
         deadline_val = datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M') if request.form.get('deadline') else None
+        ds_raw = request.form.get('display_start_at', '').strip()
+        display_start_val = datetime.strptime(ds_raw, '%Y-%m-%dT%H:%M') if ds_raw else None
         rt = request.form.get('reset_time', '').strip()[:5] if request.form.get('reset_time') else None
         rq = request.form.get('reset_to_quantity', '').strip()
         reset_to_q = int(rq) if rq.isdigit() else None
@@ -21628,6 +21831,7 @@ def admin_product_add():
             image_url=main_img or "",
             detail_image_url=detail_img_url_str,
             deadline=deadline_val,
+            display_start_at=display_start_val,
             badge=request.form.get('badge', ''),
             reset_time=rt or None,
             reset_to_quantity=reset_to_q,
@@ -21670,6 +21874,11 @@ def admin_product_add():
 </div>
 <p class="text-[10px] text-gray-400 font-bold ml-4 mt-1">입력된 경우에만 상품 상세·카드에 인터넷 최저가 및 할인률이 표시됩니다. 비워 두면 표기되지 않습니다.</p>
 <div class="grid grid-cols-2 gap-5 text-left"><input name="stock" type="number" placeholder="한정 수량" class="p-5 bg-gray-50 rounded-2xl font-black text-left text-sm" value="50"><input name="deadline" type="datetime-local" id="add-deadline" class="p-5 bg-gray-50 rounded-2xl font-black text-left text-sm"></div>
+<div class="grid grid-cols-1 gap-5 text-left">
+    <label class="text-[10px] text-violet-600 font-black ml-4 uppercase tracking-widest">노출시작시간 (선택)</label>
+    <input name="display_start_at" type="datetime-local" class="w-full p-5 bg-violet-50 rounded-2xl font-black text-left text-sm border border-violet-100" placeholder="비우면 즉시 노출">
+    <p class="text-[10px] text-gray-400 font-bold ml-4 mt-0.5">설정 시 이 시각 이후부터 메인·카테고리 목록에 노출됩니다. 비우면 등록 즉시 노출.</p>
+</div>
 <div class="grid grid-cols-1 gap-5 text-left"><label class="text-[10px] text-amber-600 font-black ml-4 uppercase tracking-widest">구매 제한 수량 (1인당 최대 구매 개수)</label><input name="max_purchase_quantity" type="number" min="0" placeholder="0 = 제한 없음" class="p-5 bg-amber-50 rounded-2xl font-black text-left text-sm border border-amber-100" value="0"></div>
 <div id="add-reset-time-block" class="grid grid-cols-2 gap-5 text-left">
     <div><label class="text-[10px] text-amber-600 font-black ml-4 block mb-1">재고 초기화 시각 (마감일 없을 때)</label><input name="reset_time" type="time" class="w-full p-5 bg-amber-50 rounded-2xl font-black text-left text-sm border border-amber-100" placeholder="09:00"></div>
@@ -21767,6 +21976,8 @@ def admin_product_edit(pid):
         p.origin = request.form['origin']
         p.badge = request.form.get('badge', '')
         p.deadline = datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M') if request.form.get('deadline') else None
+        ds_raw = request.form.get('display_start_at', '').strip()
+        p.display_start_at = datetime.strptime(ds_raw, '%Y-%m-%dT%H:%M') if ds_raw else None
         rt = request.form.get('reset_time', '').strip()
         p.reset_time = rt[:5] if rt else None
         rq = request.form.get('reset_to_quantity', '').strip()
@@ -21918,6 +22129,16 @@ def admin_product_edit(pid):
                     <input name="deadline" type="datetime-local" id="edit-deadline"
                            class="w-full p-5 bg-gray-50 rounded-2xl font-black text-left text-sm outline-none" 
                            value="{{ p.deadline.strftime('%Y-%m-%dT%H:%M') if p.deadline else '' }}">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-5">
+                <div class="space-y-1">
+                    <label class="text-[10px] text-violet-600 font-black ml-4 uppercase tracking-widest">노출시작시간 (선택)</label>
+                    <p class="text-[10px] text-gray-500 ml-4 mb-0.5">설정 시 이 시각 이후부터 메인·카테고리 목록에 노출됩니다. 비우면 즉시 노출</p>
+                    <input name="display_start_at" type="datetime-local"
+                           class="w-full p-5 bg-violet-50 rounded-2xl font-black text-left text-sm border border-violet-100 outline-none"
+                           value="{{ p.display_start_at.strftime('%Y-%m-%dT%H:%M') if getattr(p, 'display_start_at', None) and p.display_start_at else '' }}">
                 </div>
             </div>
 
@@ -22287,7 +22508,9 @@ def admin_orders_sales_excel():
             query = query.filter(Order.created_at >= sd, Order.created_at <= ed)
         except Exception:
             pass
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []
     orders = query.order_by(Order.created_at.desc()).all()
     sales_table_rows = []
     for o in orders:
@@ -22309,7 +22532,7 @@ def admin_orders_sales_excel():
         items = OrderItem.query.filter_by(order_id=o.id).order_by(OrderItem.id.asc()).all()
         if items:
             for oi in items:
-                if (is_master or oi.product_category in my_categories) and (sel_order_cat == '전체' or oi.product_category == sel_order_cat):
+                if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                     is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
                     sales_table_rows.append({
                         'order_date': order_date_str,
@@ -22324,7 +22547,7 @@ def admin_orders_sales_excel():
                 match = re.search(r'\[(.*?)\] (.*)', part)
                 if match:
                     cat_n, items_str = match.groups()
-                    if (is_master or cat_n in my_categories) and (sel_order_cat == '전체' or cat_n == sel_order_cat):
+                    if (is_master or cat_n in my_categories) and (not sel_order_cats or cat_n in sel_order_cats):
                         for item in items_str.split(', '):
                             it_match = re.search(r'(.*?)\((\d+)\)', item)
                             if it_match:
@@ -22467,7 +22690,9 @@ def admin_orders_sales_detail_image():
             query = query.filter(Order.created_at >= sd, Order.created_at <= ed)
         except Exception:
             pass
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []
     orders = query.order_by(Order.created_at.desc()).all()
     sales_table_rows = []
     for o in orders:
@@ -22489,7 +22714,7 @@ def admin_orders_sales_detail_image():
         items = OrderItem.query.filter_by(order_id=o.id).order_by(OrderItem.id.asc()).all()
         if items:
             for oi in items:
-                if (is_master or oi.product_category in my_categories) and (sel_order_cat == '전체' or oi.product_category == sel_order_cat):
+                if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                     is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
                     sales_table_rows.append({
                         'order_date': order_date_str,
@@ -22504,7 +22729,7 @@ def admin_orders_sales_detail_image():
                 match = re.search(r'\[(.*?)\] (.*)', part)
                 if match:
                     cat_n, items_str = match.groups()
-                    if (is_master or cat_n in my_categories) and (sel_order_cat == '전체' or cat_n == sel_order_cat):
+                    if (is_master or cat_n in my_categories) and (not sel_order_cats or cat_n in sel_order_cats):
                         for item in items_str.split(', '):
                             it_match = re.search(r'(.*?)\((\d+)\)', item)
                             if it_match:
@@ -22578,7 +22803,9 @@ def admin_orders_sales_summary_excel():
             query = query.filter(Order.created_at >= sd, Order.created_at <= ed)
         except Exception:
             pass
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []
     orders = query.order_by(Order.created_at.desc()).all()
     sales_table_rows = []
     for o in orders:
@@ -22600,7 +22827,7 @@ def admin_orders_sales_summary_excel():
         items = OrderItem.query.filter_by(order_id=o.id).order_by(OrderItem.id.asc()).all()
         if items:
             for oi in items:
-                if (is_master or oi.product_category in my_categories) and (sel_order_cat == '전체' or oi.product_category == sel_order_cat):
+                if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                     is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
                     sales_table_rows.append({
                         'order_date': order_date_str,
@@ -22614,7 +22841,7 @@ def admin_orders_sales_summary_excel():
                 match = re.search(r'\[(.*?)\] (.*)', part)
                 if match:
                     cat_n, items_str = match.groups()
-                    if (is_master or cat_n in my_categories) and (sel_order_cat == '전체' or cat_n == sel_order_cat):
+                    if (is_master or cat_n in my_categories) and (not sel_order_cats or cat_n in sel_order_cats):
                         for item in items_str.split(', '):
                             it_match = re.search(r'(.*?)\((\d+)\)', item)
                             if it_match:
@@ -22655,14 +22882,16 @@ def admin_orders_delivery_summary_image():
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     order_ids_param = request.args.get('order_ids', '').strip()
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []
     try:
         start_dt = datetime.strptime(start_date_str, '%Y-%m-%d %H:%M')
         end_dt = datetime.strptime(end_date_str, '%Y-%m-%d %H:%M')
     except Exception:
         start_dt = now.replace(hour=0, minute=0, second=0)
         end_dt = now.replace(hour=23, minute=59, second=59)
-    delivery_rows = _delivery_summary_rows(is_master, my_categories, sel_order_cat, start_dt, end_dt, order_ids_param, full_items=True)
+    delivery_rows = _delivery_summary_rows(is_master, my_categories, sel_order_cats, start_dt, end_dt, order_ids_param, full_items=True)
     if not delivery_rows:
         flash("다운로드할 배송 집계 데이터가 없습니다.")
         return redirect('/admin?tab=orders')
@@ -22706,8 +22935,8 @@ def admin_orders_delivery_summary_image():
     return resp
 
 
-def _delivery_summary_rows(is_master, my_categories, sel_order_cat, start_dt, end_dt, order_ids_param, full_items=True):
-    """배송집계용 행 목록 생성. full_items=True면 품목 전체, False면 이미지용 60자 절단."""
+def _delivery_summary_rows(is_master, my_categories, sel_order_cats, start_dt, end_dt, order_ids_param, full_items=True):
+    """배송집계용 행 목록 생성. full_items=True면 품목 전체, False면 이미지용 60자 절단. sel_order_cats는 리스트(빈 목록=전체)."""
     q_orders = Order.query.filter(Order.created_at >= start_dt, Order.created_at <= end_dt, Order.status != '결제취소')
     if order_ids_param:
         allowed_ids = [x.strip() for x in order_ids_param.split(',') if x.strip()]
@@ -22723,7 +22952,7 @@ def _delivery_summary_rows(is_master, my_categories, sel_order_cat, start_dt, en
             for oi in items:
                 if is_master or oi.product_category in my_categories:
                     order_show = True
-                    if sel_order_cat == '전체' or oi.product_category == sel_order_cat:
+                    if not sel_order_cats or oi.product_category in sel_order_cats:
                         manager_items_list.append(f"{oi.product_name}({oi.quantity})")
         else:
             parts = (o.product_details or '').split(' | ')
@@ -22734,7 +22963,7 @@ def _delivery_summary_rows(is_master, my_categories, sel_order_cat, start_dt, en
                     items_str = match.group(2).strip()
                     if is_master or cat_n in my_categories:
                         order_show = True
-                        if sel_order_cat == '전체' or cat_n == sel_order_cat:
+                        if not sel_order_cats or cat_n in sel_order_cats:
                             for item in items_str.split(', '):
                                 it_match = re.search(r'(.*?)\((\d+)\)', item)
                                 if it_match:
@@ -22771,14 +23000,16 @@ def admin_orders_delivery_summary_excel():
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
     order_ids_param = request.args.get('order_ids', '').strip()
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []
     try:
         start_dt = datetime.strptime(start_date_str, '%Y-%m-%d %H:%M')
         end_dt = datetime.strptime(end_date_str, '%Y-%m-%d %H:%M')
     except Exception:
         start_dt = now.replace(hour=0, minute=0, second=0)
         end_dt = now.replace(hour=23, minute=59, second=59)
-    delivery_rows = _delivery_summary_rows(is_master, my_categories, sel_order_cat, start_dt, end_dt, order_ids_param, full_items=True)
+    delivery_rows = _delivery_summary_rows(is_master, my_categories, sel_order_cats, start_dt, end_dt, order_ids_param, full_items=True)
     if not delivery_rows:
         flash("다운로드할 배송 집계 데이터가 없습니다.")
         return redirect('/admin?tab=orders')
@@ -22828,7 +23059,9 @@ def admin_orders_sales_summary_image():
             query = query.filter(Order.created_at >= sd, Order.created_at <= ed)
         except Exception:
             pass
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []
     orders = query.order_by(Order.created_at.desc()).all()
     sales_table_rows = []
     for o in orders:
@@ -22849,7 +23082,7 @@ def admin_orders_sales_summary_image():
         items = OrderItem.query.filter_by(order_id=o.id).order_by(OrderItem.id.asc()).all()
         if items:
             for oi in items:
-                if (is_master or oi.product_category in my_categories) and (sel_order_cat == '전체' or oi.product_category == sel_order_cat):
+                if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                     is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
                     sales_table_rows.append({
                         'category': oi.product_category,
@@ -22861,7 +23094,7 @@ def admin_orders_sales_summary_image():
                 match = re.search(r'\[(.*?)\] (.*)', part)
                 if match:
                     cat_n, items_str = match.groups()
-                    if (is_master or cat_n in my_categories) and (sel_order_cat == '전체' or cat_n == sel_order_cat):
+                    if (is_master or cat_n in my_categories) and (not sel_order_cats or cat_n in sel_order_cats):
                         for item in items_str.split(', '):
                             it_match = re.search(r'(.*?)\((\d+)\)', item)
                             if it_match:
@@ -22920,7 +23153,9 @@ def admin_orders_settlement_detail_excel():
     now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
-    sel_order_cat = request.args.get('order_cat', '전체')
+    sel_order_cats = request.args.getlist('order_cat')
+    if not sel_order_cats or '전체' in sel_order_cats:
+        sel_order_cats = []
     sel_settlement_status = request.args.get('settlement_status', '전체')
     if sel_settlement_status == '정산대기': sel_settlement_status = '입금대기'
     if sel_settlement_status == '정산완료': sel_settlement_status = '입금완료'
@@ -22935,8 +23170,8 @@ def admin_orders_settlement_detail_excel():
     q = Settlement.query.filter(Settlement.sale_dt >= start_dt, Settlement.sale_dt <= end_dt)
     if not is_master:
         q = q.filter(Settlement.category.in_(my_categories))
-    if sel_order_cat != '전체':
-        q = q.filter(Settlement.category == sel_order_cat)
+    if sel_order_cats:
+        q = q.filter(Settlement.category.in_(sel_order_cats))
     if sel_settlement_status and sel_settlement_status != '전체':
         q = q.filter(Settlement.settlement_status == sel_settlement_status)
     if order_id_search or payment_key_search:
@@ -22997,7 +23232,9 @@ def admin_settlement_category_excel():
     now = now_kst()
     start_date_str = request.args.get('start_date', now.strftime('%Y-%m-%d 00:00')).replace('T', ' ')
     end_date_str = request.args.get('end_date', now.strftime('%Y-%m-%d 23:59')).replace('T', ' ')
-    sel_cat = request.args.get('category', '전체')
+    sel_cats = request.args.getlist('category')
+    if not sel_cats or '전체' in sel_cats:
+        sel_cats = []
     try:
         start_dt = datetime.strptime(start_date_str, '%Y-%m-%d %H:%M')
         end_dt = datetime.strptime(end_date_str, '%Y-%m-%d %H:%M')
@@ -23011,8 +23248,8 @@ def admin_settlement_category_excel():
     q = q.filter(Order.created_at >= start_dt, Order.created_at <= end_dt)
     if not is_master:
         q = q.filter(OrderItem.product_category.in_(my_categories))
-    if sel_cat != '전체':
-        q = q.filter(OrderItem.product_category == sel_cat)
+    if sel_cats:
+        q = q.filter(OrderItem.product_category.in_(sel_cats))
     rows = []
     for oi, o, p in q.order_by(Order.created_at.desc(), OrderItem.id.asc()).all():
         spec = (p.spec if p else None) or "-"
@@ -23436,6 +23673,11 @@ with app.app_context():
         db.session.rollback()
     try:
         db.session.execute(text('ALTER TABLE product ADD COLUMN last_reset_at DATETIME'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    try:
+        db.session.execute(text('ALTER TABLE product ADD COLUMN display_start_at DATETIME'))
         db.session.commit()
     except Exception:
         db.session.rollback()

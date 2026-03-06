@@ -63,7 +63,7 @@ class Category(db.Model):
     """카테고리 및 판매 사업자 정보 모델"""
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
-    category_type = db.Column(db.String(20), default='입점형')
+    category_type = db.Column(db.String(20), default='공급자형')
     tax_type = db.Column(db.String(20), default='과세')
     manager_email = db.Column(db.String(120), nullable=True)
     seller_name = db.Column(db.String(100), nullable=True)
@@ -104,6 +104,7 @@ class Product(db.Model):
     detail_image_url = db.Column(db.Text)
     stock = db.Column(db.Integer, default=10)
     deadline = db.Column(db.DateTime, nullable=True)
+    display_start_at = db.Column(db.DateTime, nullable=True)  # 노출시작시간: 이 시각 이전에는 목록/메인에 미노출
     reset_time = db.Column(db.String(5), nullable=True)
     reset_to_quantity = db.Column(db.Integer, nullable=True)
     last_reset_at = db.Column(db.DateTime, nullable=True)
