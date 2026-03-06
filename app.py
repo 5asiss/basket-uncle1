@@ -1,4 +1,6 @@
 import os
+import sys
+import traceback
 import requests
 from dotenv import load_dotenv
 import base64
@@ -484,10 +486,7 @@ def _login_redirect_target(next_url):
 
 @app.errorhandler(500)
 def internal_error(e):
-    """500 발생 시 콘솔에 traceback 출력 (원인 파악용)."""
-    import sys
-    import traceback
-    # 터미널에 반드시 출력되도록 print 사용
+    """500 발생 시 콘솔/로그에 traceback 출력 (원인 파악용)."""
     print("\n" + "=" * 60 + " 500 Internal Server Error " + "=" * 60, flush=True)
     if e is not None:
         print("Exception:", type(e).__name__, str(e), flush=True)
@@ -499,8 +498,11 @@ def internal_error(e):
         traceback.print_exception(exc_type, exc_value, exc_tb)
     print("=" * 60, flush=True)
     return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'><title>오류</title></head><body>"
-        "<h1>Internal Server Error</h1><p>서버 오류가 발생했습니다. 터미널(콘솔) 로그를 확인해 주세요.</p>"
+        "<!DOCTYPE html><html><head><meta charset='utf-8'><title>오류</title></head><body style='font-family: sans-serif; padding: 2rem;'>"
+        "<h1>서버 오류 (500)</h1>"
+        "<p>일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.</p>"
+        "<p><a href='/'>메인으로 이동</a> · <a href='/health'>서버 상태 확인</a></p>"
+        "<p style='color:#888; font-size:0.9em; margin-top:2rem;'>배포 환경(Render 등)에서는 대시보드의 <strong>Logs</strong> 탭에서 위 오류 내용을 확인할 수 있습니다.</p>"
         "</body></html>",
         500,
     )
@@ -3809,80 +3811,113 @@ def index():
         all_categories = []
     grouped_products = {}
     # 상품 노출 유지(판매종료·마감 상품도 표시). 정렬: 판매중 먼저, 마감된 상품 제일 뒤
-    is_sellable = and_(
-        or_(Product.stock.is_(None), Product.stock > 0),
-        or_(Product.deadline.is_(None), Product.deadline > now)
-    )
-    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
+    try:
+        is_sellable = and_(
+            or_(Product.stock.is_(None), Product.stock > 0),
+            or_(Product.deadline.is_(None), Product.deadline > now)
+        )
+        displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
 
-    latest_all = Product.query.filter_by(is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
-    random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
+        latest_all = Product.query.filter_by(is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
+        random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
 
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = now.replace(hour=23, minute=59, second=59)
-    # 오늘 마감인 상품 전부(이미 마감된 것 포함). 판매중 먼저, 마감된 건 제일 뒤
-    closing_today = Product.query.filter(
-        Product.is_active == True,
-        Product.deadline >= today_start,
-        Product.deadline <= today_end
-    ).filter(displayable).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now.replace(hour=23, minute=59, second=59)
+        # 오늘 마감인 상품 전부(이미 마감된 것 포함). 판매중 먼저, 마감된 건 제일 뒤
+        closing_today = Product.query.filter(
+            Product.is_active == True,
+            Product.deadline >= today_start,
+            Product.deadline <= today_end
+        ).filter(displayable).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
 
-    for cat in all_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
-        if prods:
-            grouped_products[cat] = prods
+        for cat in all_categories:
+            prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
+            if prods:
+                grouped_products[cat] = prods
 
-    latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
-    all_pids = set()
-    for p in random_latest: all_pids.add(p.id)
-    for p in closing_today: all_pids.add(p.id)
-    for prods in grouped_products.values():
-        for p in prods: all_pids.add(p.id)
-    review_counts = {}
-    if all_pids:
-        review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
-    now = now_kst()
+        latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
+        all_pids = set()
+        for p in random_latest: all_pids.add(p.id)
+        for p in closing_today: all_pids.add(p.id)
+        for prods in grouped_products.values():
+            for p in prods: all_pids.add(p.id)
+        review_counts = {}
+        if all_pids:
+            review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
+        now = now_kst()
 
-    # 게시판별 추천 많은 순 상위 4개 (메인 하단 노출)
-    def _top_restaurant_ids(limit=4):
-        subq = db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id).label('up')).filter(RestaurantVote.vote_type == 'up').group_by(RestaurantVote.restaurant_request_id).subquery()
-        rows = db.session.query(RestaurantRequest.id).outerjoin(subq, RestaurantRequest.id == subq.c.restaurant_request_id).filter(RestaurantRequest.is_hidden == False, RestaurantRequest.is_notice == False).order_by(func.coalesce(subq.c.up, 0).desc(), RestaurantRequest.id.desc()).limit(limit).all()
-        return [r[0] for r in rows]
-    def _top_delivery_ids(limit=4):
-        subq = db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id).label('up')).filter(DeliveryRequestVote.vote_type == 'up').group_by(DeliveryRequestVote.delivery_request_id).subquery()
-        rows = db.session.query(DeliveryRequest.id).outerjoin(subq, DeliveryRequest.id == subq.c.delivery_request_id).filter(DeliveryRequest.is_hidden == False, DeliveryRequest.is_notice == False).order_by(func.coalesce(subq.c.up, 0).desc(), DeliveryRequest.id.desc()).limit(limit).all()
-        return [r[0] for r in rows]
-    r_ids = _top_restaurant_ids(4)
-    main_restaurant_posts = []
-    if r_ids:
-        main_restaurant_posts = RestaurantRequest.query.filter(RestaurantRequest.id.in_(r_ids)).all()
-        main_restaurant_posts.sort(key=lambda p: r_ids.index(p.id))
-    d_ids = _top_delivery_ids(4)
-    main_delivery_posts = []
-    if d_ids:
-        main_delivery_posts = DeliveryRequest.query.filter(DeliveryRequest.id.in_(d_ids)).all()
-        main_delivery_posts.sort(key=lambda p: d_ids.index(p.id))
-    main_partnership_posts = PartnershipInquiry.query.filter_by(is_hidden=False, is_notice=False).order_by(PartnershipInquiry.id.desc()).limit(4).all()
-    main_free_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=False).order_by(FreeBoard.id.desc()).limit(4).all()
-    # 게시판 추천/비추천 수 일괄 조회 (N+1 제거)
-    main_restaurant_votes = {}
-    if r_ids:
-        up_r = dict(db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id)).filter(RestaurantVote.restaurant_request_id.in_(r_ids), RestaurantVote.vote_type == 'up').group_by(RestaurantVote.restaurant_request_id).all())
-        down_r = dict(db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id)).filter(RestaurantVote.restaurant_request_id.in_(r_ids), RestaurantVote.vote_type == 'down').group_by(RestaurantVote.restaurant_request_id).all())
-        leg_r = dict(db.session.query(RestaurantRecommend.restaurant_request_id, func.count(RestaurantRecommend.id)).filter(RestaurantRecommend.restaurant_request_id.in_(r_ids)).group_by(RestaurantRecommend.restaurant_request_id).all())
-        for rid in r_ids:
-            u, d = up_r.get(rid, 0), down_r.get(rid, 0)
-            if u == 0 and d == 0:
-                u = leg_r.get(rid, 0)
-            main_restaurant_votes[rid] = (u, d)
-    main_delivery_votes = {}
-    if d_ids:
-        up_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'up').group_by(DeliveryRequestVote.delivery_request_id).all())
-        down_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'down').group_by(DeliveryRequestVote.delivery_request_id).all())
-        main_delivery_votes = {did: (up_d.get(did, 0), down_d.get(did, 0)) for did in d_ids}
+        # 게시판별 추천 많은 순 상위 4개 (메인 하단 노출)
+        def _top_restaurant_ids(limit=4):
+            subq = db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id).label('up')).filter(RestaurantVote.vote_type == 'up').group_by(RestaurantVote.restaurant_request_id).subquery()
+            rows = db.session.query(RestaurantRequest.id).outerjoin(subq, RestaurantRequest.id == subq.c.restaurant_request_id).filter(RestaurantRequest.is_hidden == False, RestaurantRequest.is_notice == False).order_by(func.coalesce(subq.c.up, 0).desc(), RestaurantRequest.id.desc()).limit(limit).all()
+            return [r[0] for r in rows]
+        def _top_delivery_ids(limit=4):
+            subq = db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id).label('up')).filter(DeliveryRequestVote.vote_type == 'up').group_by(DeliveryRequestVote.delivery_request_id).subquery()
+            rows = db.session.query(DeliveryRequest.id).outerjoin(subq, DeliveryRequest.id == subq.c.delivery_request_id).filter(DeliveryRequest.is_hidden == False, DeliveryRequest.is_notice == False).order_by(func.coalesce(subq.c.up, 0).desc(), DeliveryRequest.id.desc()).limit(limit).all()
+            return [r[0] for r in rows]
+        r_ids = _top_restaurant_ids(4)
+        main_restaurant_posts = []
+        if r_ids:
+            main_restaurant_posts = RestaurantRequest.query.filter(RestaurantRequest.id.in_(r_ids)).all()
+            main_restaurant_posts.sort(key=lambda p: r_ids.index(p.id))
+        d_ids = _top_delivery_ids(4)
+        main_delivery_posts = []
+        if d_ids:
+            main_delivery_posts = DeliveryRequest.query.filter(DeliveryRequest.id.in_(d_ids)).all()
+            main_delivery_posts.sort(key=lambda p: d_ids.index(p.id))
+        main_partnership_posts = PartnershipInquiry.query.filter_by(is_hidden=False, is_notice=False).order_by(PartnershipInquiry.id.desc()).limit(4).all()
+        main_free_posts = FreeBoard.query.filter_by(is_hidden=False, is_notice=False).order_by(FreeBoard.id.desc()).limit(4).all()
+        # 게시판 추천/비추천 수 일괄 조회 (N+1 제거)
+        main_restaurant_votes = {}
+        if r_ids:
+            up_r = dict(db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id)).filter(RestaurantVote.restaurant_request_id.in_(r_ids), RestaurantVote.vote_type == 'up').group_by(RestaurantVote.restaurant_request_id).all())
+            down_r = dict(db.session.query(RestaurantVote.restaurant_request_id, func.count(RestaurantVote.id)).filter(RestaurantVote.restaurant_request_id.in_(r_ids), RestaurantVote.vote_type == 'down').group_by(RestaurantVote.restaurant_request_id).all())
+            leg_r = dict(db.session.query(RestaurantRecommend.restaurant_request_id, func.count(RestaurantRecommend.id)).filter(RestaurantRecommend.restaurant_request_id.in_(r_ids)).group_by(RestaurantRecommend.restaurant_request_id).all())
+            for rid in r_ids:
+                u, d = up_r.get(rid, 0), down_r.get(rid, 0)
+                if u == 0 and d == 0:
+                    u = leg_r.get(rid, 0)
+                main_restaurant_votes[rid] = (u, d)
+        main_delivery_votes = {}
+        if d_ids:
+            up_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'up').group_by(DeliveryRequestVote.delivery_request_id).all())
+            down_d = dict(db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id)).filter(DeliveryRequestVote.delivery_request_id.in_(d_ids), DeliveryRequestVote.vote_type == 'down').group_by(DeliveryRequestVote.delivery_request_id).all())
+            main_delivery_votes = {did: (up_d.get(did, 0), down_d.get(did, 0)) for did in d_ids}
 
-    has_more_categories = False
-    total_categories_count = len(all_categories)
+        has_more_categories = False
+        total_categories_count = len(all_categories)
+    except Exception:
+        traceback.print_exc()
+        grouped_products = {}
+        random_latest = []
+        closing_today = []
+        latest_reviews = []
+        review_counts = {}
+        now = now_kst()
+        main_restaurant_posts = []
+        main_delivery_posts = []
+        main_partnership_posts = []
+        main_free_posts = []
+        main_restaurant_votes = {}
+        main_delivery_votes = {}
+        has_more_categories = False
+        total_categories_count = len(all_categories) if all_categories else 0
+        _err_content = (
+            '<div class="max-w-2xl mx-auto px-4 py-16 text-center">'
+            '<h2 class="text-xl font-black text-gray-800 mb-4">메인 페이지를 일시적으로 불러올 수 없습니다</h2>'
+            '<p class="text-gray-600 mb-6">잠시 후 다시 시도해 주세요. 계속되면 서버 로그를 확인해 주세요.</p>'
+            '<a href="/" class="inline-block bg-teal-600 text-white px-6 py-3 rounded-xl font-bold">새로고침</a> '
+            '<a href="/health" class="inline-block ml-3 border border-gray-300 px-6 py-3 rounded-xl font-bold text-gray-700">서버 상태</a>'
+            '</div>'
+        )
+        return render_template_string(HEADER_HTML + _err_content + FOOTER_HTML,
+            grouped_products=grouped_products, random_latest=random_latest, closing_today=closing_today,
+            latest_reviews=latest_reviews, review_counts=review_counts, now=now,
+            has_more_categories=has_more_categories, total_categories_count=total_categories_count,
+            all_categories=all_categories, main_restaurant_posts=main_restaurant_posts,
+            main_delivery_posts=main_delivery_posts, main_partnership_posts=main_partnership_posts,
+            main_free_posts=main_free_posts, main_restaurant_votes=main_restaurant_votes,
+            main_delivery_votes=main_delivery_votes)
 
     content = """
 <style>
@@ -4568,37 +4603,60 @@ def index_horizontal():
         all_categories = []
     grouped_products = {}
     # 상품 노출 유지(판매종료·마감 상품도 표시). 정렬: 판매중 먼저, 마감된 상품 제일 뒤
-    is_sellable = and_(
-        or_(Product.stock.is_(None), Product.stock > 0),
-        or_(Product.deadline.is_(None), Product.deadline > now)
-    )
-    displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
-    latest_all = Product.query.filter_by(is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
-    random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = now.replace(hour=23, minute=59, second=59)
-    closing_today = Product.query.filter(
-        Product.is_active == True,
-        Product.deadline >= today_start,
-        Product.deadline <= today_end
-    ).filter(displayable).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
-    for cat in all_categories:
-        prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
-        if prods:
-            grouped_products[cat] = prods
-    all_pids = set()
-    for p in random_latest:
-        all_pids.add(p.id)
-    for p in closing_today:
-        all_pids.add(p.id)
-    for prods in grouped_products.values():
-        for p in prods:
+    try:
+        is_sellable = and_(
+            or_(Product.stock.is_(None), Product.stock > 0),
+            or_(Product.deadline.is_(None), Product.deadline > now)
+        )
+        displayable = or_(Product.display_start_at.is_(None), Product.display_start_at <= now)
+        latest_all = Product.query.filter_by(is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.id.desc()).limit(latest_count * 2).all()
+        random_latest = random.sample(latest_all, min(len(latest_all), latest_count)) if latest_all else []
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now.replace(hour=23, minute=59, second=59)
+        closing_today = Product.query.filter(
+            Product.is_active == True,
+            Product.deadline >= today_start,
+            Product.deadline <= today_end
+        ).filter(displayable).order_by((Product.deadline > now).desc(), Product.deadline.asc()).limit(closing_count).all()
+        for cat in all_categories:
+            prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
+            if prods:
+                grouped_products[cat] = prods
+        all_pids = set()
+        for p in random_latest:
             all_pids.add(p.id)
-    review_counts = {}
-    if all_pids:
-        review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
-    has_more_categories = False
-    total_categories_count = len(all_categories)
+        for p in closing_today:
+            all_pids.add(p.id)
+        for prods in grouped_products.values():
+            for p in prods:
+                all_pids.add(p.id)
+        review_counts = {}
+        if all_pids:
+            review_counts = dict(db.session.query(Review.product_id, func.count(Review.id)).filter(Review.product_id.in_(all_pids)).group_by(Review.product_id).all())
+        has_more_categories = False
+        total_categories_count = len(all_categories)
+    except Exception:
+        traceback.print_exc()
+        grouped_products = {}
+        random_latest = []
+        closing_today = []
+        review_counts = {}
+        has_more_categories = False
+        total_categories_count = len(all_categories) if all_categories else 0
+        _err_content = (
+            '<div class="max-w-2xl mx-auto px-4 py-16 text-center">'
+            '<h2 class="text-xl font-black text-gray-800 mb-4">가로 보기를 일시적으로 불러올 수 없습니다</h2>'
+            '<p class="text-gray-600 mb-6">잠시 후 다시 시도해 주세요.</p>'
+            '<a href="/" class="inline-block bg-teal-600 text-white px-6 py-3 rounded-xl font-bold">세로 보기</a> '
+            '<a href="/horizontal" class="inline-block ml-3 border border-gray-300 px-6 py-3 rounded-xl font-bold">새로고침</a> '
+            '<a href="/health" class="inline-block ml-3 border border-gray-300 px-6 py-3 rounded-xl font-bold text-gray-700">서버 상태</a>'
+            '</div>'
+        )
+        return render_template_string(HEADER_HTML + _err_content + FOOTER_HTML,
+            grouped_products=grouped_products, random_latest=random_latest, closing_today=closing_today,
+            review_counts=review_counts, has_more_categories=has_more_categories,
+            total_categories_count=total_categories_count, all_categories=all_categories,
+            now=now_kst())
 
     content = """
 <style>
