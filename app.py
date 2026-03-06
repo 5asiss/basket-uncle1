@@ -2160,7 +2160,7 @@ HEADER_HTML = """
         var openBtn = document.getElementById('scroll-search-bar-open');
         var closeBtn = document.getElementById('scroll-search-bar-close');
         var path = window.location.pathname || '';
-        var allowScrollSearch = path === '/' || path === '/search' || path.indexOf('/category/') === 0 || path.indexOf('/product/') === 0;
+        var allowScrollSearch = path === '/' || path === '/horizontal' || path === '/search' || path.indexOf('/category/') === 0 || path.indexOf('/product/') === 0;
         if (!allowScrollSearch) {
             if (scrollBar) scrollBar.style.display = 'none';
             if (openBtn) openBtn.style.display = 'none';
@@ -2391,11 +2391,7 @@ FOOTER_HTML = """
                         <p class="pt-4 text-stone-600 font-bold uppercase tracking-widest">© 2026 BASAM. All Rights Reserved.</p>
                     </div>
                 </div>
-                <div class="hidden md:flex justify-end md:justify-center">
-                    <span class="w-14 h-14 rounded-2xl bg-stone-800 flex items-center justify-center text-stone-600 shrink-0">
-                        <i class="fas fa-truck-fast text-2xl"></i>
-                    </span>
-                </div>
+                
             </div>
         </div>
     </footer>
@@ -3545,7 +3541,10 @@ def inject_globals():
     try:
         # 비회원(미인증)이면 장바구니/메시지 수 없음, 카테고리는 등급 1 기준으로 표시 (좌측 메뉴·검색바용)
         if not getattr(current_user, 'is_authenticated', False):
-            nav_categories = categories_for_member_grade(1).all()
+            try:
+                nav_categories = categories_for_member_grade(1).all()
+            except Exception:
+                nav_categories = []
             return dict(cart_count=0, unread_message_count=0, now=now_kst(), managers=[], nav_categories=nav_categories)
         cart_count = 0
         unread_message_count = 0
@@ -3790,12 +3789,24 @@ def search_view():
 @app.route('/')
 def index():
     """메인 페이지 (디자인 유지). 카테고리·상품 개수는 관리자 > 메인화면 설정에서 조정. 판매 마감(재고0·마감경과) 상품은 노출하지 않음."""
-    _record_page_view('main')
-    run_product_stock_reset()
+    try:
+        _record_page_view('main')
+    except Exception:
+        pass
+    try:
+        run_product_stock_reset()
+    except Exception:
+        pass
     now = now_kst()
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
-    main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
-    all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
+    try:
+        main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
+    except Exception:
+        main_cat_count, products_per_cat, latest_count, closing_count = 8, 20, 30, 50
+    try:
+        all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
+    except Exception:
+        all_categories = []
     grouped_products = {}
     # 상품 노출 유지(판매종료·마감 상품도 표시). 정렬: 판매중 먼저, 마감된 상품 제일 뒤
     is_sellable = and_(
@@ -4454,6 +4465,15 @@ def index():
     {% endif %}
     {% endfor %}
 
+    <div class="mt-10 flex justify-center">
+        {% set _p = request.path if request else '' %}
+        <div class="flex items-center gap-2 text-[11px] md:text-xs">
+            <span class="text-slate-500 font-medium">보기 방식</span>
+            <a href="/" class="px-3 py-1.5 rounded-lg {% if _p != '/horizontal' %}bg-teal-100 text-teal-800 font-bold border border-teal-200{% else %}bg-slate-100 text-slate-600 font-semibold border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition{% endif %}">세로타입</a>
+            <a href="/horizontal" class="px-3 py-1.5 rounded-lg {% if _p == '/horizontal' %}bg-teal-100 text-teal-800 font-bold border border-teal-200{% else %}bg-slate-100 text-slate-600 font-semibold border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition{% endif %}">가로타입</a>
+        </div>
+    </div>
+
     <!-- 게시판 인기글 (추천순, 각 4개) -->
     <section class="mb-10 pt-8 border-t border-slate-200">
         <div class="flex justify-between items-end border-b border-slate-100 pb-3 mb-4">
@@ -4528,12 +4548,24 @@ def index():
 @app.route('/horizontal')
 def index_horizontal():
     """메인 가로타입 보기: 카테고리·상품을 가로 스크롤로 표시."""
-    _record_page_view('main')
-    run_product_stock_reset()
+    try:
+        _record_page_view('main')
+    except Exception:
+        pass
+    try:
+        run_product_stock_reset()
+    except Exception:
+        pass
     now = now_kst()
     grade = (getattr(current_user, 'member_grade', 1) or 1) if current_user.is_authenticated else 1
-    main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
-    all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
+    try:
+        main_cat_count, products_per_cat, latest_count, closing_count = get_main_display_config()
+    except Exception:
+        main_cat_count, products_per_cat, latest_count, closing_count = 8, 20, 30, 50
+    try:
+        all_categories = categories_for_member_grade(grade).order_by(Category.order.asc(), Category.id.asc()).all()
+    except Exception:
+        all_categories = []
     grouped_products = {}
     # 상품 노출 유지(판매종료·마감 상품도 표시). 정렬: 판매중 먼저, 마감된 상품 제일 뒤
     is_sellable = and_(
@@ -4571,8 +4603,37 @@ def index_horizontal():
     content = """
 <style>
 .page-main-h { overflow-x: hidden; }
-.page-main-h .hero-wrap { background: linear-gradient(165deg, #0c1222 0%, #1a2744 35%, #0f172a 70%, #020617 100%); color: #f8fafc; padding: clamp(1.5rem, 4vw, 3rem) 1rem; min-height: 28vh; display: flex; align-items: center; }
-.page-main-h .hero-inner { max-width: 56rem; margin: 0 auto; text-align: center; }
+/* 세로모드 메인 히어로와 동일한 스타일 */
+.page-main-h { --hero-bg: linear-gradient(165deg, #0c1222 0%, #1a2744 35%, #0f172a 70%, #020617 100%); }
+.page-main-h .hero-wrap {
+    background: var(--hero-bg);
+    color: #f8fafc;
+    padding: clamp(1.75rem, 6vw, 5rem) 1rem clamp(2rem, 8vw, 4.5rem);
+    position: relative;
+    overflow: hidden;
+    min-height: 40vh;
+    display: flex;
+    align-items: center;
+}
+@media (min-width: 768px) { .page-main-h .hero-wrap { min-height: 55vh; padding: clamp(3rem, 8vw, 5.5rem) 1.5rem; } }
+.page-main-h .hero-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(13, 148, 136, 0.18) 0%, transparent 50%),
+                radial-gradient(ellipse 60% 40% at 80% 60%, rgba(13, 148, 136, 0.08) 0%, transparent 40%);
+    pointer-events: none;
+}
+.page-main-h .hero-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    opacity: 0.6;
+}
+.page-main-h .hero-inner { position: relative; z-index: 1; max-width: 56rem; margin: 0 auto; text-align: center; }
+.page-main-h .hero-divider { width: 3rem; height: 0.25rem; border-radius: 9999px; background: rgba(255,255,255,0.18); margin: 1.1rem auto 1.25rem; }
 /* 가로 스크롤: 스크롤바 숨김 + 좌우 화살표를 상품 영역 위에 투명 오버레이 */
 .page-main-h .scroll-wrap { position: relative; }
 .page-main-h .scroll-wrap .scroll-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 10; width: 2.25rem; height: 2.25rem; border-radius: 50%; background: rgba(255,255,255,0.55); border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 2px 12px rgba(0,0,0,0.06); color: #475569; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s, color 0.2s, box-shadow 0.2s; font-size: 0.7rem; }
@@ -4624,11 +4685,20 @@ def index_horizontal():
 <div class="hero-wrap">
     <div class="hero-inner">
         <span class="text-[11px] md:text-xs tracking-[.16em] uppercase text-slate-100 block mb-2">Bright Local Fresh Delivery</span>
-        <h1 class="text-xl md:text-2xl font-semibold text-white leading-snug mb-2">엄선된 제철 농산물, 당일 배송으로 전해드립니다.</h1>
-        <div class="flex justify-center gap-2 mt-4 text-xs">
-            <span class="text-slate-500 font-medium">보기 방식</span>
-            <a href="/" class="px-3 py-1.5 rounded-lg bg-slate-600/50 text-slate-300 font-semibold border border-slate-500 hover:bg-slate-500 hover:text-white transition">세로타입</a>
-            <a href="/horizontal" class="px-3 py-1.5 rounded-lg bg-teal-500/80 text-white font-bold border border-teal-400">가로타입</a>
+        <h1 class="text-2xl md:text-3xl lg:text-4xl font-semibold text-white leading-snug md:leading-snug mb-3">
+            엄선된 제철 농산물,<br class="hidden md:block">당일 배송으로 가장 신선하게 전해드립니다.
+        </h1>
+        <div class="hero-divider"></div>
+        <p class="text-[13px] md:text-sm text-slate-300 mt-1 mb-6 max-w-2xl">
+            송도 지역을 위한 맞춤형 서비스, 효율적인 유통시스템으로 비용을 최소화하고, 최상의 품질을 유지합니다.
+        </p>
+        <div class="flex flex-col md:flex-row justify-center items-center gap-3 md:gap-4">
+            <a href="#products" class="inline-flex items-center justify-center px-5 md:px-6 py-3 rounded-full bg-gray-900 text-white text-sm md:text-base font-medium hover:bg-black transition">
+                오늘의 신선상품 보기
+            </a>
+            <a href="/about" class="inline-flex items-center justify-center px-4 py-2 text-[13px] md:text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-full transition">
+                바구니삼촌이란?
+            </a>
         </div>
     </div>
 </div>
@@ -4866,6 +4936,15 @@ def index_horizontal():
     </section>
     {% endif %}
     {% endfor %}
+
+    <div class="mt-10 flex justify-center">
+        {% set _p = request.path if request else '' %}
+        <div class="flex items-center gap-2 text-[11px] md:text-xs">
+            <span class="text-slate-500 font-medium">보기 방식</span>
+            <a href="/" class="px-3 py-1.5 rounded-lg {% if _p != '/horizontal' %}bg-teal-100 text-teal-800 font-bold border border-teal-200{% else %}bg-slate-100 text-slate-600 font-semibold border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition{% endif %}">세로타입</a>
+            <a href="/horizontal" class="px-3 py-1.5 rounded-lg {% if _p == '/horizontal' %}bg-teal-100 text-teal-800 font-bold border border-teal-200{% else %}bg-slate-100 text-slate-600 font-semibold border border-slate-200 hover:bg-slate-200 hover:text-slate-800 transition{% endif %}">가로타입</a>
+        </div>
+    </div>
 </div>
 </div>
 <script>
@@ -8442,7 +8521,7 @@ def product_detail(pid):
                                                   일반 상품: 밤12시 마감마감  - 오후배송 </li>
                 <li><strong>배송비:</strong> 기본 1,900원 + 카테고리별 1,900원 추가 + 카테고리별 50,000원이상 1,900원 추가 </li>
             </ul>
-    
+
             <h3 class="text-lg font-black text-gray-800 mb-4">교환 및 반품 안내</h3>
             <div class="space-y-4 text-sm text-gray-700 mb-10">
                 <div>
