@@ -119,10 +119,13 @@ class Product(db.Model):
     naver_lowest_updated_at = db.Column(db.DateTime, nullable=True)
     # 구매 제한: 0이면 제한 없음, N이면 1인당(1주문당) 최대 N개까지 구매 가능
     max_purchase_quantity = db.Column(db.Integer, default=0)
+    # 공급사(상품별). 카테고리는 날짜별 운영 예정이므로 발주·취합은 공급사 기준
+    supplier = db.Column(db.String(100), nullable=True)
 
 
 class Cart(db.Model):
     """장바구니 모델"""
+    __tablename__ = "cart"
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     product_id = db.Column(db.Integer)
@@ -179,6 +182,8 @@ class OrderItem(db.Model):
     delivery_proof_image_url = db.Column(db.String(500), nullable=True)
     settlement_status = db.Column(db.String(20), default='입금대기')
     settled_at = db.Column(db.DateTime, nullable=True)
+    # 주문 시점 공급사(Product.supplier 복사). 이력·취합용
+    supplier = db.Column(db.String(100), nullable=True)
 
 
 class OrderItemLog(db.Model):
@@ -606,3 +611,19 @@ class BulkImageMap(db.Model):
     file_name = db.Column(db.String(255), unique=True, nullable=False)
     url = db.Column(db.String(512), nullable=False)
     created_at = db.Column(db.DateTime, default=_now_kst)
+
+
+class EmailOrderDispatch(db.Model):
+    """이메일 발주 발송 — 관리자가 발주서 내용(표/이미지/엑셀)을 만들어 보내고, 받는 사람이 확인 버튼을 누르면 수신확인으로 표시."""
+    __tablename__ = "email_order_dispatch"
+    id = db.Column(db.Integer, primary_key=True)
+    recipient_email = db.Column(db.String(200), nullable=False)
+    recipient_name = db.Column(db.String(100), nullable=True)   # 공급사명
+    subject = db.Column(db.String(300), nullable=False)
+    body_html = db.Column(db.Text, nullable=True)              # 표 붙여넣기 또는 엑셀→HTML
+    image_urls = db.Column(db.Text, nullable=True)              # JSON array of URLs
+    confirm_token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    sent_at = db.Column(db.DateTime, default=_now_kst)
+    confirmed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=_now_kst)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)

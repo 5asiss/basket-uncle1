@@ -72,8 +72,27 @@ def _ensure_product_display_start_column():
         print(f"[DB MIGRATION] product.display_start_at 컬럼 점검/추가 중 오류: {e!r}", flush=True)
 
 
+def _ensure_supplier_columns():
+    """product.supplier, order_item.supplier 컬럼이 없으면 자동 추가 (공급사별 취합용)."""
+    try:
+        insp = inspect(db.engine)
+        pcols = [c["name"] for c in insp.get_columns("product")]
+        if "supplier" not in pcols:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE product ADD COLUMN supplier VARCHAR(100)"))
+            print("[DB MIGRATION] product.supplier 컬럼을 추가했습니다.", flush=True)
+        oicols = [c["name"] for c in insp.get_columns("order_item")]
+        if "supplier" not in oicols:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE order_item ADD COLUMN supplier VARCHAR(100)"))
+            print("[DB MIGRATION] order_item.supplier 컬럼을 추가했습니다.", flush=True)
+    except Exception as e:
+        print(f"[DB MIGRATION] supplier 컬럼 점검/추가 중 오류: {e!r}", flush=True)
+
+
 with app.app_context():
     _ensure_product_display_start_column()
+    _ensure_supplier_columns()
 
 # 3. 배송 관리 시스템 Blueprint 등록 (주소 접두어 /logi 적용됨)
 app.register_blueprint(logi_bp)
@@ -578,6 +597,7 @@ from models import (
     EventWinnerPost,
     EventWinnerAttachment,
     BulkImageMap,
+    EmailOrderDispatch,
 )
 
 
@@ -1118,7 +1138,8 @@ def _get_category_delivery_settings(cat_name):
     cat = Category.query.filter_by(name=cat_name).first()
     if not cat:
         return 1900, None, 50000, 1900, 0
-    base = int(getattr(cat, 'delivery_base_fee', None) or 1900)
+    base_raw = getattr(cat, 'delivery_base_fee', None)
+    base = int(base_raw) if base_raw is not None else 1900
     free_over = getattr(cat, 'delivery_free_over', None)
     if free_over is not None:
         free_over = int(free_over)
@@ -1127,8 +1148,10 @@ def _get_category_delivery_settings(cat_name):
         extra_threshold = 50000
     else:
         extra_threshold = int(extra_threshold)
-    extra_fee = int(getattr(cat, 'delivery_extra_fee', None) or 1900)
-    per_item = int(getattr(cat, 'delivery_fee_per_item', None) or 0)
+    extra_fee_raw = getattr(cat, 'delivery_extra_fee', None)
+    extra_fee = int(extra_fee_raw) if extra_fee_raw is not None else 1900
+    per_item_raw = getattr(cat, 'delivery_fee_per_item', None)
+    per_item = int(per_item_raw) if per_item_raw is not None else 0
     return base, free_over, extra_threshold, extra_fee, per_item
 
 
@@ -2166,10 +2189,13 @@ HEADER_HTML = """
     <button type="button" id="scroll-search-bar-open" class="fixed z-30 right-4 top-[4.5rem] md:top-[5.25rem] rounded-full bg-teal-600 text-white shadow-lg py-2.5 px-4 text-xs font-bold hover:bg-teal-700 transition flex items-center gap-1.5" aria-label="검색 열기" style="display: none;"><i class="fas fa-search"></i> 검색</button>
     <div id="mobile-search-nav" class="hidden md:hidden pb-4 pt-2 bg-white border-b border-stone-200 shadow-md mobile-px">
         <div class="max-w-7xl mx-auto px-4 pt-2 pb-3">
-            <form action="/search" method="GET" class="relative">
-                <input name="q" placeholder="상품 검색" class="w-full bg-stone-50 py-3.5 px-5 rounded-xl text-base font-medium border border-stone-100 focus:border-teal-200 focus:ring-2 focus:ring-teal-500/10 outline-none transition">
-                <button type="submit" class="absolute right-4 top-1/2 -translate-y-1/2 text-teal-600"><i class="fas fa-search"></i></button>
-            </form>
+            <div class="flex items-center gap-2 mb-2">
+                <form action="/search" method="GET" class="relative flex-1 min-w-0">
+                    <input name="q" placeholder="상품 검색" class="w-full bg-stone-50 py-3.5 pl-5 pr-12 rounded-xl text-base font-medium border border-stone-100 focus:border-teal-200 focus:ring-2 focus:ring-teal-500/10 outline-none transition">
+                    <button type="submit" class="absolute right-4 top-1/2 -translate-y-1/2 text-teal-600"><i class="fas fa-search"></i></button>
+                </form>
+                <button type="button" id="mobile-search-nav-close" class="shrink-0 px-4 py-3 rounded-xl text-stone-500 hover:bg-stone-100 text-sm font-bold" aria-label="닫기">닫기</button>
+            </div>
         </div>
     </div>
     <main class="min-h-screen">
@@ -2177,7 +2203,17 @@ HEADER_HTML = """
     (function(){
         var toggle = document.getElementById('header-search-toggle');
         var mobileNav = document.getElementById('mobile-search-nav');
-        if (toggle && mobileNav) toggle.addEventListener('click', function() { mobileNav.classList.toggle('hidden'); });
+        if (toggle && mobileNav) {
+            toggle.addEventListener('click', function() {
+                var isHidden = mobileNav.classList.toggle('hidden');
+                toggle.style.display = isHidden ? '' : 'none';
+            });
+            var mobileClose = document.getElementById('mobile-search-nav-close');
+            if (mobileClose) mobileClose.addEventListener('click', function() {
+                mobileNav.classList.add('hidden');
+                toggle.style.display = '';
+            });
+        }
         var scrollBar = document.getElementById('scroll-search-bar');
         var openBtn = document.getElementById('scroll-search-bar-open');
         var closeBtn = document.getElementById('scroll-search-bar-close');
@@ -3855,6 +3891,8 @@ def index():
             if prods:
                 grouped_products[cat] = prods
 
+        # 메인에서는 상품이 있는 카테고리만 표시
+        all_categories = [c for c in all_categories if c in grouped_products]
         latest_reviews = Review.query.order_by(Review.created_at.desc()).limit(4).all()
         all_pids = set()
         for p in random_latest: all_pids.add(p.id)
@@ -4642,6 +4680,8 @@ def index_horizontal():
             prods = Product.query.filter_by(category=cat.name, is_active=True).filter(displayable).order_by(is_sellable.desc(), Product.deadline.asc().nullslast(), Product.id.desc()).limit(products_per_cat).all()
             if prods:
                 grouped_products[cat] = prods
+        # 메인에서는 상품이 있는 카테고리만 표시
+        all_categories = [c for c in all_categories if c in grouped_products]
         all_pids = set()
         for p in random_latest:
             all_pids.add(p.id)
@@ -11518,7 +11558,9 @@ def payment_success():
         db.session.add(order)
         db.session.flush()  # order.id 확보
         for i in items:
-            db.session.add(OrderItem(order_id=order.id, product_id=i.product_id, product_name=i.product_name, product_category=i.product_category, price=i.price, quantity=i.quantity, tax_type=i.tax_type or '과세', item_status='결제완료'))
+            p = Product.query.get(i.product_id)
+            supplier_val = (getattr(p, 'supplier', None) or '').strip() if p else ''
+            db.session.add(OrderItem(order_id=order.id, product_id=i.product_id, product_name=i.product_name, product_category=i.product_category, price=i.price, quantity=i.quantity, tax_type=i.tax_type or '과세', item_status='결제완료', supplier=supplier_val or None))
         db.session.flush()  # OrderItem.id 확보
 
         order_items = OrderItem.query.filter_by(order_id=order.id).order_by(OrderItem.id.asc()).all()
@@ -13034,6 +13076,12 @@ def admin_dashboard():
     settlement_supplier_totals = {}
     settlement_summary = None  # 검색 기간 기준 총 수익/지출/받을돈/나갈돈 (tab == 'settlement'일 때 채움)
     list_uploaded_images = []  # 대량등록 탭에서 static/uploads/ 이미지 목록 (확인용)
+    supplier_orders_agg = []
+    supplier_start_date_str = ''
+    supplier_end_date_str = ''
+    supplier_product_agg = []
+    supplier_product_start_date_str = ''
+    supplier_product_end_date_str = ''
     if request.args.get("tab") == "price_compare":
         price_compare_results = _load_price_compare_results()
         price_compare_truncated = session.get("price_compare_truncated", False)
@@ -13338,6 +13386,150 @@ def admin_dashboard():
         }
         # 오더 목록 (정산 테이블은 n넘버 기준이므로 빈 목록 유지)
         settlement_detail_orders = []
+            
+    elif tab == 'supplier_orders':
+        # 공급사(상품별) 주문 취합 — 상품에 지정한 공급사(supplier) 기준으로 묶음. 카테고리는 날짜별 운영 예정이므로 취합은 공급사 기준.
+        def _parse_date_supplier(s, default_dt):
+            s = (s or '').strip()[:19]
+            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(s, fmt)
+                except ValueError:
+                    continue
+            return default_dt
+        try:
+            supplier_start_dt = _parse_date_supplier(request.args.get('start_date'), (now - timedelta(days=7)).replace(hour=0, minute=0, second=0))
+            supplier_end_dt = _parse_date_supplier(request.args.get('end_date'), now.replace(hour=23, minute=59, second=59))
+        except Exception:
+            supplier_start_dt = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0)
+            supplier_end_dt = now.replace(hour=23, minute=59, second=59)
+        supplier_start_date_str = supplier_start_dt.strftime('%Y-%m-%d %H:%M')[:16]
+        supplier_end_date_str = supplier_end_dt.strftime('%Y-%m-%d %H:%M')[:16]
+        q_ord_supplier = Order.query.filter(
+            Order.created_at >= supplier_start_dt,
+            Order.created_at <= supplier_end_dt,
+            Order.status != '결제취소'
+        )
+        if not is_master:
+            order_ids_supplier = db.session.query(Order.id).join(OrderItem, Order.id == OrderItem.order_id).filter(
+                Order.created_at >= supplier_start_dt,
+                Order.created_at <= supplier_end_dt,
+                Order.status != '결제취소',
+                OrderItem.cancelled == False,
+                OrderItem.product_category.in_(my_categories)
+            ).distinct().all()
+            order_ids_supplier = [r[0] for r in order_ids_supplier]
+        else:
+            order_ids_supplier = [o.id for o in q_ord_supplier.all()]
+        items_supplier = OrderItem.query.filter(
+            OrderItem.order_id.in_(order_ids_supplier),
+            OrderItem.cancelled == False
+        ).order_by(OrderItem.id.asc()).all()
+        if not is_master:
+            items_supplier = [oi for oi in items_supplier if oi.product_category in my_categories]
+        # 공급사: OrderItem.supplier 있으면 사용, 없으면 Product.supplier, 없으면 '(미지정)'
+        from collections import defaultdict
+        agg_by_supplier = defaultdict(lambda: defaultdict(lambda: {'qty': 0, 'price': 0}))
+        for oi in items_supplier:
+            supplier_name = (getattr(oi, 'supplier', None) or '').strip()
+            if not supplier_name:
+                prod = Product.query.get(oi.product_id)
+                supplier_name = (getattr(prod, 'supplier', None) or '').strip() if prod else ''
+            supplier_name = supplier_name or '(미지정)'
+            agg_by_supplier[supplier_name][oi.product_name]['qty'] += oi.quantity
+            agg_by_supplier[supplier_name][oi.product_name]['price'] = oi.price
+        supplier_orders_agg = []
+        for sup_name in sorted(agg_by_supplier.keys()):
+            lines = []
+            total_amount = 0
+            for pname, data in sorted(agg_by_supplier[sup_name].items()):
+                qty = data['qty']
+                price = data['price']
+                line_amount = price * qty
+                total_amount += line_amount
+                lines.append({'product_name': pname, 'total_qty': qty, 'price': price, 'line_amount': line_amount})
+            supplier_orders_agg.append({
+                'supplier_name': sup_name,
+                'lines': lines,
+                'total_amount': total_amount,
+            })
+            
+    elif tab == 'supplier_product_agg':
+        # 상품정보 공급사별 취합 — 공급사별로 품명·규격·카테고리·단가·수량·금액 표시 (발주/상품정보용)
+        def _parse_date_supplier_product(s, default_dt):
+            s = (s or '').strip()[:19]
+            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+                try:
+                    return datetime.strptime(s, fmt)
+                except ValueError:
+                    continue
+            return default_dt
+        try:
+            sp_start_dt = _parse_date_supplier_product(request.args.get('start_date'), (now - timedelta(days=7)).replace(hour=0, minute=0, second=0))
+            sp_end_dt = _parse_date_supplier_product(request.args.get('end_date'), now.replace(hour=23, minute=59, second=59))
+        except Exception:
+            sp_start_dt = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0)
+            sp_end_dt = now.replace(hour=23, minute=59, second=59)
+        supplier_product_start_date_str = sp_start_dt.strftime('%Y-%m-%d %H:%M')[:16]
+        supplier_product_end_date_str = sp_end_dt.strftime('%Y-%m-%d %H:%M')[:16]
+        q_ord_sp = Order.query.filter(
+            Order.created_at >= sp_start_dt,
+            Order.created_at <= sp_end_dt,
+            Order.status != '결제취소'
+        )
+        if not is_master:
+            order_ids_sp = db.session.query(Order.id).join(OrderItem, Order.id == OrderItem.order_id).filter(
+                Order.created_at >= sp_start_dt,
+                Order.created_at <= sp_end_dt,
+                Order.status != '결제취소',
+                OrderItem.cancelled == False,
+                OrderItem.product_category.in_(my_categories)
+            ).distinct().all()
+            order_ids_sp = [r[0] for r in order_ids_sp]
+        else:
+            order_ids_sp = [o.id for o in q_ord_sp.all()]
+        items_sp = OrderItem.query.filter(
+            OrderItem.order_id.in_(order_ids_sp),
+            OrderItem.cancelled == False
+        ).order_by(OrderItem.id.asc()).all()
+        if not is_master:
+            items_sp = [oi for oi in items_sp if oi.product_category in my_categories]
+        from collections import defaultdict
+        agg_sp = defaultdict(lambda: defaultdict(lambda: {'qty': 0, 'price': 0, 'product_id': None}))
+        for oi in items_sp:
+            supplier_name = (getattr(oi, 'supplier', None) or '').strip()
+            if not supplier_name:
+                prod = Product.query.get(oi.product_id)
+                supplier_name = (getattr(prod, 'supplier', None) or '').strip() if prod else ''
+            supplier_name = supplier_name or '(미지정)'
+            agg_sp[supplier_name][oi.product_name]['qty'] += oi.quantity
+            agg_sp[supplier_name][oi.product_name]['price'] = oi.price
+            agg_sp[supplier_name][oi.product_name]['product_id'] = oi.product_id
+        supplier_product_agg = []
+        for sup_name in sorted(agg_sp.keys()):
+            lines = []
+            total_amount = 0
+            for pname, data in sorted(agg_sp[sup_name].items()):
+                qty = data['qty']
+                price = data['price']
+                line_amount = price * qty
+                total_amount += line_amount
+                prod = Product.query.get(data['product_id']) if data.get('product_id') else None
+                spec = (prod.spec or '-').strip() if prod else '-'
+                category = (prod.category or '-').strip() if prod else '-'
+                lines.append({
+                    'product_name': pname,
+                    'spec': spec or '-',
+                    'category': category or '-',
+                    'total_qty': qty,
+                    'price': price,
+                    'line_amount': line_amount,
+                })
+            supplier_product_agg.append({
+                'supplier_name': sup_name,
+                'lines': lines,
+                'total_amount': total_amount,
+            })
             
     elif tab == 'reviews':
         category_names = {c.id: c.name for c in Category.query.all()}
@@ -13964,6 +14156,23 @@ def admin_dashboard():
                 {'product_name': n, **vals} for n, vals in sorted(_sum.items(), key=lambda x: -x[1]['line_total'])
             ]
 
+    email_order_dispatch_list = []
+    email_order_dispatch_with_images = []
+    if tab == 'email_order_confirm' and is_master:
+        email_order_dispatch_list = EmailOrderDispatch.query.order_by(EmailOrderDispatch.created_at.desc()).limit(200).all()
+        try:
+            import json as _json
+            for d in email_order_dispatch_list:
+                img_list = []
+                if getattr(d, 'image_urls', None):
+                    try:
+                        img_list = _json.loads(d.image_urls)
+                    except Exception:
+                        pass
+                email_order_dispatch_with_images.append((d, img_list))
+        except Exception:
+            email_order_dispatch_with_images = [(d, []) for d in email_order_dispatch_list]
+
     # 통계(페이지뷰) 탭: 조회수·주문·상품·회원 등
     stats_page_views_today = stats_page_views_week = stats_page_views_total = {'main': 0, 'category': 0, 'product': 0, 'cart': 0}
     stats_orders_today = stats_orders_week = stats_orders_total = 0
@@ -14141,7 +14350,10 @@ def admin_dashboard():
                 {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-left transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=email_order_confirm" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'email_order_confirm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일 발주확인</a>{% endif %}
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문·매출 집계</a>
+                <a href="/admin?tab=supplier_orders" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'supplier_orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">공급사 주문취합</a>
+                <a href="/admin?tab=supplier_product_agg" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'supplier_product_agg' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품정보 공급사별취합</a>
                 <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
                 {% if is_master %}<a href="/logi/driver-payout" target="_blank" class="px-4 py-3 rounded-xl text-left bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200 transition">기사정산(새창)</a>{% endif %}
             </div>
@@ -14482,6 +14694,115 @@ def admin_dashboard():
                 {% endif %}
             </div>
         {% endif %}
+        {% if tab == 'email_order_confirm' %}
+            <div class="mb-12 p-6 rounded-[2rem] border-2 border-teal-200 bg-teal-50/80 text-left">
+                <h3 class="text-lg font-black text-teal-800 mb-2">이메일 발주 확인</h3>
+                <p class="text-[11px] text-gray-700 mb-4">발주서 내용을 <strong>표 붙여넣기</strong>, <strong>이미지 업로드</strong>, <strong>엑셀 업로드</strong> 중 하나 이상으로 만든 뒤 받는 사람 이메일로 보내면, 수신자가 링크에서 확인 후 [확인 메시지 보내기]를 누를 때 우리 페이지에서 공급사 수신확인/미확인으로 구분됩니다.</p>
+                {% if request.args.get('sent') %}<p class="text-sm font-bold text-teal-600 mb-4">발송되었습니다. 수신자가 확인 링크에서 [확인 메시지 보내기]를 누르면 아래 목록에서 수신확인으로 표시됩니다.</p>{% endif %}
+                {% if request.args.get('err') == 'email' %}<p class="text-sm font-bold text-red-600 mb-4">수신 이메일을 입력해 주세요.</p>{% endif %}
+                {% if request.args.get('err') == 'subject' %}<p class="text-sm font-bold text-red-600 mb-4">제목을 입력해 주세요.</p>{% endif %}
+                {% if request.args.get('err') == 'content' %}<p class="text-sm font-bold text-red-600 mb-4">내용(표 붙여넣기·이미지·엑셀 중 하나 이상)을 넣어 주세요.</p>{% endif %}
+                {% if request.args.get('err') == 'excel' %}<p class="text-sm font-bold text-red-600 mb-4">엑셀/CSV 파일을 확인해 주세요.</p>{% endif %}
+                {% if request.args.get('err') == 'send' %}<p class="text-sm font-bold text-red-600 mb-4">이메일 발송에 실패했습니다. 이메일 설정을 확인해 주세요.</p>{% endif %}
+                <form action="/admin/email-order-dispatch/send" method="POST" enctype="multipart/form-data" class="bg-white p-6 rounded-2xl border border-teal-100 mb-8">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div><label class="block text-[10px] font-black text-gray-600 mb-1">받는 사람 이메일</label><input type="email" name="recipient_email" required placeholder="공급사 이메일" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold"></div>
+                        <div><label class="block text-[10px] font-black text-gray-600 mb-1">공급사명 (선택)</label><input type="text" name="recipient_name" placeholder="예: OO농장" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold"></div>
+                    </div>
+                    <div class="mb-4"><label class="block text-[10px] font-black text-gray-600 mb-1">제목</label><input type="text" name="subject" required placeholder="발주서 제목" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-bold"></div>
+                    <div class="mb-4">
+                        <p class="text-[10px] font-black text-gray-600 mb-2">내용 (표 붙여넣기·이미지·엑셀 중 하나 이상 사용 가능)</p>
+                        <div class="mb-3"><label class="block text-[10px] text-gray-500 mb-1">표/내용 붙여넣기 (엑셀에서 복사한 표 또는 HTML)</label><textarea name="body_html" rows="6" placeholder="엑셀·표에서 복사해 붙여넣거나 HTML 입력" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-mono"></textarea></div>
+                        <div class="mb-3"><label class="block text-[10px] text-gray-500 mb-1">이미지 추가 (선택, 여러 장 가능)</label><input type="file" name="dispatch_image_1" accept="image/*" class="w-full text-sm"><input type="file" name="dispatch_image_2" accept="image/*" class="w-full text-sm mt-2"><input type="file" name="dispatch_image_3" accept="image/*" class="w-full text-sm mt-2"></div>
+                        <div class="mb-3"><label class="block text-[10px] text-gray-500 mb-1">엑셀/CSV로 내용 채우기 (선택, 업로드 시 위 표 붙여넣기 내용을 대체)</label><input type="file" name="excel_file" accept=".xlsx,.xls,.csv" class="w-full text-sm"></div>
+                    </div>
+                    <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-teal-700">발주서 보내기</button>
+                </form>
+                <h4 class="text-sm font-black text-gray-800 mb-3">발송 목록 (공급사 수신확인/미확인)</h4>
+                <div class="flex gap-2 mb-3">
+                    <button type="button" class="dispatch-list-tab px-4 py-2 rounded-xl text-xs font-black transition bg-teal-600 text-white" data-panel="dispatch-panel-list">목록</button>
+                    <button type="button" class="dispatch-list-tab px-4 py-2 rounded-xl text-xs font-black transition bg-gray-200 text-gray-700 hover:bg-gray-300" data-panel="dispatch-panel-content">발송내용</button>
+                    <button type="button" class="dispatch-list-tab px-4 py-2 rounded-xl text-xs font-black transition bg-gray-200 text-gray-700 hover:bg-gray-300" data-panel="dispatch-panel-email">수신이메일</button>
+                </div>
+                <div id="dispatch-panel-list" class="dispatch-panel overflow-x-auto bg-white rounded-2xl border border-teal-100">
+                    <table class="w-full text-left text-[11px] min-w-[600px]">
+                        <thead class="bg-gray-800 text-white"><tr><th class="p-3">공급사(받는 사람)</th><th class="p-3">제목</th><th class="p-3">발송 일시</th><th class="p-3">수신확인</th><th class="p-3">확인 일시</th></tr></thead>
+                        <tbody>
+                            {% for d in email_order_dispatch_list %}
+                            <tr class="border-b border-gray-100">
+                                <td class="p-3 font-bold">{{ d.recipient_name or d.recipient_email }}</td>
+                                <td class="p-3">{{ d.subject[:40] }}{% if d.subject|length > 40 %}...{% endif %}</td>
+                                <td class="p-3">{{ d.sent_at.strftime('%Y-%m-%d %H:%M') if d.sent_at else '-' }}</td>
+                                <td class="p-3">{% if d.confirmed_at %}<span class="text-teal-600 font-black">수신확인</span>{% else %}<span class="text-amber-600 font-black">미확인</span>{% endif %}</td>
+                                <td class="p-3">{{ d.confirmed_at.strftime('%Y-%m-%d %H:%M') if d.confirmed_at else '-' }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="5" class="p-4 text-center text-gray-400 font-bold">아직 발송한 발주서가 없습니다.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div id="dispatch-panel-content" class="dispatch-panel hidden">
+                    <div class="space-y-6">
+                        {% for d, image_list in email_order_dispatch_with_images %}
+                        <div class="bg-white rounded-2xl border border-teal-100 p-5">
+                            <p class="text-[10px] text-gray-500 mb-1">{{ d.sent_at.strftime('%Y-%m-%d %H:%M') if d.sent_at else '-' }} · {{ d.subject }}</p>
+                            {% if d.body_html %}
+                            <div class="prose prose-sm max-w-none text-[11px] mb-3 border-b border-gray-100 pb-3">{{ d.body_html | safe }}</div>
+                            {% endif %}
+                            {% for img_url in image_list %}
+                            <div class="mb-2"><img src="{{ img_url }}" alt="발송 이미지" class="max-w-full max-h-48 object-contain rounded-lg border border-gray-100" loading="lazy"></div>
+                            {% endfor %}
+                            {% if not d.body_html and not image_list %}<p class="text-gray-400 text-xs">(내용 없음)</p>{% endif %}
+                        </div>
+                        {% else %}
+                        <p class="text-gray-400 text-sm font-bold py-4">아직 발송한 발주서가 없습니다.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div id="dispatch-panel-email" class="dispatch-panel hidden overflow-x-auto bg-white rounded-2xl border border-teal-100">
+                    <table class="w-full text-left text-[11px] min-w-[500px]">
+                        <thead class="bg-gray-800 text-white"><tr><th class="p-3">수신 이메일</th><th class="p-3">공급사명</th><th class="p-3">제목</th><th class="p-3">발송 일시</th><th class="p-3">수신확인</th></tr></thead>
+                        <tbody>
+                            {% for d in email_order_dispatch_list %}
+                            <tr class="border-b border-gray-100">
+                                <td class="p-3 font-bold text-teal-700">{{ d.recipient_email }}</td>
+                                <td class="p-3">{{ d.recipient_name or '-' }}</td>
+                                <td class="p-3">{{ d.subject[:50] }}{% if d.subject|length > 50 %}...{% endif %}</td>
+                                <td class="p-3">{{ d.sent_at.strftime('%Y-%m-%d %H:%M') if d.sent_at else '-' }}</td>
+                                <td class="p-3">{% if d.confirmed_at %}<span class="text-teal-600 font-black">수신확인</span>{% else %}<span class="text-amber-600 font-black">미확인</span>{% endif %}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="5" class="p-4 text-center text-gray-400 font-bold">아직 발송한 발주서가 없습니다.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <script>
+                (function(){
+                    var tabs = document.querySelectorAll('.dispatch-list-tab');
+                    var panels = document.querySelectorAll('.dispatch-panel');
+                    function show(panelId) {
+                        panels.forEach(function(p) {
+                            p.classList.add('hidden');
+                            if (p.id === panelId) p.classList.remove('hidden');
+                        });
+                        tabs.forEach(function(t) {
+                            t.classList.remove('bg-teal-600', 'text-white');
+                            t.classList.add('bg-gray-200', 'text-gray-700');
+                            if (t.getAttribute('data-panel') === panelId) {
+                                t.classList.remove('bg-gray-200', 'text-gray-700');
+                                t.classList.add('bg-teal-600', 'text-white');
+                            }
+                        });
+                    }
+                    tabs.forEach(function(t) {
+                        t.addEventListener('click', function() { show(t.getAttribute('data-panel')); });
+                    });
+                })();
+                </script>
+            </div>
+        {% endif %}
         {% if tab == 'products' %}
             <div class="mb-8 p-6 rounded-[2rem] border-2 border-amber-200 bg-amber-50/80 text-left">
                 <p class="font-black text-amber-800 text-sm mb-3 flex items-center gap-2"><span class="text-lg">👋</span> 처음 사용하시는 관리자용 안내</p>
@@ -14810,9 +15131,11 @@ def admin_dashboard():
                   </div>
                   
                   <div class="bg-white rounded-[2.5rem] md:rounded-[3.5rem] border border-gray-50 shadow-sm overflow-hidden h-fit overflow-x-auto -mx-3 md:mx-0">
+                      <p class="text-[11px] text-gray-500 font-bold px-4 pt-4 pb-1">아래 배송료는 주문·장바구니에서 <strong class="text-teal-600">카테고리별로 합산</strong> 적용됩니다. 변경은 각 카테고리 <strong>수정</strong>에서 할 수 있습니다.</p>
+                      <p class="text-[10px] text-gray-400 px-4 pb-3"><strong>사용 설명:</strong> 기본료 = 해당 카테고리 기본 배송료(원). 무료조건 = 이 금액 이상 구매 시 기본료·추가료 없음(건당료만). 추가료 기준 = 이 금액 이상이면 추가료 적용. 건당료 = 상품 종류당 추가 금액(0이면 미적용). 여러 카테고리 담을 경우 각 카테고리 배송료가 더해집니다.</p>
                       <table class="w-full text-left min-w-[560px]">
                           <thead class="bg-gray-50 border-b border-gray-100 font-bold uppercase text-[10px] md:text-xs">
-                              <tr><th class="p-4 md:p-6">순서</th><th class="p-4 md:p-6">카테고리 정보</th><th class="p-4 md:p-6">배송료 설정</th><th class="p-4 md:p-6 text-center">구분</th><th class="p-4 md:p-6 text-center">관리</th></tr>
+                              <tr><th class="p-4 md:p-6">순서</th><th class="p-4 md:p-6">카테고리 정보</th><th class="p-4 md:p-6">배송료 설정 <span class="font-normal normal-case text-gray-500">(기본료·무료조건·추가료·건당료)</span></th><th class="p-4 md:p-6 text-center">구분</th><th class="p-4 md:p-6 text-center">관리</th></tr>
                           </thead>
                           <tbody>
                               {% for c in categories %}
@@ -17775,6 +18098,90 @@ def admin_dashboard():
             })();
             </script>
 
+        {% elif tab == 'supplier_orders' %}
+            <div class="mb-12">
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">공급사별 주문 취합</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-6">기간을 선택한 뒤 조회하면 <strong>상품에 지정한 공급사</strong>별로 주문 품목·수량·금액이 취합됩니다. 공급사는 상품 등록/수정 시 「공급사」 필드에 입력합니다. (카테고리와 무관, 추후 카테고리 날짜별 운영 시에도 취합은 공급사 기준 유지)</p>
+                <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm mb-8">
+                    <div class="flex gap-2 mb-4">
+                        <button type="button" onclick="var s=document.getElementById('supplier_start_date'); var e=document.getElementById('supplier_end_date'); var n=new Date(); var t=new Date(n.getTime()-7*24*60*60*1000); s.value=t.toISOString().slice(0,16); e.value=n.toISOString().slice(0,16);" class="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black hover:bg-teal-100 transition">최근 7일</button>
+                        <button type="button" onclick="var s=document.getElementById('supplier_start_date'); var e=document.getElementById('supplier_end_date'); var n=new Date(); s.value=n.toISOString().slice(0,10)+'T00:00'; e.value=n.toISOString().slice(0,16);" class="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black hover:bg-teal-100 transition">오늘</button>
+                    </div>
+                    <form action="/admin" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+                        <input type="hidden" name="tab" value="supplier_orders">
+                        <div><label class="text-[10px] text-gray-400 font-black ml-2">시작 일시</label><input type="datetime-local" name="start_date" id="supplier_start_date" value="{{ supplier_start_date_str.replace(' ', 'T')[:16] }}" class="w-full border border-gray-200 bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
+                        <div><label class="text-[10px] text-gray-400 font-black ml-2">종료 일시</label><input type="datetime-local" name="end_date" id="supplier_end_date" value="{{ supplier_end_date_str.replace(' ', 'T')[:16] }}" class="w-full border border-gray-200 bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
+                        <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg">조회하기</button>
+                    </form>
+                </div>
+                {% for agg in supplier_orders_agg %}
+                <div class="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden mb-8">
+                    <div class="p-6 border-b border-gray-100 bg-gray-50">
+                        <h4 class="text-base font-black text-gray-800">{{ agg.supplier_name }}</h4>
+                        <p class="text-[10px] text-teal-600 font-black mt-2">취합 합계: {{ "{:,}".format(agg.total_amount) }}원</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table id="supplier-table-{{ loop.index }}" class="w-full text-left text-[11px] font-bold min-w-[400px]" data-supplier-name="{{ agg.supplier_name }}">
+                            <thead class="bg-gray-800 text-white"><tr><th class="p-4">품명</th><th class="p-4 text-center">단가</th><th class="p-4 text-center">수량</th><th class="p-4 text-right">금액</th></tr></thead>
+                            <tbody>
+                                {% for line in agg.lines %}
+                                <tr class="border-b border-gray-100"><td class="p-4">{{ line.product_name }}</td><td class="p-4 text-center">{{ "{:,}".format(line.price) }}원</td><td class="p-4 text-center font-black text-teal-600">{{ line.total_qty }}</td><td class="p-4 text-right">{{ "{:,}".format(line.line_amount) }}원</td></tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot class="bg-gray-200"><tr><td colspan="3" class="p-4 text-right font-black">소계</td><td class="p-4 text-right font-black">{{ "{:,}".format(agg.total_amount) }}원</td></tr></tfoot>
+                        </table>
+                    </div>
+                    <div class="p-4 flex gap-2">
+                        <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-amber-600" data-table-id="supplier-table-{{ loop.index }}">이 공급사 표 복사</button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="bg-white p-12 rounded-[2rem] border border-gray-100 text-center text-gray-400 font-bold">조회 기간에 주문이 없거나 취합할 품목이 없습니다. 상품에 공급사를 입력한 뒤 주문이 들어오면 여기서 취합됩니다.</div>
+                {% endfor %}
+            </div>
+
+        {% elif tab == 'supplier_product_agg' %}
+            <div class="mb-12">
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">상품정보 공급사별 취합</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-6">기간을 선택한 뒤 조회하면 <strong>공급사별</strong>로 품명·규격·카테고리·단가·수량·금액이 취합됩니다. 발주·상품정보 확인용으로 활용하세요.</p>
+                <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm mb-8">
+                    <div class="flex gap-2 mb-4">
+                        <button type="button" onclick="var s=document.getElementById('supplier_product_start_date'); var e=document.getElementById('supplier_product_end_date'); var n=new Date(); var t=new Date(n.getTime()-7*24*60*60*1000); s.value=t.toISOString().slice(0,16); e.value=n.toISOString().slice(0,16);" class="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black hover:bg-teal-100 transition">최근 7일</button>
+                        <button type="button" onclick="var s=document.getElementById('supplier_product_start_date'); var e=document.getElementById('supplier_product_end_date'); var n=new Date(); s.value=n.toISOString().slice(0,10)+'T00:00'; e.value=n.toISOString().slice(0,16);" class="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black hover:bg-teal-100 transition">오늘</button>
+                    </div>
+                    <form action="/admin" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+                        <input type="hidden" name="tab" value="supplier_product_agg">
+                        <div><label class="text-[10px] text-gray-400 font-black ml-2">시작 일시</label><input type="datetime-local" name="start_date" id="supplier_product_start_date" value="{{ supplier_product_start_date_str.replace(' ', 'T')[:16] }}" class="w-full border border-gray-200 bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
+                        <div><label class="text-[10px] text-gray-400 font-black ml-2">종료 일시</label><input type="datetime-local" name="end_date" id="supplier_product_end_date" value="{{ supplier_product_end_date_str.replace(' ', 'T')[:16] }}" class="w-full border border-gray-200 bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
+                        <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg">조회하기</button>
+                    </form>
+                </div>
+                {% for agg in supplier_product_agg %}
+                <div class="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden mb-8">
+                    <div class="p-6 border-b border-gray-100 bg-gray-50">
+                        <h4 class="text-base font-black text-gray-800">{{ agg.supplier_name }}</h4>
+                        <p class="text-[10px] text-teal-600 font-black mt-2">취합 합계: {{ "{:,}".format(agg.total_amount) }}원</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table id="supplier-product-table-{{ loop.index }}" class="w-full text-left text-[11px] font-bold min-w-[500px]" data-supplier-name="{{ agg.supplier_name }}">
+                            <thead class="bg-gray-800 text-white"><tr><th class="p-4">품명</th><th class="p-4">규격</th><th class="p-4">카테고리</th><th class="p-4 text-center">단가</th><th class="p-4 text-center">수량</th><th class="p-4 text-right">금액</th></tr></thead>
+                            <tbody>
+                                {% for line in agg.lines %}
+                                <tr class="border-b border-gray-100"><td class="p-4">{{ line.product_name }}</td><td class="p-4 text-gray-600">{{ line.spec }}</td><td class="p-4 text-gray-600">{{ line.category }}</td><td class="p-4 text-center">{{ "{:,}".format(line.price) }}원</td><td class="p-4 text-center font-black text-teal-600">{{ line.total_qty }}</td><td class="p-4 text-right">{{ "{:,}".format(line.line_amount) }}원</td></tr>
+                                {% endfor %}
+                            </tbody>
+                            <tfoot class="bg-gray-200"><tr><td colspan="5" class="p-4 text-right font-black">소계</td><td class="p-4 text-right font-black">{{ "{:,}".format(agg.total_amount) }}원</td></tr></tfoot>
+                        </table>
+                    </div>
+                    <div class="p-4 flex gap-2">
+                        <button type="button" class="admin-copy-table-btn bg-amber-500 text-white px-4 py-2 rounded-xl font-black text-[10px] hover:bg-amber-600" data-table-id="supplier-product-table-{{ loop.index }}">이 공급사 표 복사</button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="bg-white p-12 rounded-[2rem] border border-gray-100 text-center text-gray-400 font-bold">조회 기간에 주문이 없거나 취합할 품목이 없습니다.</div>
+                {% endfor %}
+            </div>
+
         {% elif tab == 'settlement' %}
             <div class="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mb-12">
                 <div class="flex gap-2 mb-6">
@@ -18541,7 +18948,10 @@ def admin_dashboard():
                 {% if my_categories %}<a href="/seller/orders" class="px-4 py-3 rounded-xl text-left transition bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100 hover:border-teal-300">내 발주 목록</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=email_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'seller_request' or tab == 'email_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일발주</a>{% endif %}
                 {% if is_master %}<a href="/admin?tab=purchase_order" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'purchase_order' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">발주관리</a>{% endif %}
+                {% if is_master %}<a href="/admin?tab=email_order_confirm" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'email_order_confirm' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">이메일 발주확인</a>{% endif %}
                 <a href="/admin?tab=orders" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">주문·매출 집계</a>
+                <a href="/admin?tab=supplier_orders" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'supplier_orders' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">공급사 주문취합</a>
+                <a href="/admin?tab=supplier_product_agg" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'supplier_product_agg' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">상품정보 공급사별취합</a>
                 <a href="/admin?tab=settlement" class="px-4 py-3 rounded-xl text-left transition {% if tab == 'settlement' %}bg-orange-50 border-2 border-orange-500 text-orange-600{% else %}bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200{% endif %}">정산관리</a>
                 {% if is_master %}<a href="/logi/driver-payout" target="_blank" class="px-4 py-3 rounded-xl text-left bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 hover:border-orange-200 transition">기사정산(새창)</a>{% endif %}
             </div>
@@ -20621,6 +21031,88 @@ def admin_seller_send_manual_email():
     return jsonify({"success": True, "message": "이메일을 발송했습니다."})
 
 
+@login_required
+def admin_email_order_dispatch_send():
+    """이메일 발주 확인용 발주서 발송. 표 붙여넣기·이미지·엑셀 중 내용을 만들어 받는 사람에게 보내고, 확인 링크를 포함."""
+    if not getattr(current_user, 'is_admin', False):
+        return redirect(url_for('admin.admin_dashboard')) if request.method == 'GET' else (jsonify({"success": False, "message": "권한이 없습니다."}), 403)
+    if request.method != 'POST':
+        return redirect(url_for('admin.admin_dashboard'))
+    import secrets
+    import json as _json
+    recipient_email = (request.form.get('recipient_email') or '').strip()
+    recipient_name = (request.form.get('recipient_name') or '').strip() or None
+    subject = (request.form.get('subject') or '').strip()
+    body_html = (request.form.get('body_html') or '').strip()
+    if not recipient_email or '@' not in recipient_email:
+        return redirect(url_for('admin.admin_dashboard') + '?tab=email_order_confirm&err=email')
+    if not subject:
+        return redirect(url_for('admin.admin_dashboard') + '?tab=email_order_confirm&err=subject')
+    excel_file = request.files.get('excel_file')
+    if excel_file and getattr(excel_file, 'filename', None) and excel_file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
+        try:
+            import pandas as pd
+            if excel_file.filename.lower().endswith('.csv'):
+                df = pd.read_csv(excel_file)
+            else:
+                df = pd.read_excel(excel_file)
+            body_html = '<table class="w-full text-left border-collapse" style="border:1px solid #ddd"><thead><tr>'
+            for c in df.columns:
+                body_html += f'<th style="border:1px solid #ddd; padding:6px">{c}</th>'
+            body_html += '</tr></thead><tbody>'
+            for _, row in df.iterrows():
+                body_html += '<tr>'
+                for v in row:
+                    body_html += f'<td style="border:1px solid #ddd; padding:6px">{v}</td>'
+                body_html += '</tr>'
+            body_html += '</tbody></table>'
+        except Exception:
+            return redirect(url_for('admin.admin_dashboard') + '?tab=email_order_confirm&err=excel')
+    image_urls = []
+    for key in request.files:
+        if key.startswith('dispatch_image') or key == 'dispatch_images':
+            f = request.files.get(key)
+            if not f or not getattr(f, 'filename', None):
+                continue
+            url = save_uploaded_file(f)
+            if url:
+                if not url.startswith('http'):
+                    base_url = (os.getenv("SITE_URL") or request.url_root or "").rstrip("/")
+                    url = base_url + url if url.startswith('/') else base_url + '/' + url
+                image_urls.append(url)
+    image_urls_json = _json.dumps(image_urls) if image_urls else None
+    if not body_html and not image_urls:
+        return redirect(url_for('admin.admin_dashboard') + '?tab=email_order_confirm&err=content')
+    token = secrets.token_urlsafe(32)
+    while EmailOrderDispatch.query.filter_by(confirm_token=token).first():
+        token = secrets.token_urlsafe(32)
+    dispatch = EmailOrderDispatch(
+        recipient_email=recipient_email,
+        recipient_name=recipient_name,
+        subject=subject,
+        body_html=body_html or None,
+        image_urls=image_urls_json,
+        confirm_token=token,
+        created_by=current_user.id,
+    )
+    db.session.add(dispatch)
+    db.session.commit()
+    base_url = (os.getenv("SITE_URL") or request.url_root or "").rstrip("/")
+    confirm_url = f"{base_url}/admin/order-confirm-dispatch/{token}"
+    body_plain = f"""발주서가 도착했습니다.
+
+아래 링크에서 내용을 확인하시고, [확인 메시지 보내기] 버튼을 눌러 주시면 저희 쪽에서 수신 확인으로 표시됩니다.
+
+확인 링크: {confirm_url}
+"""
+    try:
+        send_mail(recipient_email, subject, body_plain)
+    except Exception:
+        db.session.rollback()
+        return redirect(url_for('admin.admin_dashboard') + '?tab=email_order_confirm&err=send')
+    return redirect(url_for('admin.admin_dashboard') + '?tab=email_order_confirm&sent=1')
+
+
 def _get_purchase_order_detail_rows(start_dt, end_dt, category_filter=None):
     """발주관리: 기간·카테고리별 주문 품목 상세. 오더넘버, 주문시간, 품목, 수량, 공급가, 종합계액(공급가×수량).
     반환: (rows list, rows_by_date dict, grand_total int). rows_by_date: 'YYYY-MM-DD' -> [rows], 날자별 소계용."""
@@ -20671,10 +21163,10 @@ def _build_purchase_order_image(rows, rows_by_date, grand_total, font_size=12):
     for date_key in sorted(rows_by_date.keys()):
         for r in rows_by_date[date_key]:
             row_cells_list.append([
-                str(r.get('order_id', ''))[:16],
-                str(r.get('order_time', ''))[:16],
-                str(r.get('product_name', ''))[:14],
-                str(r.get('quantity', '')),
+                _safe_utf8_str(r.get('order_id', ''))[:16],
+                _safe_utf8_str(r.get('order_time', ''))[:16],
+                _safe_utf8_str(r.get('product_name', ''))[:14],
+                _safe_utf8_str(r.get('quantity', '')),
                 "{:,}".format(r.get('supply_price', 0)),
                 "{:,}".format(r.get('line_total', 0)),
             ])
@@ -20978,6 +21470,85 @@ def seller_confirm():
         """ + FOOTER_HTML,
         code=code or "",
         invalid=invalid
+    )
+
+
+@app.route('/order-confirm-dispatch/<token>', methods=['GET', 'POST'])
+def order_confirm_dispatch(token):
+    """이메일 발주 확인: 받는 사람이 링크로 접속해 발주서 내용을 보고 [확인 메시지 보내기]를 누르면 수신확인 처리."""
+    dispatch = EmailOrderDispatch.query.filter_by(confirm_token=token).first()
+    if not dispatch:
+        return render_template_string(
+            HEADER_HTML + """
+            <div class="max-w-md mx-auto px-4 py-20 text-center">
+                <h1 class="text-xl font-black text-gray-800 mb-4">링크를 찾을 수 없습니다</h1>
+                <p class="text-sm text-gray-500">만료되었거나 잘못된 링크입니다.</p>
+            </div>
+            """ + FOOTER_HTML
+        ), 404
+    if request.method == 'POST':
+        if not dispatch.confirmed_at:
+            dispatch.confirmed_at = now_kst()
+            db.session.commit()
+            try:
+                admin_user = User.query.filter_by(is_admin=True).first()
+                if admin_user and getattr(admin_user, 'email', None):
+                    admin_email = admin_user.email.strip()
+                    if admin_email:
+                        subject = f"[바구니삼촌] 공급사 수신 확인 - {dispatch.recipient_name or dispatch.recipient_email}"
+                        body = f"""공급사(받는 사람)가 발주서 수신 확인을 완료했습니다.
+
+공급사: {dispatch.recipient_name or '-'}
+수신 이메일: {dispatch.recipient_email}
+제목: {dispatch.subject}
+확인 시각: {dispatch.confirmed_at}
+"""
+                        send_mail(admin_email, subject, body)
+            except Exception:
+                pass
+        return render_template_string(
+            HEADER_HTML + """
+            <div class="max-w-md mx-auto px-4 py-20 text-center">
+                <div class="bg-teal-50 border border-teal-200 rounded-2xl p-8">
+                    <p class="text-4xl mb-4">✓</p>
+                    <h1 class="text-xl font-black text-teal-800 mb-2">수신 확인이 완료되었습니다.</h1>
+                    <p class="text-sm text-gray-600 mt-2">관리자에게 확인 메시지가 전달되었습니다.</p>
+                </div>
+            </div>
+            """ + FOOTER_HTML
+        )
+    import json as _json
+    image_list = []
+    try:
+        if dispatch.image_urls:
+            image_list = _json.loads(dispatch.image_urls)
+    except Exception:
+        pass
+    return render_template_string(
+        HEADER_HTML + """
+        <div class="max-w-3xl mx-auto px-4 py-8">
+            <h1 class="text-xl font-black text-gray-800 mb-4">발주서 확인</h1>
+            <div class="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+                <p class="text-sm text-gray-500 mb-2">제목: {{ dispatch.subject }}</p>
+                {% if dispatch.body_html %}
+                <div class="prose prose-sm max-w-none mb-4">{{ dispatch.body_html | safe }}</div>
+                {% endif %}
+                {% for img_url in image_list %}
+                <div class="mb-4"><img src="{{ img_url }}" alt="발주서" class="max-w-full h-auto rounded-lg border border-gray-100" loading="lazy"></div>
+                {% endfor %}
+            </div>
+            {% if not dispatch.confirmed_at %}
+            <form method="POST" class="text-center">
+                <button type="submit" class="px-8 py-4 bg-teal-600 text-white rounded-2xl font-black text-lg hover:bg-teal-700 transition">확인 메시지 보내기</button>
+            </form>
+            <p class="text-center text-sm text-gray-500 mt-3">위 버튼을 누르시면 수신 확인이 완료되며, 관리자에게 알림이 전송됩니다.</p>
+            {% else %}
+            <p class="text-center text-teal-600 font-bold">이미 수신 확인이 완료되었습니다. ({{ dispatch.confirmed_at.strftime('%Y-%m-%d %H:%M') }})</p>
+            {% endif %}
+        </div>
+        """ + FOOTER_HTML,
+        dispatch=dispatch,
+        image_list=image_list,
     )
 
 
@@ -21342,7 +21913,7 @@ def admin_board_comment_delete(cid):
     flash("댓글이 삭제되었습니다.")
     next_tab = (request.form.get('next_tab') or '').strip() or 'board_comments'
     board_type = (request.form.get('board_type') or '').strip()
-    base = url_for('admin_dashboard') + '?tab=' + next_tab
+    base = url_for('admin.admin_dashboard') + '?tab=' + next_tab
     if board_type in ('restaurant', 'delivery', 'partnership', 'free'):
         return redirect(base + '&board_type=' + board_type)
     return redirect(base)
@@ -21993,9 +22564,11 @@ def admin_product_add():
             reset_time=rt or None,
             reset_to_quantity=reset_to_q,
             max_purchase_quantity=max_purchase_quantity,
+            supplier=(request.form.get('supplier') or '').strip() or None,
         )
         db.session.add(new_p); db.session.commit(); return redirect('/admin')
     return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-20 px-6 font-black text-left"><h2 class="text-3xl font-black mb-12 border-l-8 border-teal-600 pl-6 uppercase italic text-left">Add Product</h2><p class="text-[11px] text-gray-500 font-bold mb-6 bg-gray-50 p-4 rounded-xl border border-gray-100">각 항목이 <strong>목록·상세 페이지 어디에</strong> 나가는지: 상품명→목록 카드·상세 제목 / Short Intro→상품명 옆 / Detailed Intro→상세 사진 위 / Delivery→목록 배지·상세 배송문구 / 가격·규격→목록·상세 / 재고→잔여 N개 / 마감일→카운트다운·오늘마감 / Main Image→목록·대표사진 / Detail Images→상세 본문 여러 장.</p><form method="POST" enctype="multipart/form-data" class="bg-white p-10 rounded-[3rem] shadow-2xl space-y-7 text-left"><select name="category" class="w-full p-5 bg-gray-50 rounded-2xl font-black outline-none focus:ring-4 focus:ring-teal-50 text-left">{% for c in selectable_categories %}<option value="{{c.name}}">{{c.name}}</option>{% endfor %}</select>
+   <div class="space-y-1"><label class="text-[10px] text-indigo-600 font-black ml-4 uppercase tracking-widest">공급사 (발주·취합용)</label><input name="supplier" placeholder="예: OO농장, XX식품" class="w-full p-5 bg-indigo-50 border border-indigo-100 rounded-2xl font-black text-left text-sm" value="{{ p.supplier if p else '' }}"></div>
    <input name="name" placeholder="상품 명칭 (예: 꿀부사 사과)" class="w-full p-5 bg-gray-50 rounded-2xl font-black text-left text-sm" value="{{ p.name if p else '' }}" required>
 
 <div class="space-y-1">
@@ -22161,6 +22734,9 @@ def admin_product_edit(pid):
         mpq_raw = (request.form.get('max_purchase_quantity') or '').strip()
         p.max_purchase_quantity = int(mpq_raw) if mpq_raw.isdigit() and int(mpq_raw) >= 0 else 0
 
+        # 공급사(상품별, 주문 취합·발주용)
+        p.supplier = (request.form.get('supplier') or '').strip() or None
+
         # 메인 이미지 변경 시 처리
         main_img = save_uploaded_file(request.files.get('main_image'))
         if main_img:
@@ -22192,6 +22768,11 @@ def admin_product_edit(pid):
                 <select name="category" class="w-full p-5 bg-gray-50 rounded-2xl font-black text-left text-sm outline-none focus:ring-4 focus:ring-teal-50 border border-gray-100">
                     {% for c in selectable_categories %}<option value="{{ c.name }}" {% if p.category == c.name %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
                 </select>
+            </div>
+            <div class="space-y-1">
+                <label class="text-[10px] text-indigo-600 font-black ml-4 uppercase tracking-widest">공급사 (발주·취합용)</label>
+                <p class="text-[10px] text-gray-500 ml-4 mb-0.5">상품별 공급사명. 공급사 주문취합 탭에서 이 값으로 묶어서 표시합니다. 카테고리와 무관하게 입력하세요.</p>
+                <input name="supplier" placeholder="예: OO농장, XX식품" class="w-full p-5 bg-indigo-50 border border-indigo-100 rounded-2xl font-black text-left text-sm focus:ring-4 focus:ring-indigo-100 outline-none transition" value="{{ p.supplier or '' }}">
             </div>
             <div class="space-y-1">
                 <label class="text-[10px] text-gray-400 font-black ml-4 uppercase tracking-widest">Product Name (상품명)</label>
@@ -22525,8 +23106,8 @@ def admin_category_edit(cid):
         cat.min_member_grade = int(mg) if mg and mg.isdigit() and mg in ('1', '2', '3', '4', '5') else None
         # 카테고리별 배송료 설정
         try:
-            v = request.form.get('delivery_base_fee', '').strip()
-            cat.delivery_base_fee = int(v) if v and v.isdigit() else 1900
+            v = (request.form.get('delivery_base_fee') or '').strip()
+            cat.delivery_base_fee = int(v) if v.isdigit() else 1900
         except Exception:
             pass
         try:
@@ -22540,13 +23121,13 @@ def admin_category_edit(cid):
         except Exception:
             cat.delivery_extra_threshold = None
         try:
-            v = request.form.get('delivery_extra_fee', '').strip()
-            cat.delivery_extra_fee = int(v) if v and v.isdigit() else 1900
+            v = (request.form.get('delivery_extra_fee') or '').strip()
+            cat.delivery_extra_fee = int(v) if v.isdigit() else 1900
         except Exception:
             pass
         try:
-            v = request.form.get('delivery_fee_per_item', '').strip()
-            cat.delivery_fee_per_item = int(v) if v and v.isdigit() else 0
+            v = (request.form.get('delivery_fee_per_item') or '').strip()
+            cat.delivery_fee_per_item = int(v) if v.isdigit() else 0
         except Exception:
             cat.delivery_fee_per_item = 0
         db.session.commit(); return redirect('/admin?tab=categories')
@@ -22557,7 +23138,7 @@ def admin_category_edit(cid):
     d_thr = getattr(cat, 'delivery_extra_threshold', None)
     d_extra = getattr(cat, 'delivery_extra_fee', None)
     d_per = getattr(cat, 'delivery_fee_per_item', None)
-    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-20 px-6 font-black text-left"><h2 class="text-2xl md:text-3xl font-black mb-12 tracking-tighter uppercase text-teal-600 text-left">Edit Category Profile</h2><form method="POST" class="bg-white p-10 rounded-[3rem] shadow-2xl space-y-8 text-left"><div><label class="text-[10px] text-gray-400 uppercase font-black ml-4 text-left">Settings</label><input name="cat_name" value="{{cat.name}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-2 text-sm text-left" required><textarea name="description" class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black mt-3 text-sm text-left" placeholder="한줄 소개">{{cat.description or ''}}</textarea><p class="text-[10px] text-teal-600 font-bold uppercase mt-4 ml-4 text-left">정산 구분</p><select name="category_type" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left bg-white"><option value="입점형" {% if cat_type_val == '입점형' %}selected{% endif %}>입점형 (배송료·판매수수료 있음)</option><option value="공급자형" {% if cat_type_val == '공급자형' %}selected{% endif %}>공급자형 (배송료·수수료 없음, 공급가 기준)</option></select><input name="manager_email" value="{{cat.manager_email or ''}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left" placeholder="매니저 이메일"><select name="tax_type" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left bg-white"><option value="과세" {% if cat.tax_type == '과세' %}selected{% endif %}>과세</option><option value="면세" {% if cat.tax_type == '면세' %}selected{% endif %}>면세</option></select><p class="text-[10px] text-amber-600 font-bold uppercase mt-4 ml-4 text-left">회원 등급별 노출 (비워두면 전체)</p><select name="min_member_grade" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2 bg-white"><option value="">전체 회원</option><option value="1" {% if mg_val == 1 %}selected{% endif %}>1단계 이상</option><option value="2" {% if mg_val == 2 %}selected{% endif %}>2단계 이상</option><option value="3" {% if mg_val == 3 %}selected{% endif %}>3단계 이상</option><option value="4" {% if mg_val == 4 %}selected{% endif %}>4단계 이상</option><option value="5" {% if mg_val == 5 %}selected{% endif %}>5단계만</option></select><p class="text-[10px] text-orange-600 font-bold uppercase mt-6 ml-4 text-left">카테고리별 배송료 (금액·건별)</p><input name="delivery_base_fee" type="number" min="0" value="{{ d_base or 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="기본 배송료(원)"><input name="delivery_free_over" type="number" min="0" value="{{ d_free or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="무료조건: 이 금액 이상이면 무료 (비워두면 미적용)"><input name="delivery_extra_threshold" type="number" min="0" value="{{ d_thr or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가료 기준: 이 금액 이상이면 추가료 적용 (비워두면 50000)"><input name="delivery_extra_fee" type="number" min="0" value="{{ d_extra or 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가 배송료(원)"><input name="delivery_fee_per_item" type="number" min="0" value="{{ d_per or 0 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="건별 추가 배송료(원, 0=미적용)"></div><div class="border-t border-gray-50 pt-10 space-y-4 text-left"><label class="text-[10px] text-teal-600 uppercase font-black ml-4 text-left">Business Info</label><input name="biz_name" value="{{cat.biz_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="상호명"><input name="biz_representative" value="{{cat.biz_representative or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="대표자"><input name="biz_reg_number" value="{{cat.biz_reg_number or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="사업자번호"><input name="biz_online_sales_number" value="{{cat.biz_online_sales_number or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="통신판매업신고번호"><input name="biz_address" value="{{cat.biz_address or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="주소"><input name="biz_contact" value="{{cat.biz_contact or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="고객센터"><input name="seller_link" value="{{cat.seller_inquiry_link or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="문의 링크 URL"><p class="text-[10px] text-blue-600 font-bold uppercase mt-4 text-left">정산 계좌</p><input name="bank_name" value="{{cat.bank_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="은행명"><input name="account_holder" value="{{cat.account_holder or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="예금주"><input name="settlement_account" value="{{cat.settlement_account or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="정산계좌 (계좌번호)"></div><button class="w-full bg-blue-600 text-white py-6 rounded-3xl font-black shadow-xl hover:bg-blue-700 transition text-center text-center">Save Profile Updates</button></form></div>""", cat=cat, mg_val=mg_val, cat_type_val=cat_type_val, d_base=d_base, d_free=d_free, d_thr=d_thr, d_extra=d_extra, d_per=d_per)
+    return render_template_string(HEADER_HTML + """<div class="max-w-xl mx-auto py-20 px-6 font-black text-left"><h2 class="text-2xl md:text-3xl font-black mb-12 tracking-tighter uppercase text-teal-600 text-left">Edit Category Profile</h2><form method="POST" class="bg-white p-10 rounded-[3rem] shadow-2xl space-y-8 text-left"><div><label class="text-[10px] text-gray-400 uppercase font-black ml-4 text-left">Settings</label><input name="cat_name" value="{{cat.name}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-2 text-sm text-left" required><textarea name="description" class="border border-gray-100 p-5 rounded-2xl w-full h-24 font-black mt-3 text-sm text-left" placeholder="한줄 소개">{{cat.description or ''}}</textarea><p class="text-[10px] text-teal-600 font-bold uppercase mt-4 ml-4 text-left">정산 구분</p><select name="category_type" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left bg-white"><option value="입점형" {% if cat_type_val == '입점형' %}selected{% endif %}>입점형 (배송료·판매수수료 있음)</option><option value="공급자형" {% if cat_type_val == '공급자형' %}selected{% endif %}>공급자형 (배송료·수수료 없음, 공급가 기준)</option></select><input name="manager_email" value="{{cat.manager_email or ''}}" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left" placeholder="매니저 이메일"><select name="tax_type" class="border border-gray-100 p-5 rounded-2xl w-full font-black mt-3 text-sm text-left bg-white"><option value="과세" {% if cat.tax_type == '과세' %}selected{% endif %}>과세</option><option value="면세" {% if cat.tax_type == '면세' %}selected{% endif %}>면세</option></select><p class="text-[10px] text-amber-600 font-bold uppercase mt-4 ml-4 text-left">회원 등급별 노출 (비워두면 전체)</p><select name="min_member_grade" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2 bg-white"><option value="">전체 회원</option><option value="1" {% if mg_val == 1 %}selected{% endif %}>1단계 이상</option><option value="2" {% if mg_val == 2 %}selected{% endif %}>2단계 이상</option><option value="3" {% if mg_val == 3 %}selected{% endif %}>3단계 이상</option><option value="4" {% if mg_val == 4 %}selected{% endif %}>4단계 이상</option><option value="5" {% if mg_val == 5 %}selected{% endif %}>5단계만</option></select><p class="text-[10px] text-orange-600 font-bold uppercase mt-6 ml-4 text-left">카테고리별 배송료 (금액·건별)</p><input name="delivery_base_fee" type="number" min="0" value="{{ d_base if d_base is not none else 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="기본 배송료(원)"><input name="delivery_free_over" type="number" min="0" value="{{ d_free or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="무료조건: 이 금액 이상이면 무료 (비워두면 미적용)"><input name="delivery_extra_threshold" type="number" min="0" value="{{ d_thr or '' }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가료 기준: 이 금액 이상이면 추가료 적용 (비워두면 50000)"><input name="delivery_extra_fee" type="number" min="0" value="{{ d_extra if d_extra is not none else 1900 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="추가 배송료(원)"><input name="delivery_fee_per_item" type="number" min="0" value="{{ d_per or 0 }}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="건별 추가 배송료(원, 0=미적용)"><p class="text-[10px] text-gray-400 mt-1 ml-1">해당 카테고리에서 주문한 상품 종류(건) 수 × 입력한 금액이 배송료에 더해집니다. 0이면 미적용입니다.</p></div><div class="border-t border-gray-50 pt-10 space-y-4 text-left"><label class="text-[10px] text-teal-600 uppercase font-black ml-4 text-left">Business Info</label><input name="biz_name" value="{{cat.biz_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="상호명"><input name="biz_representative" value="{{cat.biz_representative or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="대표자"><input name="biz_reg_number" value="{{cat.biz_reg_number or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="사업자번호"><input name="biz_online_sales_number" value="{{cat.biz_online_sales_number or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="통신판매업신고번호"><input name="biz_address" value="{{cat.biz_address or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="주소"><input name="biz_contact" value="{{cat.biz_contact or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="고객센터"><input name="seller_link" value="{{cat.seller_inquiry_link or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left" placeholder="문의 링크 URL"><p class="text-[10px] text-blue-600 font-bold uppercase mt-4 text-left">정산 계좌</p><input name="bank_name" value="{{cat.bank_name or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="은행명"><input name="account_holder" value="{{cat.account_holder or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="예금주"><input name="settlement_account" value="{{cat.settlement_account or ''}}" class="border border-gray-100 p-4 rounded-xl w-full font-black text-xs text-left mt-2" placeholder="정산계좌 (계좌번호)"></div><button class="w-full bg-blue-600 text-white py-6 rounded-3xl font-black shadow-xl hover:bg-blue-700 transition text-center text-center">Save Profile Updates</button></form></div>""", cat=cat, mg_val=mg_val, cat_type_val=cat_type_val, d_base=d_base, d_free=d_free, d_thr=d_thr, d_extra=d_extra, d_per=d_per)
 
 @login_required
 def admin_category_move(cid, direction):
@@ -22729,22 +23310,60 @@ def admin_orders_sales_excel():
 def _pil_font_for_table(size=12):
     """PIL 한글 지원 폰트 반환 (테이블 이미지용). 한글 표시용으로만 사용 (Liberation/DejaVu 제외)."""
     from PIL import ImageFont
+    import glob as _glob
     root = os.path.dirname(os.path.abspath(__file__))
-    # 한글(CJK) 지원 폰트만 사용 (LiberationSans, DejaVuSans는 한글 미지원 → 글자 깨짐 방지)
-    font_paths = [
-        # Windows
-        os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'malgun.ttf'),
-        os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'gulim.ttc'),
-        os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'batang.ttc'),
-        os.path.join(os.environ.get('WINDIR', ''), 'Fonts', 'dotum.ttf'),
-        # 프로젝트 내 폰트 (배포 시 static/fonts/ 에 NanumGothic.ttf 추가 권장)
-        os.path.join(root, 'static', 'fonts', 'NanumGothic.ttf'),
-        os.path.join(root, 'static', 'fonts', 'malgun.ttf'),
+    font_dir = os.path.join(root, 'static', 'fonts')
+    tried_paths = []
+
+    def _try_load(path):
+        if not path or path in tried_paths:
+            return None
+        tried_paths.append(path)
+        if not os.path.isfile(path):
+            return None
+        try:
+            if path.lower().endswith('.ttc'):
+                return ImageFont.truetype(path, size, index=0)
+            return ImageFont.truetype(path, size)
+        except Exception:
+            return None
+
+    # 1) 프로젝트 static/fonts/ 내 모든 .ttf, .ttc (우선)
+    for ext in ('*.ttf', '*.ttc', '*.otf'):
+        for path in _glob.glob(os.path.join(font_dir, ext)):
+            f = _try_load(path)
+            if f:
+                return (f, f)
+
+    # 2) Windows 시스템 폰트
+    windir = os.environ.get('WINDIR', '')
+    if windir:
+        for name in ('malgun.ttf', 'gulim.ttc', 'batang.ttc', 'dotum.ttf', 'NanumGothic.ttf'):
+            f = _try_load(os.path.join(windir, 'Fonts', name))
+            if f:
+                return (f, f)
+
+    # 3) Linux: fontconfig로 한글 폰트 경로 조회
+    try:
+        import subprocess
+        out = subprocess.run(
+            ['fc-list', '-f', '%{file}\\n', ':lang=ko'],
+            capture_output=True, text=True, timeout=2, cwd=os.path.dirname(root)
+        )
+        if out.returncode == 0 and out.stdout:
+            for line in out.stdout.strip().split('\n'):
+                path = line.strip()
+                if path.endswith(('.ttf', '.ttc', '.otf')):
+                    f = _try_load(path)
+                    if f:
+                        return (f, f)
+    except Exception:
+        pass
+
+    # 4) 고정 Linux/macOS 경로 (나눔/노토 등)
+    fixed_paths = [
         os.path.join(root, 'NanumGothic.ttf'),
         os.path.join(root, 'malgun.ttf'),
-        'malgun.ttf',
-        'NanumGothic.ttf',
-        # Linux (나눔/노토 등 한글 지원)
         '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
         '/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf',
         '/usr/share/fonts/truetype/fonts-nanum/NanumGothic.ttf',
@@ -22752,23 +23371,23 @@ def _pil_font_for_table(size=12):
         '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
         '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
         '/usr/share/fonts/opentype/noto-cjk/NotoSansCJK-Regular.ttc',
-        '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
-        # macOS
+        '/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc',
         '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
         '/Library/Fonts/AppleGothic.ttf',
         os.path.expanduser('~/Library/Fonts/NanumGothic.ttf'),
     ]
-    for path in font_paths:
-        if path and os.path.isfile(path):
-            try:
-                # .ttc(TrueType Collection)는 index=0으로 첫 번째 폰트 사용
-                if path.lower().endswith('.ttc'):
-                    f = ImageFont.truetype(path, size, index=0)
-                else:
-                    f = ImageFont.truetype(path, size)
-                return (f, f)
-            except Exception:
-                continue
+    for path in fixed_paths:
+        f = _try_load(path)
+        if f:
+            return (f, f)
+
+    # 5) 기본 폰트는 한글 미지원 → 한글 대체 문자로 표시되므로, 가능하면 경고 로그만 남기고 동일 반환
+    try:
+        import sys
+        if sys.stderr:
+            print("[PIL] 한글 폰트를 찾지 못했습니다. static/fonts/ 에 NanumGothic.ttf 등을 넣어 주세요.", file=sys.stderr)
+    except Exception:
+        pass
     f = ImageFont.load_default()
     return (f, f)
 

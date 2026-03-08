@@ -77,6 +77,8 @@ def register_admin_routes(app):
         admin_seller_order_preview,
         admin_seller_send_manual_email,
         admin_seller_send_order_email,
+        admin_email_order_dispatch_send,
+        order_confirm_dispatch,
         admin_email_order_line_status_update,
         admin_email_order_create_view_link,
         admin_purchase_order_send_image,
@@ -206,6 +208,8 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/seller/order_preview', view_func=login_required(admin_seller_order_preview))
     admin_bp.add_url_rule('/admin/seller/send_manual_email', view_func=login_required(admin_seller_send_manual_email), methods=['POST'])
     admin_bp.add_url_rule('/admin/seller/send_order_email', view_func=login_required(admin_seller_send_order_email), methods=['POST'])
+    admin_bp.add_url_rule('/admin/email-order-dispatch/send', view_func=login_required(admin_email_order_dispatch_send), methods=['POST'])
+    admin_bp.add_url_rule('/admin/order-confirm-dispatch/<token>', view_func=order_confirm_dispatch, methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/email_order/line_status', view_func=login_required(admin_email_order_line_status_update), methods=['POST'])
     admin_bp.add_url_rule('/admin/email_order/create_view_link', view_func=login_required(admin_email_order_create_view_link), methods=['POST'])
     admin_bp.add_url_rule('/admin/purchase_order/send_image', view_func=login_required(admin_purchase_order_send_image), methods=['POST'])
