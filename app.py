@@ -648,13 +648,20 @@ def _ensure_product_naver_columns():
 
 
 def _ensure_user_withdrawn_at_column():
-    """user 테이블에 withdrawn_at 컬럼이 없으면 추가 (회원 탈퇴용)."""
+    """user 테이블에 withdrawn_at 컬럼이 없으면 추가 (회원 탈퇴용). MySQL/PostgreSQL에서 user는 예약어이므로 따옴표 처리."""
     try:
         insp = inspect(db.engine)
         columns = [c["name"] for c in insp.get_columns("user")]
         if "withdrawn_at" in columns:
             return
-        db.session.execute(text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME"))
+        dialect_name = (db.engine.dialect.name or "").lower()
+        if dialect_name in ("mysql", "mariadb"):
+            sql = text("ALTER TABLE `user` ADD COLUMN `withdrawn_at` DATETIME")
+        elif dialect_name == "postgresql":
+            sql = text('ALTER TABLE "user" ADD COLUMN withdrawn_at TIMESTAMP')
+        else:
+            sql = text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME")
+        db.session.execute(sql)
         db.session.commit()
         print("[DB MIGRATION] user.withdrawn_at 컬럼을 추가했습니다.", flush=True)
     except Exception as e:
@@ -1537,6 +1544,12 @@ def load_user(user_id):
             return None  # 탈퇴 회원은 로그인 불가
         return u
     except (TypeError, ValueError):
+        return None
+    except Exception as e:
+        # DB 컬럼 누락(예: withdrawn_at 미마이그레이션) 등으로 쿼리 실패 시 500 방지
+        import traceback
+        print(f"[load_user] user_id={user_id} error: {e}", flush=True)
+        traceback.print_exc()
         return None
 
 # --------------------------------------------------------------------------------
@@ -8962,16 +8975,26 @@ def auth_naver_callback():
         flash("프로필 형식 오류."); return redirect('/login')
     if not pid:
         flash("네이버 프로필을 가져올 수 없습니다."); return redirect('/login')
-    user = _find_or_create_social_user('naver', pid, email, name)
-    session.permanent = True
-    login_user(user)
-    if user.email and user.email.endswith('@social.local'):
-        flash("네이버로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
-    else:
-        flash("로그인되었습니다.")
-    resp = redirect(next_url)
-    resp.set_cookie('last_login_method', 'naver', max_age=365*24*3600, samesite='Lax')
-    return resp
+    try:
+        user = _find_or_create_social_user('naver', pid, email, name)
+        if getattr(user, "withdrawn_at", None):
+            flash("탈퇴된 계정입니다."); return redirect('/login')
+        session.permanent = True
+        login_user(user)
+        if user.email and user.email.endswith('@social.local'):
+            flash("네이버로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+        else:
+            flash("로그인되었습니다.")
+        resp = redirect(next_url)
+        resp.set_cookie('last_login_method', 'naver', max_age=365*24*3600, samesite='Lax')
+        return resp
+    except Exception as e:
+        import traceback
+        print(f"[auth/naver/callback] {e}", flush=True)
+        traceback.print_exc()
+        db.session.rollback()
+        flash("일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
+        return redirect('/login')
 
 
 @app.route('/auth/google')
@@ -9043,16 +9066,26 @@ def auth_google_callback():
         flash("프로필 형식 오류."); return redirect('/login')
     if not pid:
         flash("구글 프로필을 가져올 수 없습니다."); return redirect('/login')
-    user = _find_or_create_social_user('google', str(pid), email, name)
-    session.permanent = True
-    login_user(user)
-    if user.email and user.email.endswith('@social.local'):
-        flash("구글로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
-    else:
-        flash("로그인되었습니다.")
-    resp = redirect(next_url)
-    resp.set_cookie('last_login_method', 'google', max_age=365*24*3600, samesite='Lax')
-    return resp
+    try:
+        user = _find_or_create_social_user('google', str(pid), email, name)
+        if getattr(user, "withdrawn_at", None):
+            flash("탈퇴된 계정입니다."); return redirect('/login')
+        session.permanent = True
+        login_user(user)
+        if user.email and user.email.endswith('@social.local'):
+            flash("구글로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+        else:
+            flash("로그인되었습니다.")
+        resp = redirect(next_url)
+        resp.set_cookie('last_login_method', 'google', max_age=365*24*3600, samesite='Lax')
+        return resp
+    except Exception as e:
+        import traceback
+        print(f"[auth/google/callback] {e}", flush=True)
+        traceback.print_exc()
+        db.session.rollback()
+        flash("일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
+        return redirect('/login')
 
 
 @app.route('/auth/kakao')
@@ -9127,16 +9160,26 @@ def auth_kakao_callback():
         flash("카카오 프로필 형식 오류."); return redirect('/login')
     if not pid:
         flash("카카오 프로필을 가져올 수 없습니다."); return redirect('/login')
-    user = _find_or_create_social_user('kakao', str(pid), email, name)
-    session.permanent = True
-    login_user(user)
-    if user.email and user.email.endswith('@social.local'):
-        flash("카카오로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
-    else:
-        flash("로그인되었습니다.")
-    resp = redirect(next_url)
-    resp.set_cookie('last_login_method', 'kakao', max_age=365*24*3600, samesite='Lax')
-    return resp
+    try:
+        user = _find_or_create_social_user('kakao', str(pid), email, name)
+        if getattr(user, "withdrawn_at", None):
+            flash("탈퇴된 계정입니다."); return redirect('/login')
+        session.permanent = True
+        login_user(user)
+        if user.email and user.email.endswith('@social.local'):
+            flash("카카오로 로그인했습니다. 마이페이지에서 이메일·주소를 보완해 주세요.")
+        else:
+            flash("로그인되었습니다.")
+        resp = redirect(next_url)
+        resp.set_cookie('last_login_method', 'kakao', max_age=365*24*3600, samesite='Lax')
+        return resp
+    except Exception as e:
+        import traceback
+        print(f"[auth/kakao/callback] {e}", flush=True)
+        traceback.print_exc()
+        db.session.rollback()
+        flash("일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
+        return redirect('/login')
 
 
 def _auth_status_json():
@@ -9217,8 +9260,18 @@ def auth_status():
 def login():
     """로그인 라우트"""
     if request.method == 'POST':
-        user = User.query.filter_by(email=request.form.get('email')).first()
+        try:
+            user = User.query.filter_by(email=request.form.get('email')).first()
+        except Exception as e:
+            import traceback
+            print(f"[login] User query failed: {e}", flush=True)
+            traceback.print_exc()
+            flash("일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
+            return redirect(url_for('login'))
         if user and user.password and check_password_hash(user.password, request.form.get('password')):
+            if getattr(user, "withdrawn_at", None):
+                flash("탈퇴된 계정입니다.")
+                return redirect(url_for('login'))
             session.permanent = True
             login_user(user)
             flash("로그인되었습니다.")
