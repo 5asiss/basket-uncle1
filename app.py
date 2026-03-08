@@ -658,6 +658,10 @@ def _ensure_user_withdrawn_at_column():
         db.session.commit()
         print("[DB MIGRATION] user.withdrawn_at 컬럼을 추가했습니다.", flush=True)
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         print(f"[DB MIGRATION] user.withdrawn_at 컬럼 자동 추가 실패: {e}", flush=True)
 
 
@@ -667,13 +671,27 @@ def _ensure_delivery_request_secret_and_image():
         insp = inspect(db.engine)
         columns = [c["name"] for c in insp.get_columns("delivery_request")]
         if "is_secret" not in columns:
-            db.session.execute(text("ALTER TABLE delivery_request ADD COLUMN is_secret INTEGER DEFAULT 0"))
+            try:
+                db.session.execute(text("ALTER TABLE delivery_request ADD COLUMN is_secret INTEGER DEFAULT 0"))
+                db.session.commit()
+                print("[DB MIGRATION] delivery_request.is_secret 컬럼 추가됨.", flush=True)
+            except Exception as e1:
+                db.session.rollback()
+                print(f"[DB MIGRATION] is_secret 추가 실패: {e1}", flush=True)
         if "image_url" not in columns:
-            db.session.execute(text("ALTER TABLE delivery_request ADD COLUMN image_url VARCHAR(500)"))
-        db.session.commit()
-        print("[DB MIGRATION] delivery_request is_secret, image_url 컬럼 확인 완료.", flush=True)
+            try:
+                db.session.execute(text("ALTER TABLE delivery_request ADD COLUMN image_url VARCHAR(500)"))
+                db.session.commit()
+                print("[DB MIGRATION] delivery_request.image_url 컬럼 추가됨.", flush=True)
+            except Exception as e2:
+                db.session.rollback()
+                print(f"[DB MIGRATION] image_url 추가 실패: {e2}", flush=True)
     except Exception as e:
-        print(f"[DB MIGRATION] delivery_request 컬럼 자동 추가 실패: {e}", flush=True)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        print(f"[DB MIGRATION] delivery_request 컬럼 확인 실패: {e}", flush=True)
 
 
 with app.app_context():
