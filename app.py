@@ -1546,10 +1546,20 @@ def load_user(user_id):
     except (TypeError, ValueError):
         return None
     except Exception as e:
-        # DB 컬럼 누락(예: withdrawn_at 미마이그레이션) 등으로 쿼리 실패 시 500 방지
-        import traceback
+        # DB에 withdrawn_at 컬럼이 없어서 쿼리 실패한 경우 마이그레이션 시도 후 재시도
+        err_str = str(e).lower()
+        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str:
+            try:
+                _ensure_user_withdrawn_at_column()
+                db.session.expire_all()  # 세션 캐시 초기화
+                u = User.query.get(int(user_id))
+                if u and getattr(u, "withdrawn_at", None):
+                    return None
+                return u
+            except Exception as retry_e:
+                print(f"[load_user] retry failed user_id={user_id}: {retry_e}", flush=True)
+                return None
         print(f"[load_user] user_id={user_id} error: {e}", flush=True)
-        traceback.print_exc()
         return None
 
 # --------------------------------------------------------------------------------
@@ -8860,6 +8870,22 @@ def category_view_path(cat_path):
 
 def _find_or_create_social_user(provider, provider_id, email, name):
     """소셜 로그인: provider+provider_id 또는 email로 회원 찾기, 없으면 생성. 반환: User"""
+    try:
+        return _find_or_create_social_user_impl(provider, provider_id, email, name)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str:
+            try:
+                _ensure_user_withdrawn_at_column()
+                db.session.expire_all()
+                return _find_or_create_social_user_impl(provider, provider_id, email, name)
+            except Exception:
+                raise
+        raise
+
+
+def _find_or_create_social_user_impl(provider, provider_id, email, name):
+    """소셜 로그인 구현 (User 조회/생성)."""
     user = User.query.filter_by(auth_provider=provider, auth_provider_id=str(provider_id)).first()
     if user:
         if (email and not user.email):
@@ -9260,14 +9286,21 @@ def auth_status():
 def login():
     """로그인 라우트"""
     if request.method == 'POST':
+        user = None
         try:
             user = User.query.filter_by(email=request.form.get('email')).first()
         except Exception as e:
-            import traceback
-            print(f"[login] User query failed: {e}", flush=True)
-            traceback.print_exc()
-            flash("일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
-            return redirect(url_for('login'))
+            err_str = str(e).lower()
+            if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str:
+                try:
+                    _ensure_user_withdrawn_at_column()
+                    db.session.expire_all()
+                    user = User.query.filter_by(email=request.form.get('email')).first()
+                except Exception as retry_e:
+                    print(f"[login] migration/retry failed: {retry_e}", flush=True)
+            if user is None:
+                flash("일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
+                return redirect(url_for('login'))
         if user and user.password and check_password_hash(user.password, request.form.get('password')):
             if getattr(user, "withdrawn_at", None):
                 flash("탈퇴된 계정입니다.")
