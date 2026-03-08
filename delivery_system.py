@@ -86,6 +86,8 @@ class DeliveryTask(db_delivery.Model):
     # 기사 정산 상태
     driver_pay_status = db_delivery.Column(db_delivery.String(20), default="미지급")  # 미지급 / 지급완료
     driver_pay_date = db_delivery.Column(db_delivery.DateTime, nullable=True)
+    # 오더별 배송료(기사 지급액). NULL이면 전역 단가(DriverConfig.unit_fee) 사용
+    driver_fee = db_delivery.Column(db_delivery.Integer, nullable=True)
     __table_args__ = (UniqueConstraint('order_id', 'category', name='_order_cat_v12_uc_bp'),)
 
 class DeliveryLog(db_delivery.Model):
@@ -136,6 +138,7 @@ def logi_calc_driver_payouts(start_dt=None, end_dt=None, driver_id=None, pay_sta
     - item_keyword: 상품명/카테고리 텍스트 부분검색 (product_details 기준)
     """
     _logi_ensure_driver_pay_columns()
+    _logi_ensure_driver_fee_column()
     q = DeliveryTask.query.filter(DeliveryTask.status == '완료')
     if start_dt:
         q = q.filter(DeliveryTask.completed_at >= start_dt)
@@ -163,9 +166,17 @@ def logi_calc_driver_payouts(start_dt=None, end_dt=None, driver_id=None, pay_sta
             }
         stats[key]["completed_count"] += 1
 
-    # 지급액 계산 (건당 unit_fee 기준)
-    for v in stats.values():
-        v["payout_amount"] = v["completed_count"] * unit_fee
+    # 지급액 계산: 오더별 driver_fee가 있으면 해당 금액, 없으면 건당 unit_fee
+    for t in q.all():
+        if not t.driver_id:
+            continue
+        key = (t.driver_id, t.driver_name)
+        fee = getattr(t, 'driver_fee', None)
+        if fee is not None and fee >= 0:
+            amount = fee
+        else:
+            amount = unit_fee
+        stats[key]["payout_amount"] = stats[key].get("payout_amount", 0) + amount
 
     # 총합계
     total_completed = sum(v["completed_count"] for v in stats.values())
@@ -226,7 +237,20 @@ def _logi_ensure_driver_pay_columns():
         except Exception:
             db_delivery.session.rollback()
     except Exception:
-        # 어떤 이유로든 실패해도 앱이 죽지 않도록 보호
+        pass
+
+
+def _logi_ensure_driver_fee_column():
+    """delivery_task 테이블에 driver_fee(오더별 배송료) 컬럼이 없으면 자동 추가."""
+    try:
+        try:
+            db_delivery.session.execute(text(
+                "ALTER TABLE delivery_task ADD COLUMN driver_fee INTEGER NULL"
+            ))
+            db_delivery.session.commit()
+        except Exception:
+            db_delivery.session.rollback()
+    except Exception:
         pass
 
 # --------------------------------------------------------------------------------
@@ -288,6 +312,7 @@ def logi_admin_dashboard():
 
     # 새로 추가된 기사 정산 컬럼이 없을 수 있으므로, 대시보드 진입 시 한 번 보정
     _logi_ensure_driver_pay_columns()
+    _logi_ensure_driver_fee_column()
     
     st_filter = request.args.get('status', 'all')
     cat_filter = request.args.get('category', '전체')
@@ -476,6 +501,7 @@ def logi_admin_dashboard():
                             <th class="p-4 w-12 text-center"><input type="checkbox" id="check-all" onclick="toggleAll()" class="w-4 h-4 rounded border-none"></th>
                             <th class="p-4 w-20 text-center">Status</th>
                             <th class="p-4">Address & Product & History</th>
+                            <th class="p-4 w-28 text-center">배송료(원)</th>
                             <th class="p-4 w-24 text-center">Action</th>
                         </tr>
                     </thead>
@@ -515,6 +541,12 @@ def logi_admin_dashboard():
                                 </div>
                                 </div>
                                 <div id="log-view-{{t.id}}" class="hidden mt-2 p-3 bg-slate-50 rounded-xl text-[9px] text-slate-500 border border-dashed border-slate-200 leading-normal"></div>
+                            </td>
+                            <td class="py-3 px-2 text-center">
+                                <form method="POST" action="{{ url_for('logi.logi_task_set_fee', tid=t.id) }}" class="flex flex-col sm:flex-row gap-1 items-center justify-center">
+                                    <input type="number" name="fee" value="{{ t.driver_fee if t.driver_fee is not none else '' }}" min="0" placeholder="기본" class="w-16 sm:w-20 border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] font-bold text-center">
+                                    <button type="submit" class="text-[9px] bg-amber-500 text-white px-2 py-1 rounded font-black hover:bg-amber-600 min-h-[28px] touch-manipulation">설정</button>
+                                </form>
                             </td>
                             <td class="py-3 px-2 text-right">
                                 <div class="flex flex-col sm:flex-row gap-1.5 items-end sm:items-center justify-end">
@@ -1539,6 +1571,7 @@ def logi_driver_payout_page():
 
     # 테이블 스키마 보정 (컬럼 없으면 자동 추가)
     _logi_ensure_driver_pay_columns()
+    _logi_ensure_driver_fee_column()
 
     # 기본 조회 기간: 오늘
     today = get_kst().date()
@@ -1754,6 +1787,33 @@ def logi_cancel_assignment(tid):
         t.driver_id, t.driver_name, t.status, t.pickup_at = None, '미배정', '대기', None
         logi_add_log(t.id, t.order_id, '재배정', '관리자가 기사 배정을 취소하고 대기 상태로 초기화함')
     db_delivery.session.commit(); return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
+
+
+@logi_bp.route('/task/<int:tid>/fee', methods=['POST'])
+def logi_task_set_fee(tid):
+    """오더(태스크)별 배송료(기사 지급액) 설정. POST: fee= (원, 빈칸이면 기본단가 사용)."""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('logi.logi_admin_login'))
+    t = DeliveryTask.query.get(tid)
+    if not t:
+        flash("해당 배송건을 찾을 수 없습니다.")
+        return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
+    fee_raw = (request.form.get('fee') or '').strip()
+    if fee_raw == '':
+        t.driver_fee = None
+    else:
+        try:
+            fee_val = int(fee_raw)
+            if fee_val < 0:
+                fee_val = 0
+            t.driver_fee = fee_val
+        except ValueError:
+            flash("배송료는 숫자(원)로 입력하세요.")
+            return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
+    db_delivery.session.commit()
+    flash("배송료가 반영되었습니다.")
+    return redirect(request.referrer or url_for('logi.logi_admin_dashboard'))
+
 
 @logi_bp.route('/admin/users', methods=['GET', 'POST'])
 def logi_admin_users_mgmt():

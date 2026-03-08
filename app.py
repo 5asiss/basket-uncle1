@@ -647,9 +647,40 @@ def _ensure_product_naver_columns():
         print(f"[DB MIGRATION] 네이버 최저가 컬럼 자동 추가 실패: {e}", flush=True)
 
 
+def _ensure_user_withdrawn_at_column():
+    """user 테이블에 withdrawn_at 컬럼이 없으면 추가 (회원 탈퇴용)."""
+    try:
+        insp = inspect(db.engine)
+        columns = [c["name"] for c in insp.get_columns("user")]
+        if "withdrawn_at" in columns:
+            return
+        db.session.execute(text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME"))
+        db.session.commit()
+        print("[DB MIGRATION] user.withdrawn_at 컬럼을 추가했습니다.", flush=True)
+    except Exception as e:
+        print(f"[DB MIGRATION] user.withdrawn_at 컬럼 자동 추가 실패: {e}", flush=True)
+
+
+def _ensure_delivery_request_secret_and_image():
+    """delivery_request 테이블에 is_secret, image_url 컬럼이 없으면 추가 (고객문의 비밀글·사진용)."""
+    try:
+        insp = inspect(db.engine)
+        columns = [c["name"] for c in insp.get_columns("delivery_request")]
+        if "is_secret" not in columns:
+            db.session.execute(text("ALTER TABLE delivery_request ADD COLUMN is_secret INTEGER DEFAULT 0"))
+        if "image_url" not in columns:
+            db.session.execute(text("ALTER TABLE delivery_request ADD COLUMN image_url VARCHAR(500)"))
+        db.session.commit()
+        print("[DB MIGRATION] delivery_request is_secret, image_url 컬럼 확인 완료.", flush=True)
+    except Exception as e:
+        print(f"[DB MIGRATION] delivery_request 컬럼 자동 추가 실패: {e}", flush=True)
+
+
 with app.app_context():
     _ensure_product_consumer_price_column()
     _ensure_product_naver_columns()
+    _ensure_user_withdrawn_at_column()
+    _ensure_delivery_request_secret_and_image()
 
 # (모델 클래스는 models.py에 정의됨)
 
@@ -1483,7 +1514,10 @@ def load_user(user_id):
     if not user_id:
         return None
     try:
-        return User.query.get(int(user_id))
+        u = User.query.get(int(user_id))
+        if u and getattr(u, "withdrawn_at", None):
+            return None  # 탈퇴 회원은 로그인 불가
+        return u
     except (TypeError, ValueError):
         return None
 
@@ -2118,7 +2152,7 @@ HEADER_HTML = """
             <a href="/about" class="block py-3 px-4 rounded-xl text-sky-600 hover:bg-sky-50 font-semibold transition">바구니삼촌이란?</a>
             <a href="/guide" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">이용안내</a>
             <a href="/board/restaurant-request" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">전국맛집요청</a>
-            <a href="/board/delivery-request" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">배송요청</a>
+            <a href="/board/delivery-request" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">고객문의</a>
             <a href="/board/partnership" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">제휴문의</a>
             <a href="/board/free" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">자유게시판</a>
             <a href="/board/event" class="block py-3 px-4 rounded-xl text-stone-600 hover:bg-stone-50 hover:text-teal-600 font-medium transition">이벤트 게시판</a>
@@ -4558,7 +4592,7 @@ def index():
     {% endif %}
     {% endfor %}
 
-    <div class="mt-10 flex justify-center">
+    <div class="mt-10 flex justify-center md:justify-end">
         {% set _p = request.path if request else '' %}
         <div class="flex items-center gap-2 text-[11px] md:text-xs">
             <span class="text-slate-500 font-medium">보기 방식</span>
@@ -4585,11 +4619,11 @@ def index():
                 <a href="/board/restaurant-request" class="inline-block mt-2 text-[10px] font-black text-teal-600 hover:underline">전체보기</a>
             </div>
             <div class="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-                <h3 class="text-sm font-black text-slate-700 mb-3 flex items-center gap-2"><span class="w-1 h-4 bg-teal-500 rounded"></span> 배송요청</h3>
+                <h3 class="text-sm font-black text-slate-700 mb-3 flex items-center gap-2"><span class="w-1 h-4 bg-teal-500 rounded"></span> 고객문의</h3>
                 <ul class="space-y-2">
                     {% for p in main_delivery_posts %}
                     {% set v = main_delivery_votes.get(p.id, (0, 0)) %}
-                    <li><a href="/board/delivery-request/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate py-1 min-h-[32px] flex items-center touch-manipulation" title="{{ p.region_name }}">{{ p.region_name }}</a><span class="text-[10px] text-teal-600 font-black ml-1">👍 {{ v[0] }}</span></li>
+                    <li><a href="/board/delivery-request/{{ p.id }}" class="block text-xs font-bold text-slate-600 hover:text-teal-600 truncate py-1 min-h-[32px] flex items-center touch-manipulation" title="{{ p.region_name if not p.is_secret else '비밀글' }}">{% if p.is_secret %}🔒 비밀글{% else %}{{ p.region_name }}{% endif %}</a><span class="text-[10px] text-teal-600 font-black ml-1">👍 {{ v[0] }}</span></li>
                     {% endfor %}
                     {% if not main_delivery_posts %}<li class="text-[11px] text-slate-400">등록된 글이 없습니다.</li>{% endif %}
                 </ul>
@@ -5055,7 +5089,7 @@ def index_horizontal():
     {% endif %}
     {% endfor %}
 
-    <div class="mt-10 flex justify-center">
+    <div class="mt-10 flex justify-center md:justify-end">
         {% set _p = request.path if request else '' %}
         <div class="flex items-center gap-2 text-[11px] md:text-xs">
             <span class="text-slate-500 font-medium">보기 방식</span>
@@ -6092,10 +6126,10 @@ def board_restaurant_request_vote(rid):
     return redirect(url_for('board_restaurant_request_detail', rid=rid))
 
 
-# ---------- 배송요청 게시판 ----------
+# ---------- 고객문의 게시판 (배송요청) ----------
 @app.route('/board/delivery-request')
 def board_delivery_request():
-    """배송요청 목록. 공지 상단 노출 후 일반글 추천순. 10개씩 페이지네이션."""
+    """고객문의 목록. 공지 상단 노출 후 일반글 추천순. 비밀글은 작성자·관리자만 내용 노출."""
     notice_posts = DeliveryRequest.query.filter_by(is_hidden=False, is_notice=True).order_by(DeliveryRequest.id.desc()).all()
     subq = db.session.query(DeliveryRequestVote.delivery_request_id, func.count(DeliveryRequestVote.id).label('up')).filter(DeliveryRequestVote.vote_type == 'up').group_by(DeliveryRequestVote.delivery_request_id).subquery()
     normal_ids = [r[0] for r in db.session.query(DeliveryRequest.id).outerjoin(subq, DeliveryRequest.id == subq.c.delivery_request_id).filter(DeliveryRequest.is_hidden == False, DeliveryRequest.is_notice == False).order_by(func.coalesce(subq.c.up, 0).desc(), DeliveryRequest.id.desc()).all()]
@@ -6112,21 +6146,26 @@ def board_delivery_request():
         HEADER_HTML + """
         <div class="max-w-3xl mx-auto py-8 md:py-12 px-4 font-black text-left">
             <a href="/" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 홈</a>
-            <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">배송요청 <span class="text-sm font-bold text-gray-500">전체 {{ total }}건</span></h1>
-            <p class="text-gray-500 text-sm mb-6">배송이 되었으면 하는 지역을 알려주세요. 추천이 많은 지역부터 배송구역 확장을 검토합니다.</p>
+            <h1 class="text-2xl md:text-3xl font-black text-gray-900 mb-2">고객문의 <span class="text-sm font-bold text-gray-500">전체 {{ total }}건</span></h1>
+            <p class="text-gray-500 text-sm mb-6">문의·제안·배송 희망 지역 등을 남겨주세요. 비밀글로 등록하면 작성자와 관리자만 볼 수 있습니다.</p>
             <a href="/board/delivery-request/write" class="inline-block mb-6 px-5 py-3 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700 transition">글쓰기</a>
             <div class="space-y-4">
                 {% for p in posts %}
                 {% set up_down = vote_counts.get(p.id, (0, 0)) %}
+                {% set can_view_secret = p.is_secret and current_user.is_authenticated and (p.user_id == current_user.id or getattr(current_user, 'is_admin', False)) %}
                 <a href="/board/delivery-request/{{ p.id }}" class="block bg-white rounded-2xl border border-gray-100 p-4 shadow-sm hover:shadow-md transition text-left {% if p.is_notice %}border-amber-200 bg-amber-50/50{% endif %}">
                     <div class="flex gap-4">
                         <div class="flex-1 min-w-0">
-                            <p class="font-black text-teal-700 text-sm">{% if p.is_notice %}<span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{% endif %}{{ p.region_name }}</p>
+                            <p class="font-black text-teal-700 text-sm">{% if p.is_notice %}<span class="inline-block px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black rounded mr-2">공지</span>{% endif %}{% if p.is_secret and not can_view_secret %}🔒 비밀글{% else %}{{ p.region_name }}{% endif %}</p>
+                            {% if p.is_secret and not can_view_secret %}
+                            <p class="text-gray-500 text-sm mt-1">비밀글은 작성자와 관리자만 볼 수 있습니다.</p>
+                            {% else %}
                             <p class="text-gray-700 text-sm mt-1 line-clamp-2">{{ (p.content or '')[:100] }}{% if (p.content or '')|length > 100 %}...{% endif %}</p>
+                            {% endif %}
                             <p class="text-[10px] text-gray-400 mt-2">{{ p.created_at.strftime('%Y.%m.%d') if p.created_at else '' }} · {{ p.user_name or '비회원' }}</p>
                             <span class="inline-block mt-2 text-teal-600 text-xs font-black">👍 {{ up_down[0] }}</span>
                             <span class="inline-block mt-2 ml-2 text-gray-400 text-xs font-black">👎 {{ up_down[1] }}</span>
-                            {% if up_down[0] >= 20 %}
+                            {% if not p.is_secret and up_down[0] >= 20 %}
                             <span class="ml-2 text-amber-600 text-[10px] font-black">✓ 추천 많음 · 배송구역 검토 대상</span>
                             {% endif %}
                         </div>
@@ -6157,18 +6196,22 @@ def board_delivery_request():
 @app.route('/board/delivery-request/write', methods=['GET', 'POST'])
 @login_required
 def board_delivery_request_write():
-    """배송요청 글쓰기. 지역명, 글내용(여기도 배송해주세요 등)."""
+    """고객문의 글쓰기. 제목(지역/제목), 내용, 비밀글 여부, 사진 업로드."""
     if request.method == 'POST':
         region_name = (request.form.get('region_name') or '').strip()
         if not region_name:
-            flash("지역명을 입력해 주세요.")
+            flash("제목(지역명 등)을 입력해 주세요.")
             return redirect(url_for('board_delivery_request_write'))
         content = (request.form.get('content') or '').strip()
+        is_secret = request.form.get('is_secret') in ('1', 'on', 'yes')
+        img_url = save_board_image(request.files.get('image'))
         r = DeliveryRequest(
             user_id=current_user.id,
             user_name=current_user.name or current_user.email or '회원',
-            region_name=region_name,
-            content=content or None
+            region_name=region_name[:200],
+            content=content or None,
+            is_secret=is_secret,
+            image_url=img_url
         )
         db.session.add(r)
         db.session.commit()
@@ -6178,11 +6221,13 @@ def board_delivery_request_write():
         HEADER_HTML + """
         <div class="max-w-2xl lg:max-w-4xl mx-auto py-8 md:py-12 px-4 md:px-6 lg:px-8 font-black text-left">
             <a href="/board/delivery-request" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 목록</a>
-            <h1 class="text-2xl font-black text-gray-900 mb-6">배송요청 글쓰기</h1>
-            <p class="text-gray-500 text-sm mb-4">배송이 되었으면 하는 지역과 하고 싶은 말을 적어주세요. 추천이 많은 지역부터 배송구역 확장을 검토합니다.</p>
-            <form method="POST" action="/board/delivery-request/write" class="space-y-4">
-                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">지역명 *</label><input type="text" name="region_name" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="예: OO동, OO구, OO시 OO동"></div>
-                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">글내용</label><textarea name="content" rows="4" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="예: 여기도 배송해주세요! / 우리 동네도 부탁드려요"></textarea></div>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">고객문의 글쓰기</h1>
+            <p class="text-gray-500 text-sm mb-4">문의·제안·배송 희망 지역 등을 적어주세요. 비밀글로 등록하면 작성자와 관리자만 볼 수 있습니다.</p>
+            <form method="POST" action="/board/delivery-request/write" enctype="multipart/form-data" class="space-y-4">
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 (지역명·문의 제목) *</label><input type="text" name="region_name" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="예: OO동 배송 요청 / 상품 문의"></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">글내용</label><textarea name="content" rows="4" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="문의 내용을 입력하세요"></textarea></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">사진 첨부</label><input type="file" name="image" accept="image/*" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm"></div>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="is_secret" value="1" class="rounded"> <span class="text-sm font-bold">비밀글로 등록</span></label>
                 <button type="submit" class="w-full py-4 bg-teal-600 text-white rounded-xl font-black hover:bg-teal-700 transition">등록</button>
             </form>
         </div>
@@ -6192,8 +6237,12 @@ def board_delivery_request_write():
 
 @app.route('/board/delivery-request/<int:did>')
 def board_delivery_request_detail(did):
-    """배송요청 상세. 추천/비추천 1인 1표."""
+    """고객문의 상세. 비밀글은 작성자·관리자만 조회 가능. 추천/비추천 1인 1표."""
     p = DeliveryRequest.query.filter_by(id=did, is_hidden=False).first_or_404()
+    can_view = not p.is_secret or (current_user.is_authenticated and (p.user_id == current_user.id or getattr(current_user, 'is_admin', False)))
+    if not can_view:
+        flash("비밀글은 작성자만 볼 수 있습니다.")
+        return redirect(url_for('board_delivery_request'))
     up_count, down_count = _delivery_request_vote_counts(p.id)
     user_vote = _user_delivery_request_vote(p.id)
     show_notice = up_count >= 20
@@ -6220,7 +6269,7 @@ def board_delivery_request_detail(did):
             </div>
             {% endif %}
             <div class="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
-                <h1 class="text-xl font-black text-teal-700 mb-2">{{ p.region_name }}</h1>
+                <h1 class="text-xl font-black text-teal-700 mb-2">{% if p.is_secret %}🔒 {% endif %}{{ p.region_name }}</h1>
                 <p class="text-[10px] text-gray-400 mb-4">{{ p.created_at.strftime('%Y.%m.%d %H:%M') if p.created_at else '' }} · {{ p.user_name or '비회원' }}</p>
                 {% if can_edit %}
                 <div class="flex justify-end gap-2 mb-4">
@@ -6229,6 +6278,9 @@ def board_delivery_request_detail(did):
                         <button type="submit" class="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 text-red-600 hover:bg-red-100 transition">삭제</button>
                     </form>
                 </div>
+                {% endif %}
+                {% if p.image_url %}
+                <div class="mb-4"><img src="{{ p.image_url }}" alt="첨부 사진" class="max-w-full rounded-xl border border-gray-100 object-contain max-h-[400px]"></div>
                 {% endif %}
                 {% if p.content %}<div class="mb-4"><p class="text-gray-700 text-sm whitespace-pre-wrap">{{ p.content }}</p></div>{% endif %}
                 <div class="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
@@ -6282,7 +6334,7 @@ def board_delivery_request_detail(did):
 @app.route('/board/delivery-request/<int:did>/edit', methods=['GET', 'POST'])
 @login_required
 def board_delivery_request_edit(did):
-    """배송요청 글 수정 (작성자·관리자만)."""
+    """고객문의 글 수정 (작성자·관리자만). 비밀글·사진 변경 가능."""
     post = DeliveryRequest.query.filter_by(id=did, is_hidden=False).first_or_404()
     if not (
         (post.user_id is not None and current_user.id == post.user_id)
@@ -6293,10 +6345,14 @@ def board_delivery_request_edit(did):
     if request.method == "POST":
         region_name = (request.form.get("region_name") or "").strip()
         if not region_name:
-            flash("지역명을 입력해 주세요.")
+            flash("제목을 입력해 주세요.")
             return redirect(url_for("board_delivery_request_edit", did=did))
         post.region_name = region_name[:200]
         post.content = (request.form.get("content") or "").strip() or None
+        post.is_secret = request.form.get("is_secret") in ("1", "on", "yes")
+        new_img = save_board_image(request.files.get("image"))
+        if new_img:
+            post.image_url = new_img
         db.session.commit()
         flash("글이 수정되었습니다.")
         return redirect(url_for("board_delivery_request_detail", did=did))
@@ -6304,10 +6360,12 @@ def board_delivery_request_edit(did):
         HEADER_HTML + """
         <div class="max-w-2xl mx-auto py-8 md:py-12 px-4 font-black text-left">
             <a href="/board/delivery-request/{{ p.id }}" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 글 상세로</a>
-            <h1 class="text-2xl font-black text-gray-900 mb-6">배송요청 글 수정</h1>
-            <form method="POST" action="/board/delivery-request/{{ p.id }}/edit" class="space-y-4">
-                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">지역명 *</label><input type="text" name="region_name" required value="{{ p.region_name or '' }}" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">고객문의 글 수정</h1>
+            <form method="POST" action="/board/delivery-request/{{ p.id }}/edit" enctype="multipart/form-data" class="space-y-4">
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">제목 *</label><input type="text" name="region_name" required value="{{ p.region_name or '' }}" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold"></div>
                 <div><label class="block text-[10px] text-gray-500 uppercase mb-1">글내용</label><textarea name="content" rows="4" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold">{{ p.content or '' }}</textarea></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">사진 (변경 시에만 선택)</label>{% if p.image_url %}<p class="text-xs text-gray-500 mb-1">현재 첨부됨</p>{% endif %}<input type="file" name="image" accept="image/*" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm"></div>
+                <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="is_secret" value="1" {% if p.is_secret %}checked{% endif %} class="rounded"> <span class="text-sm font-bold">비밀글로 유지</span></label>
                 <div class="flex gap-3"><a href="/board/delivery-request/{{ p.id }}" class="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-sm font-bold hover:bg-gray-200">취소</a><button type="submit" class="px-5 py-2.5 bg-teal-600 text-white rounded-xl text-sm font-black hover:bg-teal-700">저장</button></div>
             </form>
         </div>
@@ -8023,8 +8081,16 @@ def product_detail(pid):
     # 2. 최근 등록 상품 10개 (이 데이터가 정상적으로 전달되어야 합니다)
     latest_all = Product.query.filter(Product.is_active == True, Product.id != pid).order_by(Product.id.desc()).limit(10).all()
     
-    # 3. 하단 노출용 추천 카테고리 3개 및 미리보기 상품
-    recommend_cats_detail = Category.query.filter(Category.name != p.category).order_by(Category.order.asc()).limit(3).all()
+    # 3. 하단 노출용 추천 카테고리 3개 — 상품이 있는 카테고리만 노출 (둘러보기에 없는 카테고리 제외)
+    cat_names_with_products = [x[0] for x in db.session.query(Product.category).filter(
+        Product.is_active == True,
+        Product.category.isnot(None),
+        Product.category != ''
+    ).distinct().all() if x[0]]
+    recommend_cats_detail = Category.query.filter(
+        Category.name != p.category,
+        Category.name.in_(cat_names_with_products)
+    ).order_by(Category.order.asc()).limit(3).all()
     cat_previews_detail = {c: Product.query.filter_by(category=c.name, is_active=True).limit(4).all() for c in recommend_cats_detail}
     
     # 4. 리뷰: 해당 상품의 판매자(카테고리)별로 묶어서 노출, 5개만 초기 로딩·더보기 5개씩
@@ -9341,6 +9407,22 @@ def register():
 def logout(): 
     """로그아웃"""
     logout_user(); return redirect('/')
+
+@app.route('/mypage/withdraw', methods=['POST'])
+@login_required
+def mypage_withdraw():
+    """회원 탈퇴: withdrawn_at 설정 후 로그아웃."""
+    try:
+        current_user.withdrawn_at = now_kst()
+        db.session.commit()
+        logout_user()
+        flash("회원 탈퇴가 완료되었습니다. 그동안 이용해 주셔서 감사합니다.")
+        return redirect(url_for('index'))
+    except Exception as e:
+        db.session.rollback()
+        flash("탈퇴 처리 중 오류가 발생했습니다.")
+        return redirect(url_for('mypage'))
+
 @app.route('/mypage/update_address', methods=['POST'])
 @login_required
 def update_address():
@@ -9651,14 +9733,14 @@ def mypage_activity():
     comments = BoardComment.query.filter_by(user_id=uid).order_by(BoardComment.created_at.desc()).limit(50).all()
     votes_r = RestaurantVote.query.filter_by(user_id=uid).order_by(RestaurantVote.created_at.desc()).limit(30).all()
     votes_d = DeliveryRequestVote.query.filter_by(user_id=uid).order_by(DeliveryRequestVote.created_at.desc()).limit(30).all()
-    board_type_label = {'restaurant': '전국맛집요청', 'delivery': '배송요청', 'partnership': '제휴문의', 'free': '자유게시판'}
+    board_type_label = {'restaurant': '전국맛집요청', 'delivery': '고객문의', 'partnership': '제휴문의', 'free': '자유게시판'}
     board_type_path = {'restaurant': '/board/restaurant-request', 'delivery': '/board/delivery-request', 'partnership': '/board/partnership', 'free': '/board/free'}
     # 게시글 하나의 리스트로 (최신순) - 5개씩 더보기용
     all_posts = []
     for p in posts_r:
         all_posts.append({'created_at': p.created_at, 'url': '/board/restaurant-request/%s' % p.id, 'label': '전국맛집요청', 'title': p.store_name or ''})
     for p in posts_d:
-        all_posts.append({'created_at': p.created_at, 'url': '/board/delivery-request/%s' % p.id, 'label': '배송요청', 'title': p.region_name or ''})
+        all_posts.append({'created_at': p.created_at, 'url': '/board/delivery-request/%s' % p.id, 'label': '고객문의', 'title': p.region_name or ''})
     for p in posts_p:
         all_posts.append({'created_at': p.created_at, 'url': '/board/partnership/%s' % p.id, 'label': '제휴문의', 'title': (p.partnership_type or '제휴문의')[:40]})
     for p in posts_f:
@@ -9669,7 +9751,7 @@ def mypage_activity():
     for v in votes_r:
         all_votes.append({'created_at': v.created_at, 'url': '/board/restaurant-request/%s' % v.restaurant_request_id, 'label': '전국맛집요청 · %s' % ('추천' if v.vote_type == 'up' else '비추'), 'is_up': v.vote_type == 'up'})
     for v in votes_d:
-        all_votes.append({'created_at': v.created_at, 'url': '/board/delivery-request/%s' % v.delivery_request_id, 'label': '배송요청 · %s' % ('추천' if v.vote_type == 'up' else '비추'), 'is_up': v.vote_type == 'up'})
+        all_votes.append({'created_at': v.created_at, 'url': '/board/delivery-request/%s' % v.delivery_request_id, 'label': '고객문의 · %s' % ('추천' if v.vote_type == 'up' else '비추'), 'is_up': v.vote_type == 'up'})
     all_votes.sort(key=lambda x: x['created_at'] or datetime.min.replace(tzinfo=None), reverse=True)
     return render_template_string(
         HEADER_HTML + """
@@ -9981,6 +10063,9 @@ def mypage():
                     <a href="/logout" class="text-gray-400 hover:text-red-500 transition flex items-center gap-1.5 text-xs md:text-sm font-semibold py-1.5 px-2.5 rounded-md hover:bg-red-50 touch-target ml-0 lg:ml-auto">
                         로그아웃 <i class="fas fa-sign-out-alt"></i>
                     </a>
+                    <button type="button" id="mypage-withdraw-btn" class="text-gray-400 hover:text-red-600 transition flex items-center gap-1.5 text-xs md:text-sm font-medium py-1.5 px-2.5 rounded-md hover:bg-red-50 touch-target">
+                        회원 탈퇴 <i class="fas fa-user-times"></i>
+                    </button>
                 </nav>
             {% if not push_already_set %}
             <div id="push-enable-block" class="p-5 md:p-6 bg-teal-50/50 border border-teal-100 rounded-2xl text-left">
@@ -10100,6 +10185,30 @@ def mypage():
                 <span class="text-teal-600 text-sm font-black">적립/사용 내역 <i class="fas fa-chevron-right ml-1"></i></span>
             </div>
         </a>
+
+        <div id="mypage-withdraw-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/50" aria-hidden="true">
+            <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 md:p-8 text-left" onclick="event.stopPropagation()">
+                <h3 class="text-lg font-black text-gray-800 mb-3">회원 탈퇴</h3>
+                <p class="text-sm text-gray-600 font-medium mb-6">탈퇴 시 보유 포인트는 소멸되며, 동일 계정으로 재가입할 수 있습니다. 정말 탈퇴하시겠습니까?</p>
+                <form action="/mypage/withdraw" method="POST" class="flex gap-3">
+                    <button type="button" id="mypage-withdraw-cancel" class="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-black text-sm hover:bg-gray-200 transition">취소</button>
+                    <button type="submit" class="flex-1 py-3 rounded-xl bg-red-500 text-white font-black text-sm hover:bg-red-600 transition">탈퇴하기</button>
+                </form>
+            </div>
+        </div>
+        <script>
+        (function(){
+            var btn = document.getElementById('mypage-withdraw-btn');
+            var modal = document.getElementById('mypage-withdraw-modal');
+            var cancel = document.getElementById('mypage-withdraw-cancel');
+            if (btn && modal) {
+                btn.addEventListener('click', function(){ modal.classList.remove('hidden'); modal.classList.add('flex'); });
+                function closeModal(){ modal.classList.add('hidden'); modal.classList.remove('flex'); }
+                if (cancel) cancel.addEventListener('click', closeModal);
+                modal.addEventListener('click', function(e){ if (e.target === modal) closeModal(); });
+            }
+        })();
+        </script>
 
         <h3 class="text-lg md:text-2xl font-black text-gray-800 mb-4 md:mb-6 flex items-center gap-3 px-1 text-left">
             <span class="w-1.5 h-6 md:h-8 bg-blue-500 rounded-full shrink-0"></span> 최근 주문 상품
@@ -10921,9 +11030,12 @@ def cart():
                 </div>
                 {min_order_msg}
                 {point_info}
-                <p class="text-[11px] md:text-xs text-gray-400 mt-4 leading-relaxed font-medium">
-                    ※ 배송료: 카테고리별로 금액·건별 설정에 따라 계산됩니다. 각 카테고리 설정은 상품 상세/카테고리 페이지에서 확인할 수 있습니다.
-                </p>
+                <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+                    <p class="text-[11px] md:text-xs font-bold text-slate-600 mb-1.5">카테고리 배송료 안내</p>
+                    <p class="text-[11px] md:text-xs text-slate-500 leading-relaxed font-medium">
+                        담긴 상품의 <strong>카테고리별</strong>로 계산된 배송료가 위 금액에 합산됩니다. 예시: [과일·채소] 1,900원 + [생수·음료] 19,000원 + 3,800원 = 총 24,700원처럼, 카테고리마다 기본료·무료조건·추가료가 달라 각각 계산 후 더해집니다. 자세한 조건은 상품 상세 또는 카테고리 페이지에서 확인할 수 있습니다.
+                    </p>
+                </div>
                 <p class="text-[11px] md:text-xs text-gray-500 mt-1 font-medium">다음 단계에서 배송지를 다시 확인하고 수정할 수 있습니다.</p>
             </div>
             
@@ -12455,24 +12567,28 @@ def admin_member_grade_config():
     """자동 등급 기준 저장 (마스터 전용). min_amount_grade2~5 (원)"""
     if not current_user.is_admin:
         return jsonify({'error': '권한 없음'}), 403
-    data = request.get_json() or request.form
-    def set_val(k, v):
-        try:
-            val = str(int(v)) if v not in (None, '') else '0'
-        except (TypeError, ValueError):
-            val = '0'
-        row = MemberGradeConfig.query.filter_by(key=k).first()
-        if not row:
-            row = MemberGradeConfig(key=k, value=val)
-            db.session.add(row)
-        else:
-            row.value = val
-    set_val('min_amount_grade2', data.get('min_amount_grade2'))
-    set_val('min_amount_grade3', data.get('min_amount_grade3'))
-    set_val('min_amount_grade4', data.get('min_amount_grade4'))
-    set_val('min_amount_grade5', data.get('min_amount_grade5'))
-    db.session.commit()
-    return jsonify({'ok': True})
+    try:
+        data = request.get_json(silent=True) or request.form
+        def set_val(k, v):
+            try:
+                val = str(int(v)) if v not in (None, '') else '0'
+            except (TypeError, ValueError):
+                val = '0'
+            row = MemberGradeConfig.query.filter_by(key=k).first()
+            if not row:
+                row = MemberGradeConfig(key=k, value=val)
+                db.session.add(row)
+            else:
+                row.value = val
+        set_val('min_amount_grade2', data.get('min_amount_grade2'))
+        set_val('min_amount_grade3', data.get('min_amount_grade3'))
+        set_val('min_amount_grade4', data.get('min_amount_grade4'))
+        set_val('min_amount_grade5', data.get('min_amount_grade5'))
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': '저장 중 오류가 발생했습니다. 다시 시도해 주세요.'}), 500
 
 
 @login_required
@@ -13069,6 +13185,7 @@ def admin_dashboard():
     order_total_qty, order_total_subtotal = 0, 0
     sales_table_rows = []
     sales_total_quantity = 0
+    sales_total_supply_amount = 0
     product_summary_rows = []
     settlement_detail_rows = []
     settlement_detail_orders = []
@@ -13079,9 +13196,12 @@ def admin_dashboard():
     supplier_orders_agg = []
     supplier_start_date_str = ''
     supplier_end_date_str = ''
+    supplier_orders_supplier_q = ''
     supplier_product_agg = []
     supplier_product_start_date_str = ''
     supplier_product_end_date_str = ''
+    manual_order_products = []
+    manual_order_users = []
     if request.args.get("tab") == "price_compare":
         price_compare_results = _load_price_compare_results()
         price_compare_truncated = session.get("price_compare_truncated", False)
@@ -13143,6 +13263,10 @@ def admin_dashboard():
             print(f"Date parsing error: {e}")
             start_dt = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0)
             end_dt = now.replace(hour=23, minute=59, second=59)
+
+        if tab == 'orders' and is_master:
+            manual_order_products = Product.query.filter_by(is_active=True).order_by(Product.category.asc(), Product.name.asc()).all()
+            manual_order_users = User.query.filter(User.is_admin == False).order_by(User.id.desc()).limit(300).all()
 
         # 결제취소 제외 주문 필터링 (order_id_search, payment_key_search는 상단에서 이미 로드)
         q_orders = Order.query.filter(
@@ -13233,13 +13357,18 @@ def admin_dashboard():
                 for oi in items:
                     if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                         is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
+                        qty = 0 if is_cancelled else oi.quantity
+                        p = Product.query.get(oi.product_id) if oi.product_id else None
+                        supply_price = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else (int(p.price) if p and getattr(p, 'price', None) is not None else 0)
+                        line_supply_amount = supply_price * qty
                         sales_table_rows.append({
                             'order_date': order_date_str,
                             'order_id': getattr(o, 'order_id', None) or '',
                             'product_name': oi.product_name,
                             'category': oi.product_category,
-                            'quantity': 0 if is_cancelled else oi.quantity,
-                            'status': '취소' if is_cancelled else (getattr(oi, 'item_status', None) or status_str)
+                            'quantity': qty,
+                            'status': '취소' if is_cancelled else (getattr(oi, 'item_status', None) or status_str),
+                            'line_supply_amount': line_supply_amount,
                         })
             else:
                 parts = (o.product_details or '').split(' | ')
@@ -13252,17 +13381,22 @@ def admin_dashboard():
                                 it_match = re.search(r'(.*?)\((\d+)\)', item)
                                 if it_match:
                                     pn, qt = it_match.groups()
-                                    sales_table_rows.append({'order_date': order_date_str, 'order_id': getattr(o, 'order_id', None) or '', 'product_name': pn.strip(), 'category': cat_n, 'quantity': int(qt), 'status': status_str})
+                                    qt = int(qt)
+                                    p = Product.query.filter_by(name=pn.strip()).first()
+                                    supply_price = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else (int(p.price) if p and getattr(p, 'price', None) is not None else 0)
+                                    sales_table_rows.append({'order_date': order_date_str, 'order_id': getattr(o, 'order_id', None) or '', 'product_name': pn.strip(), 'category': cat_n, 'quantity': qt, 'status': status_str, 'line_supply_amount': supply_price * qt})
         # 조회 결과 총합계 수량 + 품목·판매상품명별 판매수량 총합계 (집계 테이블용)
         sales_total_quantity = sum(r.get('quantity', 0) for r in sales_table_rows)
         product_summary_rows = []
         from collections import defaultdict
-        agg = defaultdict(int)
+        agg = defaultdict(lambda: {'qty': 0, 'supply_amount': 0})
         for r in sales_table_rows:
             key = (r.get('category') or '', r.get('product_name') or '')
-            agg[key] += r.get('quantity', 0)
-        for (cat, pname), total_qty in sorted(agg.items(), key=lambda x: (x[0][0], x[0][1])):
-            product_summary_rows.append({'category': cat, 'product_name': pname, 'total_quantity': total_qty})
+            agg[key]['qty'] += r.get('quantity', 0)
+            agg[key]['supply_amount'] += r.get('line_supply_amount', 0)
+        for (cat, pname), data in sorted(agg.items(), key=lambda x: (x[0][0], x[0][1])):
+            product_summary_rows.append({'category': cat, 'product_name': pname, 'total_quantity': data['qty'], 'total_supply_amount': data['supply_amount']})
+        sales_total_supply_amount = sum(r.get('total_supply_amount', 0) for r in product_summary_rows)
 
         # 정산 전용 테이블(Settlement) 기준: n넘버(정산번호), 판매일시, 카테고리, 면세여부, 품목, 판매금액, 수수료, 배송관리비, 정산합계, 입금상태(입금일)
         sel_settlement_status = request.args.get('settlement_status', '전체')
@@ -13405,6 +13539,7 @@ def admin_dashboard():
             supplier_end_dt = now.replace(hour=23, minute=59, second=59)
         supplier_start_date_str = supplier_start_dt.strftime('%Y-%m-%d %H:%M')[:16]
         supplier_end_date_str = supplier_end_dt.strftime('%Y-%m-%d %H:%M')[:16]
+        supplier_orders_supplier_q = (request.args.get('supplier_q') or '').strip()
         q_ord_supplier = Order.query.filter(
             Order.created_at >= supplier_start_dt,
             Order.created_at <= supplier_end_dt,
@@ -13429,29 +13564,49 @@ def admin_dashboard():
             items_supplier = [oi for oi in items_supplier if oi.product_category in my_categories]
         # 공급사: OrderItem.supplier 있으면 사용, 없으면 Product.supplier, 없으면 '(미지정)'
         from collections import defaultdict
-        agg_by_supplier = defaultdict(lambda: defaultdict(lambda: {'qty': 0, 'price': 0}))
+        agg_by_supplier = defaultdict(lambda: defaultdict(lambda: {'qty': 0, 'price': 0, 'supply_price': 0}))
         for oi in items_supplier:
             supplier_name = (getattr(oi, 'supplier', None) or '').strip()
             if not supplier_name:
                 prod = Product.query.get(oi.product_id)
                 supplier_name = (getattr(prod, 'supplier', None) or '').strip() if prod else ''
             supplier_name = supplier_name or '(미지정)'
+            prod = Product.query.get(oi.product_id) if oi.product_id else None
+            supply_price = int(prod.supply_price) if prod and getattr(prod, 'supply_price', None) is not None else (int(oi.price) if oi.price else 0)
+            if prod and getattr(prod, 'supply_price', None) is None and getattr(prod, 'price', None) is not None:
+                supply_price = int(prod.price)
             agg_by_supplier[supplier_name][oi.product_name]['qty'] += oi.quantity
             agg_by_supplier[supplier_name][oi.product_name]['price'] = oi.price
+            agg_by_supplier[supplier_name][oi.product_name]['supply_price'] = supply_price
         supplier_orders_agg = []
+        supplier_q_lower = supplier_orders_supplier_q.lower() if supplier_orders_supplier_q else None
         for sup_name in sorted(agg_by_supplier.keys()):
+            if supplier_q_lower and supplier_q_lower not in sup_name.lower():
+                continue
             lines = []
             total_amount = 0
+            total_supply_amount = 0
             for pname, data in sorted(agg_by_supplier[sup_name].items()):
                 qty = data['qty']
                 price = data['price']
-                line_amount = price * qty
+                supply_price = data['supply_price']
+                line_amount = (price or 0) * qty
+                line_supply_amount = supply_price * qty
                 total_amount += line_amount
-                lines.append({'product_name': pname, 'total_qty': qty, 'price': price, 'line_amount': line_amount})
+                total_supply_amount += line_supply_amount
+                lines.append({
+                    'product_name': pname,
+                    'total_qty': qty,
+                    'price': price or 0,
+                    'supply_price': supply_price,
+                    'line_amount': line_amount,
+                    'line_supply_amount': line_supply_amount,
+                })
             supplier_orders_agg.append({
                 'supplier_name': sup_name,
                 'lines': lines,
                 'total_amount': total_amount,
+                'total_supply_amount': total_supply_amount,
             })
             
     elif tab == 'supplier_product_agg':
@@ -14415,7 +14570,7 @@ def admin_dashboard():
                     <p>· 대표=접미사 _1, 상세=_2~_100. 상세이미지파일명은 쉼표로 구분해 여러 개 입력 가능.</p>
                     <p class="font-black text-gray-800 mb-2 mt-3">📋 양식 컬럼</p>
                     <p>· <b>필수</b>: 카테고리, 상품명, 가격. 카테고리는 카테고리관리에서 등록된 이름과 동일하게 입력하세요.</p>
-                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, 재고, 마감일시, <b>노출시작시간</b>, <b>인터넷 최저가 (원, 선택)</b>, <b>인터넷 최저가 링크 (선택)</b>, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+1, <b>상세이미지파일명</b>=품명+2~100 또는 쉼표 구분. (Cloudinary에 올린 파일명만 넣어도 자동 해석)</p>
+                    <p>· <b>선택</b>: Short Intro(뱃지), 상세문구, 배송(+1일 등), 규격, 공급가, <b>공급사</b>(발주·취합용), 재고, 마감일시, <b>노출시작시간</b>, <b>인터넷 최저가 (원, 선택)</b>, <b>인터넷 최저가 링크 (선택)</b>, 재고초기화시각, 초기화수량. 비어 있으면 기본값 적용. <b>대표이미지파일명</b>=품명+1, <b>상세이미지파일명</b>=품명+2~100 또는 쉼표 구분. (Cloudinary에 올린 파일명만 넣어도 자동 해석)</p>
                 </div>
                 <div class="mt-5 p-5 bg-white rounded-xl border border-teal-200 text-left text-[11px]">
                     <p class="font-black text-teal-800 mb-2">🖼 이미지 대량 업로드 후 확인 방법</p>
@@ -14719,6 +14874,10 @@ def admin_dashboard():
                     <button type="submit" class="bg-teal-600 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-teal-700">발주서 보내기</button>
                 </form>
                 <h4 class="text-sm font-black text-gray-800 mb-3">발송 목록 (공급사 수신확인/미확인)</h4>
+                <div class="flex flex-wrap items-center gap-2 mb-3">
+                    <a href="/admin/email-order-dispatch/excel" class="px-4 py-2 rounded-xl text-xs font-black bg-teal-600 text-white hover:bg-teal-700 transition">엑셀 다운로드</a>
+                    <a href="/admin/email-order-dispatch/image" class="px-4 py-2 rounded-xl text-xs font-black bg-gray-700 text-white hover:bg-gray-800 transition">이미지 다운로드</a>
+                </div>
                 <div class="flex gap-2 mb-3">
                     <button type="button" class="dispatch-list-tab px-4 py-2 rounded-xl text-xs font-black transition bg-teal-600 text-white" data-panel="dispatch-panel-list">목록</button>
                     <button type="button" class="dispatch-list-tab px-4 py-2 rounded-xl text-xs font-black transition bg-gray-200 text-gray-700 hover:bg-gray-300" data-panel="dispatch-panel-content">발송내용</button>
@@ -15636,7 +15795,7 @@ def admin_dashboard():
 
                 <div class="border-t-2 border-gray-200 pt-10">
                     <h4 class="text-base font-black text-teal-700 border-b-2 border-teal-200 pb-2 mb-4">게시판 댓글</h4>
-                    <p class="text-[11px] text-gray-500 font-bold mb-4">전국맛집요청·배송요청·제휴문의·자유게시판에 달린 회원 댓글을 조회·삭제할 수 있습니다.</p>
+                    <p class="text-[11px] text-gray-500 font-bold mb-4">전국맛집요청·고객문의·제휴문의·자유게시판에 달린 회원 댓글을 조회·삭제할 수 있습니다.</p>
                     <div class="flex flex-wrap items-center gap-2 mb-4">
                         <a href="/admin?tab=board_manage" class="px-3 py-2 rounded-xl text-[11px] font-black {% if not board_comment_board_type %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">전체</a>
                         <a href="/admin?tab=board_manage&board_type=restaurant" class="px-3 py-2 rounded-xl text-[11px] font-black {% if board_comment_board_type == 'restaurant' %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">전국맛집요청</a>
@@ -15713,12 +15872,12 @@ def admin_dashboard():
             </div>
         {% elif tab == 'delivery_request' %}
             <div class="mb-12">
-                <h3 class="text-lg font-black text-gray-800 italic mb-2">배송요청 관리</h3>
-                <p class="text-[11px] text-gray-500 font-bold mb-4">고객이 요청한 배송 지역. 추천이 많은 지역부터 배송구역 확장을 검토합니다. 적용 시 <a href="/admin?tab=delivery_zone" class="text-teal-600 font-black underline">배송구역관리</a> 탭에서 설정하세요. 공지는 게시판 전체보기 시에만 상단 노출됩니다.</p>
+                <h3 class="text-lg font-black text-gray-800 italic mb-2">고객문의 관리</h3>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">고객 문의·제안·배송 희망 지역. 비밀글은 작성자와 관리자만 상세 조회 가능. 공지는 게시판 전체보기 시에만 상단 노출됩니다.</p>
                 <div class="mb-4"><a href="/admin/board/delivery-request/notice/write" class="inline-block px-4 py-2 bg-amber-500 text-white rounded-xl text-[11px] font-black hover:bg-amber-600">📌 공지글 등록</a></div>
                 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden overflow-x-auto -mx-3 md:mx-0">
-                    <table class="w-full text-left text-[11px] min-w-[860px]">
-                        <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-4">ID</th><th class="p-4">지역명</th><th class="p-4">공지</th><th class="p-4">글내용</th><th class="p-4">작성자</th><th class="p-4">작성일</th><th class="p-4">추천</th><th class="p-4">비추천</th><th class="p-4">관리자 댓글</th><th class="p-4">관리</th></tr></thead>
+                    <table class="w-full text-left text-[11px] min-w-[920px]">
+                        <thead class="bg-gray-50 border-b border-gray-100"><tr><th class="p-4">ID</th><th class="p-4">제목</th><th class="p-4">공지</th><th class="p-4">비밀</th><th class="p-4">글내용</th><th class="p-4">작성자</th><th class="p-4">작성일</th><th class="p-4">추천</th><th class="p-4">비추천</th><th class="p-4">관리자 댓글</th><th class="p-4">관리</th></tr></thead>
                         <tbody>
                             {% for p in admin_delivery_requests %}
                             {% set vc = delivery_request_vote_counts.get(p.id, (0, 0)) %}
@@ -15726,6 +15885,7 @@ def admin_dashboard():
                                 <td class="p-4">{{ p.id }}</td>
                                 <td class="p-4 font-bold text-teal-700">{{ p.region_name }}</td>
                                 <td class="p-4"><form action="/admin/board/delivery-request/{{ p.id }}/notice" method="POST" class="inline"><button type="submit" class="px-2 py-1 rounded text-[10px] font-black {% if p.is_notice %}bg-amber-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ '공지 해제' if p.is_notice else '공지로' }}</button></form></td>
+                                <td class="p-4"><form action="/admin/board/delivery-request/{{ p.id }}/secret" method="POST" class="inline"><button type="submit" class="px-2 py-1 rounded text-[10px] font-black {% if p.is_secret %}bg-purple-500 text-white{% else %}bg-gray-200 text-gray-600{% endif %}">{{ '비밀 해제' if p.is_secret else '비밀로' }}</button></form></td>
                                 <td class="p-4 max-w-[180px] truncate" title="{{ (p.content or '')[:200] }}">{{ (p.content or '-')[:60] }}{% if (p.content or '')|length > 60 %}...{% endif %}</td>
                                 <td class="p-4">{{ p.user_name or '-' }}</td>
                                 <td class="p-4">{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '-' }}</td>
@@ -15744,7 +15904,7 @@ def admin_dashboard():
                                 </td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="10" class="p-8 text-center text-gray-400">등록된 글이 없습니다.</td></tr>
+                            <tr><td colspan="11" class="p-8 text-center text-gray-400">등록된 글이 없습니다.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -15788,11 +15948,11 @@ def admin_dashboard():
         {% elif tab == 'board_comments' %}
             <div class="mb-12">
                 <h3 class="text-lg font-black text-gray-800 italic mb-2">게시판 댓글 관리</h3>
-                <p class="text-[11px] text-gray-500 font-bold mb-4">전국맛집요청·배송요청·제휴문의·자유게시판에 달린 회원 댓글을 조회·삭제할 수 있습니다.</p>
+                <p class="text-[11px] text-gray-500 font-bold mb-4">전국맛집요청·고객문의·제휴문의·자유게시판에 달린 회원 댓글을 조회·삭제할 수 있습니다.</p>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <a href="/admin?tab=board_comments" class="px-3 py-2 rounded-xl text-[11px] font-black {% if not board_comment_board_type %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">전체</a>
                     <a href="/admin?tab=board_comments&board_type=restaurant" class="px-3 py-2 rounded-xl text-[11px] font-black {% if board_comment_board_type == 'restaurant' %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">전국맛집요청</a>
-                    <a href="/admin?tab=board_comments&board_type=delivery" class="px-3 py-2 rounded-xl text-[11px] font-black {% if board_comment_board_type == 'delivery' %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">배송요청</a>
+                    <a href="/admin?tab=board_comments&board_type=delivery" class="px-3 py-2 rounded-xl text-[11px] font-black {% if board_comment_board_type == 'delivery' %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">고객문의</a>
                     <a href="/admin?tab=board_comments&board_type=partnership" class="px-3 py-2 rounded-xl text-[11px] font-black {% if board_comment_board_type == 'partnership' %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">제휴문의</a>
                     <a href="/admin?tab=board_comments&board_type=free" class="px-3 py-2 rounded-xl text-[11px] font-black {% if board_comment_board_type == 'free' %}bg-teal-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">자유게시판</a>
                 </div>
@@ -15804,7 +15964,7 @@ def admin_dashboard():
                             <tr class="border-b border-gray-50 hover:bg-gray-50/50">
                                 <td class="p-4">{{ c.id }}</td>
                                 <td class="p-4">
-                                    {% if c.board_type == 'restaurant' %}전국맛집요청{% elif c.board_type == 'delivery' %}배송요청{% elif c.board_type == 'partnership' %}제휴문의{% else %}자유게시판{% endif %}
+                                    {% if c.board_type == 'restaurant' %}전국맛집요청{% elif c.board_type == 'delivery' %}고객문의{% elif c.board_type == 'partnership' %}제휴문의{% else %}자유게시판{% endif %}
                                 </td>
                                 <td class="p-4">
                                     {% if c.board_type == 'restaurant' %}<a href="/board/restaurant-request/{{ c.post_id }}" target="_blank" class="text-teal-600 font-black">글 #{{ c.post_id }}</a>{% elif c.board_type == 'delivery' %}<a href="/board/delivery-request/{{ c.post_id }}" target="_blank" class="text-teal-600 font-black">글 #{{ c.post_id }}</a>{% elif c.board_type == 'partnership' %}<a href="/board/partnership/{{ c.post_id }}" target="_blank" class="text-teal-600 font-black">글 #{{ c.post_id }}</a>{% else %}<a href="/board/free/{{ c.post_id }}" target="_blank" class="text-teal-600 font-black">글 #{{ c.post_id }}</a>{% endif %}
@@ -16448,10 +16608,21 @@ def admin_dashboard():
                 document.getElementById('mg_config_form').addEventListener('submit', function(e) {
                     e.preventDefault();
                     var fd = new FormData(this);
-                    fetch('/admin/member_grade/config', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function(r) { return r.json(); }).then(function(d) {
-                        showMsg(d.error || '기준 저장되었습니다.', !d.error);
-                        if (!d.error) setTimeout(function() { location.reload(); }, 600);
-                    }).catch(function() { showMsg('통신 오류', false); });
+                    fetch('/admin/member_grade/config', { method: 'POST', body: fd, credentials: 'same-origin' })
+                        .then(function(r) {
+                            return r.json().then(function(d) {
+                                if (!r.ok) return Promise.reject(d && d.error ? new Error(d.error) : new Error('저장 실패'));
+                                return d;
+                            }).catch(function(err) {
+                                if (err instanceof SyntaxError) return Promise.reject(new Error('통신 오류'));
+                                return Promise.reject(err);
+                            });
+                        })
+                        .then(function(d) {
+                            showMsg(d.error || '기준 저장되었습니다.', !d.error);
+                            if (!d.error) setTimeout(function() { location.reload(); }, 600);
+                        })
+                        .catch(function(err) { showMsg(err.message || '통신 오류', false); });
                 });
                 var mgBulkForm = document.getElementById('mg_bulk_set_form');
                 if (mgBulkForm) {
@@ -17457,6 +17628,7 @@ def admin_dashboard():
                             <tr>
                                 <th class="p-3 border border-gray-600 w-12 text-center">ID</th>
                                 <th class="p-3 border border-gray-600 w-20 text-center">가입구분</th>
+                                <th class="p-3 border border-gray-600 w-24 text-center">가입일</th>
                                 <th class="p-3 border border-gray-600 w-24 text-center">유입경로</th>
                                 <th class="p-3 border border-gray-600">이메일</th>
                                 <th class="p-3 border border-gray-600 w-24">이름</th>
@@ -17484,6 +17656,7 @@ def admin_dashboard():
                             <tr class="border-b border-gray-100 hover:bg-gray-50/50" data-member-id="{{ u.id }}" data-member-name="{{ (u.name or u.email or '')|e }}">
                                 <td class="p-3 border border-gray-100 text-center text-gray-500">{{ u.id }}</td>
                                 <td class="p-3 border border-gray-100 text-center text-[10px]">{% if u.auth_provider == 'kakao' %}카카오{% elif u.auth_provider == 'naver' %}네이버{% elif u.auth_provider == 'google' %}구글{% else %}자체가입{% endif %}</td>
+                                <td class="p-3 border border-gray-100 text-center text-[10px]">{{ u.created_at.strftime('%Y-%m-%d %H:%M') if getattr(u, 'created_at', None) else '-' }}</td>
                                 <td class="p-3 border border-gray-100 text-center text-[10px] text-teal-700" title="{% if u.utm_medium or u.utm_campaign %}{{ (u.utm_medium or '')|e }}{% if u.utm_medium and u.utm_campaign %} / {% endif %}{{ (u.utm_campaign or '')|e }}{% endif %}">{{ (u.utm_source or '')|trim or '직접/기타' }}</td>
                                 <td class="p-3 border border-gray-100">{{ u.email or '-' }}</td>
                                 <td class="p-3 border border-gray-100">{{ u.name or '-' }}</td>
@@ -17513,7 +17686,7 @@ def admin_dashboard():
                                 </td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="22" class="p-8 text-center text-gray-400 font-bold">등록된 회원이 없습니다.</td></tr>
+                            <tr><td colspan="23" class="p-8 text-center text-gray-400 font-bold">등록된 회원이 없습니다.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -17677,13 +17850,6 @@ def admin_dashboard():
                 <div class="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm"><p class="text-[9px] text-gray-400 font-black uppercase mb-1">Delivery Fees</p><p class="text-xl font-black text-orange-500">{{ "{:,}".format(stats.delivery) }}원</p></div>
                 <div class="bg-gray-800 p-6 rounded-[2rem] shadow-xl"><p class="text-[9px] text-gray-400 font-black uppercase mb-1 text-white/50">Grand Total</p><p class="text-xl font-black text-white">{{ "{:,}".format(stats.grand_total) }}원</p></div>
             </div>
-            <div class="mb-6 flex flex-wrap items-center gap-4">
-                <form action="/admin/orders/delete_all" method="POST" class="inline" onsubmit="return confirm('전체 주문·정산·배송·리뷰 등 주문 관련 데이터를 모두 삭제합니다. 복구할 수 없습니다. 정말 진행할까요?');">
-                    <input type="hidden" name="confirm" value="1">
-                    <button type="submit" class="bg-red-600 text-white px-5 py-3 rounded-2xl font-black text-[10px] shadow-lg hover:bg-red-700">🗑 주문정보 전체 삭제</button>
-                </form>
-            </div>
-
             <div class="bg-white p-8 rounded-[2.5rem] border border-gray-100 shadow-sm mb-12">
                 <div class="flex gap-2 mb-6">
                     <button type="button" onclick="setDateRange('today')" class="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black hover:bg-teal-100 transition">오늘</button>
@@ -17699,6 +17865,85 @@ def admin_dashboard():
                     <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg">조회하기</button>
                 </form>
             </div>
+            {% if is_master and manual_order_products is defined %}
+            <div class="bg-violet-50 border border-violet-200 rounded-[2rem] p-6 mb-8">
+                <h3 class="text-base font-black text-violet-800 mb-4">주문 수기 등록</h3>
+                <p class="text-[11px] text-violet-700 font-bold mb-4">전화/방문 주문 등을 수기로 등록합니다. 회원 선택 또는 비회원(이름·연락처 입력) 후 품목과 수량을 넣고 등록하세요.</p>
+                <form action="/admin/orders/manual_create" method="POST" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-[10px] font-black text-gray-600 mb-1">회원 선택 (비회원이면 빈칸)</label>
+                            <select name="user_id" id="manual_order_user_id" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold bg-white">
+                                <option value="">비회원 — 아래 이름·연락처 입력</option>
+                                {% for u in manual_order_users %}
+                                <option value="{{ u.id }}" data-name="{{ (u.name or '')|e }}" data-phone="{{ (u.phone or '')|e }}" data-email="{{ (u.email or '')|e }}">{{ (u.name or u.email or 'ID'+u.id|string) }} ({{ u.email or '-' }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div id="manual_order_guest_fields" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div><label class="block text-[10px] font-black text-gray-600 mb-1">이름 (비회원 필수)</label><input type="text" name="customer_name" id="manual_customer_name" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs" placeholder="이름"></div>
+                        <div><label class="block text-[10px] font-black text-gray-600 mb-1">연락처 (비회원 필수)</label><input type="text" name="customer_phone" id="manual_customer_phone" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs" placeholder="010-0000-0000"></div>
+                        <div><label class="block text-[10px] font-black text-gray-600 mb-1">이메일</label><input type="text" name="customer_email" id="manual_customer_email" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs" placeholder="email@example.com"></div>
+                    </div>
+                    <div class="grid grid-cols-1 gap-4">
+                        <div><label class="block text-[10px] font-black text-gray-600 mb-1">배송지</label><input type="text" name="delivery_address" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs" placeholder="주소 (선택)" value="(수기등록)"></div>
+                        <div class="flex gap-4">
+                            <div><label class="block text-[10px] font-black text-gray-600 mb-1">요청메모</label><input type="text" name="request_memo" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs w-64" placeholder="메모 (선택)"></div>
+                            <div><label class="block text-[10px] font-black text-gray-600 mb-1">배송비 (원)</label><input type="number" name="delivery_fee" value="0" min="0" class="border border-gray-200 rounded-xl px-3 py-2 text-xs w-28"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-black text-gray-600 mb-2">품목</label>
+                        <table class="w-full text-[11px] border border-gray-200 rounded-xl overflow-hidden bg-white">
+                            <thead class="bg-gray-700 text-white"><tr><th class="p-2 text-left">상품</th><th class="p-2 w-24 text-center">수량</th><th class="p-2 w-20"></th></tr></thead>
+                            <tbody id="manual_order_items">
+                                <tr class="manual-order-row"><td class="p-2"><select name="product_id" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-bold bg-white"><option value="">선택</option>{% for p in manual_order_products %}<option value="{{ p.id }}" data-price="{{ p.price }}">[{{ p.category }}] {{ p.name }} ({{ "{:,}".format(p.price) }}원)</option>{% endfor %}</select></td><td class="p-2"><input type="number" name="quantity" min="1" value="1" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-center"></td><td class="p-2"><button type="button" class="manual-order-remove-row text-red-600 font-black text-[10px] hover:underline">삭제</button></td></tr>
+                            </tbody>
+                        </table>
+                        <button type="button" id="manual_order_add_row" class="mt-2 px-3 py-1.5 bg-violet-200 text-violet-800 rounded-lg text-[10px] font-black hover:bg-violet-300">+ 품목 행 추가</button>
+                    </div>
+                    <button type="submit" class="px-6 py-3 bg-violet-600 text-white rounded-xl font-black text-sm hover:bg-violet-700">수기 주문 등록</button>
+                </form>
+            </div>
+            <script>
+            (function(){
+                var userSel = document.getElementById('manual_order_user_id');
+                var nameEl = document.getElementById('manual_customer_name');
+                var phoneEl = document.getElementById('manual_customer_phone');
+                var emailEl = document.getElementById('manual_customer_email');
+                if (userSel && nameEl && phoneEl) {
+                    function syncGuestFields() {
+                        var opt = userSel.options[userSel.selectedIndex];
+                        if (opt && opt.value) {
+                            nameEl.value = opt.getAttribute('data-name') || '';
+                            phoneEl.value = opt.getAttribute('data-phone') || '';
+                            emailEl.value = opt.getAttribute('data-email') || '';
+                        }
+                    }
+                    userSel.addEventListener('change', syncGuestFields);
+                }
+                var tbody = document.getElementById('manual_order_items');
+                var addBtn = document.getElementById('manual_order_add_row');
+                if (tbody && addBtn) {
+                    addBtn.addEventListener('click', function() {
+                        var firstRow = tbody.querySelector('.manual-order-row');
+                        if (!firstRow) return;
+                        var clone = firstRow.cloneNode(true);
+                        clone.querySelector('select').selectedIndex = 0;
+                        clone.querySelector('input[type="number"]').value = 1;
+                        tbody.appendChild(clone);
+                    });
+                    tbody.addEventListener('click', function(e) {
+                        if (e.target.classList.contains('manual-order-remove-row')) {
+                            var row = e.target.closest('tr');
+                            if (row && tbody.querySelectorAll('.manual-order-row').length > 1) row.remove();
+                        }
+                    });
+                }
+            })();
+            </script>
+            {% endif %}
 
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
                 <div>
@@ -17717,6 +17962,7 @@ def admin_dashboard():
                                     <th class="p-4 text-left">품목(카테고리)</th>
                                     <th class="p-4 text-left">판매상품명</th>
                                     <th class="p-4 text-center">판매수량 총합계</th>
+                                    <th class="p-4 text-right">공급가액</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -17725,15 +17971,17 @@ def admin_dashboard():
                                     <td class="p-4 text-gray-600">{{ row.category }}</td>
                                     <td class="p-4 text-gray-800">{{ row.product_name }}</td>
                                     <td class="p-4 text-center font-black text-teal-600">{{ row.total_quantity }}</td>
+                                    <td class="p-4 text-right">{{ "{:,}".format(row.total_supply_amount) }}원</td>
                                 </tr>
                                 {% else %}
-                                <tr><td colspan="3" class="p-8 text-center text-gray-400">조회 결과가 없습니다.</td></tr>
+                                <tr><td colspan="4" class="p-8 text-center text-gray-400">조회 결과가 없습니다.</td></tr>
                                 {% endfor %}
                             </tbody>
                             <tfoot class="bg-gray-200 border-t-2 border-gray-400">
                                 <tr>
                                     <td colspan="2" class="p-4 text-right font-black text-gray-800">총합계 수량</td>
                                     <td class="p-4 text-center font-black text-teal-600">{{ sales_total_quantity }}</td>
+                                    <td class="p-4 text-right font-black">{{ "{:,}".format(sales_total_supply_amount) }}원</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -18107,10 +18355,11 @@ def admin_dashboard():
                         <button type="button" onclick="var s=document.getElementById('supplier_start_date'); var e=document.getElementById('supplier_end_date'); var n=new Date(); var t=new Date(n.getTime()-7*24*60*60*1000); s.value=t.toISOString().slice(0,16); e.value=n.toISOString().slice(0,16);" class="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black hover:bg-teal-100 transition">최근 7일</button>
                         <button type="button" onclick="var s=document.getElementById('supplier_start_date'); var e=document.getElementById('supplier_end_date'); var n=new Date(); s.value=n.toISOString().slice(0,10)+'T00:00'; e.value=n.toISOString().slice(0,16);" class="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black hover:bg-teal-100 transition">오늘</button>
                     </div>
-                    <form action="/admin" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+                    <form action="/admin" method="GET" class="grid grid-cols-1 md:grid-cols-5 gap-6 items-end">
                         <input type="hidden" name="tab" value="supplier_orders">
                         <div><label class="text-[10px] text-gray-400 font-black ml-2">시작 일시</label><input type="datetime-local" name="start_date" id="supplier_start_date" value="{{ supplier_start_date_str.replace(' ', 'T')[:16] }}" class="w-full border border-gray-200 bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                         <div><label class="text-[10px] text-gray-400 font-black ml-2">종료 일시</label><input type="datetime-local" name="end_date" id="supplier_end_date" value="{{ supplier_end_date_str.replace(' ', 'T')[:16] }}" class="w-full border border-gray-200 bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
+                        <div><label class="text-[10px] text-gray-400 font-black ml-2">공급사 검색</label><input type="text" name="supplier_q" value="{{ supplier_orders_supplier_q }}" placeholder="공급사명 일부 입력" class="w-full border border-gray-200 bg-gray-50 p-4 rounded-2xl font-black text-xs"></div>
                         <button type="submit" class="bg-teal-600 text-white py-4 rounded-2xl font-black shadow-lg">조회하기</button>
                     </form>
                 </div>
@@ -18118,17 +18367,17 @@ def admin_dashboard():
                 <div class="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden mb-8">
                     <div class="p-6 border-b border-gray-100 bg-gray-50">
                         <h4 class="text-base font-black text-gray-800">{{ agg.supplier_name }}</h4>
-                        <p class="text-[10px] text-teal-600 font-black mt-2">취합 합계: {{ "{:,}".format(agg.total_amount) }}원</p>
+                        <p class="text-[10px] text-teal-600 font-black mt-2">취합 합계: {{ "{:,}".format(agg.total_amount) }}원 · 공급가액 합계: {{ "{:,}".format(agg.total_supply_amount) }}원</p>
                     </div>
                     <div class="overflow-x-auto">
-                        <table id="supplier-table-{{ loop.index }}" class="w-full text-left text-[11px] font-bold min-w-[400px]" data-supplier-name="{{ agg.supplier_name }}">
-                            <thead class="bg-gray-800 text-white"><tr><th class="p-4">품명</th><th class="p-4 text-center">단가</th><th class="p-4 text-center">수량</th><th class="p-4 text-right">금액</th></tr></thead>
+                        <table id="supplier-table-{{ loop.index }}" class="w-full text-left text-[11px] font-bold min-w-[500px]" data-supplier-name="{{ agg.supplier_name }}">
+                            <thead class="bg-gray-800 text-white"><tr><th class="p-4">품명</th><th class="p-4 text-center">공급가</th><th class="p-4 text-center">수량</th><th class="p-4 text-right">금액</th><th class="p-4 text-right">공급가액</th></tr></thead>
                             <tbody>
                                 {% for line in agg.lines %}
-                                <tr class="border-b border-gray-100"><td class="p-4">{{ line.product_name }}</td><td class="p-4 text-center">{{ "{:,}".format(line.price) }}원</td><td class="p-4 text-center font-black text-teal-600">{{ line.total_qty }}</td><td class="p-4 text-right">{{ "{:,}".format(line.line_amount) }}원</td></tr>
+                                <tr class="border-b border-gray-100"><td class="p-4">{{ line.product_name }}</td><td class="p-4 text-center">{{ "{:,}".format(line.supply_price) }}원</td><td class="p-4 text-center font-black text-teal-600">{{ line.total_qty }}</td><td class="p-4 text-right">{{ "{:,}".format(line.line_amount) }}원</td><td class="p-4 text-right">{{ "{:,}".format(line.line_supply_amount) }}원</td></tr>
                                 {% endfor %}
                             </tbody>
-                            <tfoot class="bg-gray-200"><tr><td colspan="3" class="p-4 text-right font-black">소계</td><td class="p-4 text-right font-black">{{ "{:,}".format(agg.total_amount) }}원</td></tr></tfoot>
+                            <tfoot class="bg-gray-200"><tr><td colspan="3" class="p-4 text-right font-black">소계</td><td class="p-4 text-right font-black">{{ "{:,}".format(agg.total_amount) }}원</td><td class="p-4 text-right font-black">{{ "{:,}".format(agg.total_supply_amount) }}원</td></tr></tfoot>
                         </table>
                     </div>
                     <div class="p-4 flex gap-2">
@@ -19405,14 +19654,14 @@ def admin_product_bulk_upload_template():
     if not current_user.is_admin:
         return redirect('/')
     columns = [
-        '카테고리', '상품명', 'Short Intro', '상세문구', '배송', '가격', '규격', '공급가', '재고',
+        '카테고리', '상품명', 'Short Intro', '상세문구', '배송', '가격', '규격', '공급가', '공급사', '재고',
         '마감일시', '노출시작시간', '인터넷 최저가 (원, 선택)', '인터넷 최저가 링크 (선택)',
         '재고초기화시각', '초기화수량', '대표이미지파일명', '상세이미지파일명'
     ]
     df = pd.DataFrame(columns=columns)
     df.loc[0] = [
         '가공식품', '간장 오리주물럭 300g', '맵지 않아 온 가족이 즐기는 단짠단짠의 정석!',
-        '주문 마감당일 오후 배송됩니다!', '+1일', 5900, '300g', 5000, 30,
+        '주문 마감당일 오후 배송됩니다!', '+1일', 5900, '300g', 5000, 'OO농장', 30,
         '2026-03-02 23:59', '',
         10800, 'https://search.shopping.naver.com/catalog/12345678',
         '', 30,
@@ -19644,6 +19893,8 @@ def admin_product_bulk_upload():
             description = _cell_str(row.get('배송', '')) or '+1일'
             spec = _cell_str(row.get('규격', ''))
             supply_price = _cell_int(row.get('공급가'))
+            supplier_raw = _cell_str(row.get('공급사', ''))
+            supplier = (supplier_raw.strip() or None) if supplier_raw else None
             stock = _cell_int(row.get('재고'))
             if stock is None or stock < 0:
                 stock = 50
@@ -19731,6 +19982,7 @@ def admin_product_bulk_upload():
                 description=description,
                 price=price_val,
                 supply_price=supply_price,
+                supplier=supplier,
                 spec=spec or "",
                 origin=origin or "",
                 farmer="바구니삼촌",
@@ -20303,13 +20555,25 @@ def admin_delivery_request_hide(did):
 
 @login_required
 def admin_delivery_request_notice_toggle(did):
-    """관리자: 배송요청 글 공지 설정/해제."""
+    """관리자: 고객문의 글 공지 설정/해제."""
     if not current_user.is_admin:
         return redirect('/')
     r = DeliveryRequest.query.get_or_404(did)
     r.is_notice = not r.is_notice
     db.session.commit()
     flash("공지로 설정되었습니다." if r.is_notice else "공지가 해제되었습니다.")
+    return redirect('/admin?tab=delivery_request')
+
+
+@login_required
+def admin_delivery_request_secret_toggle(did):
+    """관리자: 고객문의 글 비밀 설정/해제."""
+    if not current_user.is_admin:
+        return redirect('/')
+    r = DeliveryRequest.query.get_or_404(did)
+    r.is_secret = not r.is_secret
+    db.session.commit()
+    flash("비밀글로 설정되었습니다." if r.is_secret else "비밀이 해제되었습니다.")
     return redirect('/admin?tab=delivery_request')
 
 
@@ -20418,13 +20682,13 @@ def admin_restaurant_request_notice_write():
 
 @login_required
 def admin_delivery_request_notice_write():
-    """관리자: 배송요청 공지글 등록."""
+    """관리자: 고객문의 공지글 등록."""
     if not current_user.is_admin:
         return redirect('/')
     if request.method == 'POST':
         region_name = (request.form.get('region_name') or '').strip()
         if not region_name:
-            flash("지역명(제목)을 입력해 주세요.")
+            flash("제목(지역명)을 입력해 주세요.")
             return redirect(url_for('admin_delivery_request_notice_write'))
         content = (request.form.get('content') or '').strip()
         r = DeliveryRequest(
@@ -20441,11 +20705,11 @@ def admin_delivery_request_notice_write():
     return render_template_string(
         HEADER_HTML + """
         <div class="max-w-2xl mx-auto py-8 px-4 font-black text-left">
-            <a href="/admin?tab=delivery_request" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 배송요청 관리</a>
-            <h1 class="text-2xl font-black text-gray-900 mb-6">배송요청 공지글 등록</h1>
+            <a href="/admin?tab=delivery_request" class="text-gray-400 hover:text-teal-600 text-sm font-bold mb-6 inline-block">← 고객문의 관리</a>
+            <h1 class="text-2xl font-black text-gray-900 mb-6">고객문의 공지글 등록</h1>
             <p class="text-gray-500 text-sm mb-4">공지는 게시판 전체보기 시 상단에만 노출됩니다.</p>
             <form method="POST" action="/admin/board/delivery-request/notice/write" class="space-y-4">
-                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">지역명(제목) *</label><input type="text" name="region_name" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="예: 공지"></div>
+                <div><label class="block text-[10px] text-gray-500 uppercase mb-1">제목(지역명 등) *</label><input type="text" name="region_name" required class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="예: 공지"></div>
                 <div><label class="block text-[10px] text-gray-500 uppercase mb-1">내용</label><textarea name="content" rows="5" class="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm font-bold" placeholder="공지 내용"></textarea></div>
                 <button type="submit" class="w-full py-4 bg-amber-600 text-white rounded-xl font-black hover:bg-amber-700 transition">공지 등록</button>
             </form>
@@ -21113,6 +21377,161 @@ def admin_email_order_dispatch_send():
     return redirect(url_for('admin.admin_dashboard') + '?tab=email_order_confirm&sent=1')
 
 
+@login_required
+def admin_email_order_dispatch_excel():
+    """이메일 발주 발송 목록 엑셀 다운로드 (수신처 확인용)."""
+    if not getattr(current_user, 'is_admin', False):
+        return redirect(url_for('admin.admin_dashboard'))
+    list_d = EmailOrderDispatch.query.order_by(EmailOrderDispatch.created_at.desc()).limit(200).all()
+    rows = []
+    for d in list_d:
+        rows.append({
+            '공급사(받는사람)': d.recipient_name or d.recipient_email or '',
+            '수신이메일': d.recipient_email or '',
+            '제목': d.subject or '',
+            '발송일시': d.sent_at.strftime('%Y-%m-%d %H:%M') if d.sent_at else '',
+            '수신확인': '수신확인' if d.confirmed_at else '미확인',
+            '확인일시': d.confirmed_at.strftime('%Y-%m-%d %H:%M') if d.confirmed_at else '',
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        df = pd.DataFrame(columns=['공급사(받는사람)', '수신이메일', '제목', '발송일시', '수신확인', '확인일시'])
+    df = _dataframe_utf8_safe(df)
+    out = BytesIO()
+    with pd.ExcelWriter(out, engine='openpyxl') as w:
+        df.to_excel(w, index=False)
+    out.seek(0)
+    filename = f"이메일발주_수신처목록_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return resp
+
+
+@login_required
+def admin_email_order_dispatch_image():
+    """이메일 발주 발송 목록 이미지 다운로드 (수신처 확인용)."""
+    if not getattr(current_user, 'is_admin', False):
+        return redirect(url_for('admin.admin_dashboard'))
+    from PIL import ImageDraw, ImageFont
+    list_d = EmailOrderDispatch.query.order_by(EmailOrderDispatch.created_at.desc()).limit(200).all()
+    headers = ['공급사(받는사람)', '수신이메일', '제목', '발송일시', '수신확인', '확인일시']
+    row_cells_list = []
+    for d in list_d:
+        row_cells_list.append([
+            _safe_utf8_str(d.recipient_name or d.recipient_email or ''),
+            _safe_utf8_str(d.recipient_email or ''),
+            (_safe_utf8_str(d.subject or ''))[:30] + ('...' if len(d.subject or '') > 30 else ''),
+            d.sent_at.strftime('%Y-%m-%d %H:%M') if d.sent_at else '-',
+            '수신확인' if d.confirmed_at else '미확인',
+            d.confirmed_at.strftime('%Y-%m-%d %H:%M') if d.confirmed_at else '-',
+        ])
+    if not row_cells_list:
+        row_cells_list = [['(데이터 없음)', '', '', '', '', '']]
+    font, font_header = _pil_font_for_table(10)
+    col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font, padding=12, min_w=40, max_w=400)
+    cell_h = 28
+    img_w = sum(col_w)
+    img_h = cell_h * (1 + len(row_cells_list))
+    img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    y = 0
+    for i, h in enumerate(headers):
+        x = sum(col_w[:i])
+        draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(0, 0, 0), fill=(55, 65, 81))
+        draw.text((x + 4, y + 6), h, fill=(255, 255, 255), font=font_header)
+    y += cell_h
+    for cells in row_cells_list:
+        for i, cell in enumerate(cells):
+            x = sum(col_w[:i])
+            draw.rectangle([x, y, x + col_w[i], y + cell_h], outline=(200, 200, 200))
+            draw.text((x + 4, y + 6), str(cell), fill=(0, 0, 0), font=font)
+        y += cell_h
+    out = BytesIO()
+    img.save(out, format='PNG')
+    out.seek(0)
+    filename = f"이메일발주_수신처목록_{now_kst().strftime('%Y%m%d_%H%M%S')}.png"
+    resp = send_file(out, mimetype='image/png', download_name=filename, as_attachment=True)
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return resp
+
+
+def order_confirm_dispatch_excel(token):
+    """수신자 확인 페이지: 해당 발주서 1건 엑셀 다운로드 (토큰으로 인증)."""
+    dispatch = EmailOrderDispatch.query.filter_by(confirm_token=token).first()
+    if not dispatch:
+        return "Not Found", 404
+    import re as _re
+    body_plain = (dispatch.body_html or '')
+    body_plain = _re.sub(r'<[^>]+>', '', body_plain)
+    body_plain = _re.sub(r'\s+', ' ', body_plain).strip()
+    try:
+        n_images = len(__import__('json').loads(dispatch.image_urls or '[]'))
+    except Exception:
+        n_images = 0
+    rows = [{
+        '제목': dispatch.subject or '',
+        '공급사': dispatch.recipient_name or '',
+        '수신이메일': dispatch.recipient_email or '',
+        '발송일시': dispatch.sent_at.strftime('%Y-%m-%d %H:%M') if dispatch.sent_at else '',
+        '수신확인': '확인완료' if dispatch.confirmed_at else '미확인',
+        '확인일시': dispatch.confirmed_at.strftime('%Y-%m-%d %H:%M') if dispatch.confirmed_at else '',
+        '내용': body_plain[:32000],
+        '첨부이미지수': n_images,
+    }]
+    df = pd.DataFrame(rows)
+    df = _dataframe_utf8_safe(df)
+    out = BytesIO()
+    with pd.ExcelWriter(out, engine='openpyxl') as w:
+        df.to_excel(w, index=False)
+    out.seek(0)
+    filename = f"발주서_{(dispatch.subject or '확인')[:20]}_{now_kst().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    resp = send_file(out, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', download_name=filename, as_attachment=True)
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return resp
+
+
+def order_confirm_dispatch_image(token):
+    """수신자 확인 페이지: 해당 발주서 1건 이미지 다운로드 (토큰으로 인증)."""
+    dispatch = EmailOrderDispatch.query.filter_by(confirm_token=token).first()
+    if not dispatch:
+        return "Not Found", 404
+    import re as _re
+    from PIL import ImageDraw, ImageFont
+    body_plain = (dispatch.body_html or '')
+    body_plain = _re.sub(r'<[^>]+>', '', body_plain)
+    body_plain = _re.sub(r'\s+', ' ', body_plain).strip()
+    try:
+        n_images = len(__import__('json').loads(dispatch.image_urls or '[]'))
+    except Exception:
+        n_images = 0
+    font, font_header = _pil_font_for_table(12)
+    line_h = 22
+    lines = [f"제목: {dispatch.subject or ''}", f"발송일시: {dispatch.sent_at.strftime('%Y-%m-%d %H:%M') if dispatch.sent_at else ''}"]
+    if body_plain:
+        wrap_w = 80
+        for i in range(0, len(body_plain), wrap_w):
+            lines.append(body_plain[i:i + wrap_w])
+    if n_images:
+        lines.append(f"(첨부 이미지 {n_images}개)")
+    img_w = 800
+    img_h = max(200, line_h * (len(lines) + 2))
+    img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 0, img_w, line_h * 2], fill=(55, 65, 81))
+    draw.text((12, 8), f"발주서 확인 - {dispatch.subject or ''}"[:60], fill=(255, 255, 255), font=font_header)
+    y = line_h * 2 + 10
+    for line in lines:
+        draw.text((12, y), _safe_utf8_str(line)[:120], fill=(0, 0, 0), font=font)
+        y += line_h
+    out = BytesIO()
+    img.save(out, format='PNG')
+    out.seek(0)
+    filename = f"발주서_{(dispatch.subject or '확인')[:20]}_{now_kst().strftime('%Y%m%d_%H%M%S')}.png"
+    resp = send_file(out, mimetype='image/png', download_name=filename, as_attachment=True)
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return resp
+
+
 def _get_purchase_order_detail_rows(start_dt, end_dt, category_filter=None):
     """발주관리: 기간·카테고리별 주문 품목 상세. 오더넘버, 주문시간, 품목, 수량, 공급가, 종합계액(공급가×수량).
     반환: (rows list, rows_by_date dict, grand_total int). rows_by_date: 'YYYY-MM-DD' -> [rows], 날자별 소계용."""
@@ -21536,6 +21955,10 @@ def order_confirm_dispatch(token):
                 {% for img_url in image_list %}
                 <div class="mb-4"><img src="{{ img_url }}" alt="발주서" class="max-w-full h-auto rounded-lg border border-gray-100" loading="lazy"></div>
                 {% endfor %}
+            </div>
+            <div class="flex flex-wrap items-center justify-center gap-3 mb-6">
+                <a href="/admin/order-confirm-dispatch/{{ dispatch.confirm_token }}/excel" class="px-5 py-3 rounded-xl text-sm font-black bg-teal-600 text-white hover:bg-teal-700 transition">엑셀 다운로드</a>
+                <a href="/admin/order-confirm-dispatch/{{ dispatch.confirm_token }}/image" class="px-5 py-3 rounded-xl text-sm font-black bg-gray-700 text-white hover:bg-gray-800 transition">이미지 다운로드</a>
             </div>
             {% if not dispatch.confirmed_at %}
             <form method="POST" class="text-center">
@@ -22113,6 +22536,146 @@ def admin_delete_test_data():
     deleted = _delete_test_categories_and_products()
     flash(f"테스트 데이터 삭제 완료. 상품 {deleted}건 및 테스트 카테고리가 삭제되었습니다.")
     return redirect('/admin')
+
+
+@login_required
+def admin_orders_manual_create():
+    """주문 수기 등록. 관리자 전용. POST: user_id(선택), customer_name/phone/email(비회원 시 필수), delivery_address, request_memo, delivery_fee, product_id[], quantity[]."""
+    if not current_user.is_admin:
+        flash("권한이 없습니다.")
+        return redirect('/admin?tab=orders')
+    if request.method != 'POST':
+        return redirect('/admin?tab=orders')
+    import uuid as _uuid
+    user_id = request.form.get('user_id', '').strip()
+    if user_id and user_id.isdigit():
+        user_id = int(user_id)
+        u = User.query.get(user_id)
+        if not u:
+            flash("선택한 회원을 찾을 수 없습니다.")
+            return redirect('/admin?tab=orders')
+        customer_name = u.name or ''
+        customer_phone = u.phone or ''
+        customer_email = u.email or ''
+    else:
+        user_id = None
+        customer_name = (request.form.get('customer_name') or '').strip()
+        customer_phone = (request.form.get('customer_phone') or '').strip()
+        customer_email = (request.form.get('customer_email') or '').strip()
+        if not customer_name or not customer_phone:
+            flash("비회원 주문 시 이름·연락처는 필수입니다.")
+            return redirect('/admin?tab=orders')
+    delivery_address = (request.form.get('delivery_address') or '').strip() or '(수기등록)'
+    request_memo = (request.form.get('request_memo') or '').strip()
+    try:
+        delivery_fee = int(request.form.get('delivery_fee') or 0)
+    except (TypeError, ValueError):
+        delivery_fee = 0
+    if delivery_fee < 0:
+        delivery_fee = 0
+    product_ids = request.form.getlist('product_id')
+    quantities = request.form.getlist('quantity')
+    items = []
+    for i, pid in enumerate(product_ids):
+        if not (pid and str(pid).isdigit()):
+            continue
+        qty = quantities[i] if i < len(quantities) else '0'
+        try:
+            qty = int(qty)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty <= 0:
+            continue
+        p = Product.query.get(int(pid))
+        if p and getattr(p, 'is_active', True):
+            items.append((p, qty))
+    if not items:
+        flash("등록할 품목을 1개 이상 선택하고 수량을 입력하세요.")
+        return redirect('/admin?tab=orders')
+    now = now_kst()
+    order_id_str = "ORDER_MANUAL_" + now.strftime('%Y%m%d%H%M%S') + "_" + _uuid.uuid4().hex[:6]
+    payment_key = "manual_" + order_id_str
+    total_price = sum(p.price * qty for p, qty in items) + delivery_fee
+    tax_free = sum(p.price * qty for p, qty in items if getattr(p, 'tax_type', None) == '면세')
+    product_details = " | ".join(f"[{p.category}] {p.name}({qty})" for p, qty in items)
+    try:
+        order = Order(
+            user_id=user_id,
+            customer_name=customer_name or '수기주문',
+            customer_phone=customer_phone or '',
+            customer_email=customer_email or '',
+            product_details=product_details,
+            total_price=total_price,
+            delivery_fee=delivery_fee,
+            tax_free_amount=tax_free,
+            status='결제완료',
+            order_id=order_id_str,
+            payment_key=payment_key,
+            delivery_address=delivery_address,
+            request_memo=('[수기등록] ' + request_memo) if request_memo else '[수기등록]',
+            points_used=0,
+            quick_extra_fee=0,
+            settlement_status='입금대기',
+        )
+        db.session.add(order)
+        db.session.flush()
+        for p, qty in items:
+            tax_type = getattr(p, 'tax_type', None) or '과세'
+            supplier_val = (getattr(p, 'supplier', None) or '').strip()
+            oi = OrderItem(
+                order_id=order.id,
+                product_id=p.id,
+                product_name=p.name,
+                product_category=p.category,
+                price=p.price,
+                quantity=qty,
+                tax_type=tax_type,
+                cancelled=False,
+                item_status='결제완료',
+                settlement_status='입금대기',
+                supplier=supplier_val or None,
+            )
+            db.session.add(oi)
+            db.session.flush()
+            cat = Category.query.filter_by(name=p.category).first()
+            cat_type = getattr(cat, 'category_type', None) or '입점형'
+            if cat_type == '공급자형':
+                base_price = (getattr(p, 'supply_price', None) or p.price)
+                sales_amount = base_price * qty
+                fee = 0
+                delivery_fee_per = 0
+                total = sales_amount
+            else:
+                sales_amount = p.price * qty
+                fee = round(sales_amount * 0.055)
+                delivery_fee_per = 990
+                total = sales_amount - fee - delivery_fee_per
+            settlement_no = "N" + str(oi.id).zfill(10)
+            tax_exempt_val = (getattr(cat, 'tax_type', None) or '과세') == '면세'
+            db.session.add(Settlement(
+                settlement_no=settlement_no,
+                order_id=order.id,
+                order_item_id=oi.id,
+                sale_dt=now,
+                category=p.category,
+                tax_exempt=tax_exempt_val,
+                category_type=cat_type,
+                product_name=p.name,
+                sales_amount=sales_amount,
+                fee=fee,
+                delivery_fee=delivery_fee_per,
+                settlement_total=total,
+                settlement_status='입금대기',
+                settled_at=None,
+            ))
+            if getattr(p, 'stock', None) is not None:
+                p.stock = (p.stock or 0) - qty
+        db.session.commit()
+        flash(f"수기 주문이 등록되었습니다. 주문번호: {order_id_str}")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"수기 주문 등록 중 오류: {e}")
+    return redirect('/admin?tab=orders')
 
 
 @login_required
@@ -23381,6 +23944,39 @@ def _pil_font_for_table(size=12):
         if f:
             return (f, f)
 
+    # 4.5) 서버 등에서 폰트가 없을 때: static/fonts/에 나눔고딕 자동 다운로드 후 사용 (한글 깨짐 방지)
+    _fallback_font_path = os.path.join(font_dir, 'NanumGothic.ttf')
+    if _fallback_font_path not in tried_paths and not os.path.isfile(_fallback_font_path):
+        try:
+            os.makedirs(font_dir, exist_ok=True)
+        except Exception:
+            font_dir = None
+        if font_dir and os.path.isdir(font_dir):
+            _download_urls = (
+                'https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Regular.ttf',
+                'https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf',
+            )
+            for _url in _download_urls:
+                try:
+                    import urllib.request
+                    req = urllib.request.Request(_url, headers={'User-Agent': 'Mozilla/5.0 (compatible; BasketUncle/1.0)'})
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        if resp.status == 200:
+                            data = resp.read()
+                            if len(data) > 10000:
+                                try:
+                                    with open(_fallback_font_path, 'wb') as out:
+                                        out.write(data)
+                                    break
+                                except Exception:
+                                    pass
+                except Exception:
+                    continue
+    if os.path.isfile(_fallback_font_path):
+        f = _try_load(_fallback_font_path)
+        if f:
+            return (f, f)
+
     # 5) 기본 폰트는 한글 미지원 → 한글 대체 문자로 표시되므로, 가능하면 경고 로그만 남기고 동일 반환
     try:
         import sys
@@ -23605,12 +24201,16 @@ def admin_orders_sales_summary_excel():
             for oi in items:
                 if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                     is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
+                    qty = 0 if is_cancelled else oi.quantity
+                    p = Product.query.get(oi.product_id) if oi.product_id else None
+                    supply_price = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else (int(p.price) if p and getattr(p, 'price', None) is not None else 0)
                     sales_table_rows.append({
                         'order_date': order_date_str,
                         'product_name': oi.product_name,
                         'category': oi.product_category,
-                        'quantity': 0 if is_cancelled else oi.quantity,
-                        'status': '취소' if is_cancelled else (getattr(oi, 'item_status', None) or status_str)
+                        'quantity': qty,
+                        'status': '취소' if is_cancelled else (getattr(oi, 'item_status', None) or status_str),
+                        'line_supply_amount': supply_price * qty,
                     })
         else:
             for part in parts:
@@ -23622,18 +24222,22 @@ def admin_orders_sales_summary_excel():
                             it_match = re.search(r'(.*?)\((\d+)\)', item)
                             if it_match:
                                 pn, qt = it_match.groups()
-                                sales_table_rows.append({'order_date': order_date_str, 'product_name': pn.strip(), 'category': cat_n, 'quantity': int(qt), 'status': status_str})
+                                qt = int(qt)
+                                p = Product.query.filter_by(name=pn.strip()).first()
+                                supply_price = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else (int(p.price) if p and getattr(p, 'price', None) is not None else 0)
+                                sales_table_rows.append({'order_date': order_date_str, 'product_name': pn.strip(), 'category': cat_n, 'quantity': qt, 'status': status_str, 'line_supply_amount': supply_price * qt})
     from collections import defaultdict
-    agg = defaultdict(int)
+    agg = defaultdict(lambda: {'qty': 0, 'supply_amount': 0})
     for r in sales_table_rows:
         key = (r.get('category', ''), r.get('product_name', ''))
-        agg[key] += r.get('quantity', 0)
-    product_summary_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v} for k, v in sorted(agg.items())]
+        agg[key]['qty'] += r.get('quantity', 0)
+        agg[key]['supply_amount'] += r.get('line_supply_amount', 0)
+    product_summary_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v['qty'], 'total_supply_amount': v['supply_amount']} for k, v in sorted(agg.items())]
     if not product_summary_rows:
         flash("다운로드할 집계 데이터가 없습니다.")
         return redirect('/admin?tab=orders')
-    df = pd.DataFrame(product_summary_rows, columns=['category', 'product_name', 'total_quantity'])
-    df.columns = ['품목(카테고리)', '판매상품명', '판매수량 총합계']
+    df = pd.DataFrame(product_summary_rows, columns=['category', 'product_name', 'total_quantity', 'total_supply_amount'])
+    df.columns = ['품목(카테고리)', '판매상품명', '판매수량 총합계', '공급가액']
     df = _dataframe_utf8_safe(df)
     out = BytesIO()
     with pd.ExcelWriter(out, engine='openpyxl') as w:
@@ -23860,10 +24464,14 @@ def admin_orders_sales_summary_image():
             for oi in items:
                 if (is_master or oi.product_category in my_categories) and (not sel_order_cats or oi.product_category in sel_order_cats):
                     is_cancelled = getattr(oi, 'cancelled', False) or (getattr(oi, 'item_status', None) in ('부분취소', '품절취소'))
+                    qty = 0 if is_cancelled else oi.quantity
+                    p = Product.query.get(oi.product_id) if oi.product_id else None
+                    supply_price = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else (int(p.price) if p and getattr(p, 'price', None) is not None else 0)
                     sales_table_rows.append({
                         'category': oi.product_category,
                         'product_name': oi.product_name,
-                        'quantity': 0 if is_cancelled else oi.quantity,
+                        'quantity': qty,
+                        'line_supply_amount': supply_price * qty,
                     })
         else:
             for part in parts:
@@ -23875,21 +24483,25 @@ def admin_orders_sales_summary_image():
                             it_match = re.search(r'(.*?)\((\d+)\)', item)
                             if it_match:
                                 pn, qt = it_match.groups()
-                                sales_table_rows.append({'category': cat_n, 'product_name': pn.strip(), 'quantity': int(qt)})
+                                qt = int(qt)
+                                p = Product.query.filter_by(name=pn.strip()).first()
+                                supply_price = int(p.supply_price) if p and getattr(p, 'supply_price', None) is not None else (int(p.price) if p and getattr(p, 'price', None) is not None else 0)
+                                sales_table_rows.append({'category': cat_n, 'product_name': pn.strip(), 'quantity': qt, 'line_supply_amount': supply_price * qt})
     from collections import defaultdict
-    agg = defaultdict(int)
+    agg = defaultdict(lambda: {'qty': 0, 'supply_amount': 0})
     for r in sales_table_rows:
         key = (r.get('category', ''), r.get('product_name', ''))
-        agg[key] += r.get('quantity', 0)
-    product_summary_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v} for k, v in sorted(agg.items())]
+        agg[key]['qty'] += r.get('quantity', 0)
+        agg[key]['supply_amount'] += r.get('line_supply_amount', 0)
+    product_summary_rows = [{'category': k[0], 'product_name': k[1], 'total_quantity': v['qty'], 'total_supply_amount': v['supply_amount']} for k, v in sorted(agg.items())]
     if not product_summary_rows:
         flash("다운로드할 집계 데이터가 없습니다.")
         return redirect('/admin?tab=orders')
     # PIL로 테이블 이미지 생성
     from PIL import ImageDraw, ImageFont
     font, font_header = _pil_font_for_table(14)
-    headers = ['품목(카테고리)', '판매상품명', '판매수량 총합계']
-    row_cells_list = [[_safe_utf8_str(row.get('category', '')), _safe_utf8_str(row.get('product_name', '')), _safe_utf8_str(row.get('total_quantity', ''))] for row in product_summary_rows]
+    headers = ['품목(카테고리)', '판매상품명', '판매수량 총합계', '공급가액']
+    row_cells_list = [[_safe_utf8_str(row.get('category', '')), _safe_utf8_str(row.get('product_name', '')), _safe_utf8_str(row.get('total_quantity', '')), _safe_utf8_str("{:,}".format(row.get('total_supply_amount', 0)))] for row in product_summary_rows]
     col_w = _pil_table_col_widths(headers, row_cells_list, font_header, font)
     cell_h = 38
     img_w = sum(col_w)
@@ -24418,6 +25030,11 @@ with app.app_context():
         db.session.rollback()
     try:
         db.session.execute(text('ALTER TABLE user ADD COLUMN auth_provider_id VARCHAR(100)'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    try:
+        db.session.execute(text('ALTER TABLE user ADD COLUMN created_at DATETIME'))
         db.session.commit()
     except Exception:
         db.session.rollback()

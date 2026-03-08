@@ -55,6 +55,8 @@ class User(db.Model, UserMixin):
     utm_source = db.Column(db.String(100), nullable=True)
     utm_medium = db.Column(db.String(100), nullable=True)
     utm_campaign = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=_now_kst, nullable=True)
+    withdrawn_at = db.Column(db.DateTime, nullable=True)  # 회원 탈퇴 시각 (설정 시 로그인 불가)
 
     __table_args__ = (db.UniqueConstraint('auth_provider', 'auth_provider_id', name='uq_user_auth_provider'),)
 
@@ -369,10 +371,12 @@ class DeliveryRequest(db.Model):
     user_name = db.Column(db.String(50), nullable=True)
     region_name = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=True)
+    image_url = db.Column(db.String(500), nullable=True)
     admin_notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=_now_kst)
     is_hidden = db.Column(db.Boolean, default=False)
     is_notice = db.Column(db.Boolean, default=False)
+    is_secret = db.Column(db.Boolean, default=False)
 
 
 class DeliveryRequestVote(db.Model):

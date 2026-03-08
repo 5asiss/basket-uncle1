@@ -60,6 +60,7 @@ def register_admin_routes(app):
         admin_delivery_request_comment,
         admin_delivery_request_hide,
         admin_delivery_request_notice_toggle,
+        admin_delivery_request_secret_toggle,
         admin_delivery_request_notice_write,
         admin_partnership_comment,
         admin_partnership_hide,
@@ -78,7 +79,11 @@ def register_admin_routes(app):
         admin_seller_send_manual_email,
         admin_seller_send_order_email,
         admin_email_order_dispatch_send,
+        admin_email_order_dispatch_excel,
+        admin_email_order_dispatch_image,
         order_confirm_dispatch,
+        order_confirm_dispatch_excel,
+        order_confirm_dispatch_image,
         admin_email_order_line_status_update,
         admin_email_order_create_view_link,
         admin_purchase_order_send_image,
@@ -92,6 +97,7 @@ def register_admin_routes(app):
         admin_delete_test_data,
         admin_orders_delete_all,
         admin_orders_delete_selected,
+        admin_orders_manual_create,
         admin_db_reset_all,
         admin_seed_virtual_reviews,
         admin_seed_virtual_orders,
@@ -191,6 +197,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/board/delivery-request/<int:did>/comment', view_func=login_required(admin_delivery_request_comment), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/delivery-request/<int:did>/hide', view_func=login_required(admin_delivery_request_hide), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/delivery-request/<int:did>/notice', view_func=login_required(admin_delivery_request_notice_toggle), methods=['POST'])
+    admin_bp.add_url_rule('/admin/board/delivery-request/<int:did>/secret', view_func=login_required(admin_delivery_request_secret_toggle), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/delivery-request/notice/write', view_func=login_required(admin_delivery_request_notice_write), methods=['GET', 'POST'])
     admin_bp.add_url_rule('/admin/board/partnership/<int:pid>/comment', view_func=login_required(admin_partnership_comment), methods=['POST'])
     admin_bp.add_url_rule('/admin/board/partnership/<int:pid>/hide', view_func=login_required(admin_partnership_hide), methods=['POST'])
@@ -209,7 +216,11 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/seller/send_manual_email', view_func=login_required(admin_seller_send_manual_email), methods=['POST'])
     admin_bp.add_url_rule('/admin/seller/send_order_email', view_func=login_required(admin_seller_send_order_email), methods=['POST'])
     admin_bp.add_url_rule('/admin/email-order-dispatch/send', view_func=login_required(admin_email_order_dispatch_send), methods=['POST'])
+    admin_bp.add_url_rule('/admin/email-order-dispatch/excel', view_func=login_required(admin_email_order_dispatch_excel))
+    admin_bp.add_url_rule('/admin/email-order-dispatch/image', view_func=login_required(admin_email_order_dispatch_image))
     admin_bp.add_url_rule('/admin/order-confirm-dispatch/<token>', view_func=order_confirm_dispatch, methods=['GET', 'POST'])
+    admin_bp.add_url_rule('/admin/order-confirm-dispatch/<token>/excel', view_func=order_confirm_dispatch_excel)
+    admin_bp.add_url_rule('/admin/order-confirm-dispatch/<token>/image', view_func=order_confirm_dispatch_image)
     admin_bp.add_url_rule('/admin/email_order/line_status', view_func=login_required(admin_email_order_line_status_update), methods=['POST'])
     admin_bp.add_url_rule('/admin/email_order/create_view_link', view_func=login_required(admin_email_order_create_view_link), methods=['POST'])
     admin_bp.add_url_rule('/admin/purchase_order/send_image', view_func=login_required(admin_purchase_order_send_image), methods=['POST'])
@@ -226,6 +237,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/delete_test_data', view_func=login_required(admin_delete_test_data))
     admin_bp.add_url_rule('/admin/orders/delete_all', view_func=login_required(admin_orders_delete_all), methods=['POST'])
     admin_bp.add_url_rule('/admin/orders/delete_selected', view_func=login_required(admin_orders_delete_selected), methods=['POST'])
+    admin_bp.add_url_rule('/admin/orders/manual_create', view_func=login_required(admin_orders_manual_create), methods=['POST'])
     admin_bp.add_url_rule('/admin/db/reset_all', view_func=login_required(admin_db_reset_all), methods=['POST'])
     admin_bp.add_url_rule('/admin/seed_virtual_reviews', view_func=login_required(admin_seed_virtual_reviews))
     admin_bp.add_url_rule('/admin/seed_virtual_orders', view_func=login_required(admin_seed_virtual_orders))
