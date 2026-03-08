@@ -1548,18 +1548,27 @@ def load_user(user_id):
     except Exception as e:
         # DB에 withdrawn_at 컬럼이 없어서 쿼리 실패한 경우 마이그레이션 시도 후 재시도
         err_str = str(e).lower()
-        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str:
+        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
             try:
+                db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
                 _ensure_user_withdrawn_at_column()
-                db.session.expire_all()  # 세션 캐시 초기화
+                db.session.rollback()  # 마이그레이션 후 트랜잭션 초기화
                 u = User.query.get(int(user_id))
                 if u and getattr(u, "withdrawn_at", None):
                     return None
                 return u
             except Exception as retry_e:
                 print(f"[load_user] retry failed user_id={user_id}: {retry_e}", flush=True)
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 return None
         print(f"[load_user] user_id={user_id} error: {e}", flush=True)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         return None
 
 # --------------------------------------------------------------------------------
@@ -8874,12 +8883,17 @@ def _find_or_create_social_user(provider, provider_id, email, name):
         return _find_or_create_social_user_impl(provider, provider_id, email, name)
     except Exception as e:
         err_str = str(e).lower()
-        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str:
+        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
             try:
+                db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
                 _ensure_user_withdrawn_at_column()
-                db.session.expire_all()
+                db.session.rollback()
                 return _find_or_create_social_user_impl(provider, provider_id, email, name)
             except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 raise
         raise
 
@@ -9291,13 +9305,18 @@ def login():
             user = User.query.filter_by(email=request.form.get('email')).first()
         except Exception as e:
             err_str = str(e).lower()
-            if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str:
+            if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
                 try:
+                    db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
                     _ensure_user_withdrawn_at_column()
-                    db.session.expire_all()
+                    db.session.rollback()
                     user = User.query.filter_by(email=request.form.get('email')).first()
                 except Exception as retry_e:
                     print(f"[login] migration/retry failed: {retry_e}", flush=True)
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
             if user is None:
                 flash("일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
                 return redirect(url_for('login'))
