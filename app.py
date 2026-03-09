@@ -672,6 +672,29 @@ def _ensure_user_withdrawn_at_column():
         print(f"[DB MIGRATION] user.withdrawn_at 컬럼 자동 추가 실패: {e}", flush=True)
 
 
+def _ensure_user_withdrawn_at_column_standalone():
+    """요청 세션과 무관하게 별도 연결로 withdrawn_at 컬럼 추가 (로그인 실패 시 재시도용)."""
+    try:
+        with db.engine.connect() as conn:
+            insp = inspect(conn)
+            columns = [c["name"] for c in insp.get_columns("user")]
+            if "withdrawn_at" in columns:
+                return True
+            dialect_name = (db.engine.dialect.name or "").lower()
+            if dialect_name in ("mysql", "mariadb"):
+                conn.execute(text("ALTER TABLE `user` ADD COLUMN `withdrawn_at` DATETIME"))
+            elif dialect_name == "postgresql":
+                conn.execute(text('ALTER TABLE "user" ADD COLUMN withdrawn_at TIMESTAMP'))
+            else:
+                conn.execute(text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME"))
+            conn.commit()
+        print("[DB MIGRATION] user.withdrawn_at 컬럼을 추가했습니다. (standalone)", flush=True)
+        return True
+    except Exception as e:
+        print(f"[DB MIGRATION] user.withdrawn_at standalone 실패: {e}", flush=True)
+        return False
+
+
 def _ensure_delivery_request_secret_and_image():
     """delivery_request 테이블에 is_secret, image_url 컬럼이 없으면 추가 (고객문의 비밀글·사진용)."""
     try:
@@ -1551,7 +1574,7 @@ def load_user(user_id):
         if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
             try:
                 db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
-                _ensure_user_withdrawn_at_column()
+                _ensure_user_withdrawn_at_column_standalone()  # 세션과 무관한 별도 연결로 컬럼 추가
                 db.session.rollback()  # 마이그레이션 후 트랜잭션 초기화
                 u = User.query.get(int(user_id))
                 if u and getattr(u, "withdrawn_at", None):
@@ -8886,7 +8909,7 @@ def _find_or_create_social_user(provider, provider_id, email, name):
         if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
             try:
                 db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
-                _ensure_user_withdrawn_at_column()
+                _ensure_user_withdrawn_at_column_standalone()  # 세션과 무관한 별도 연결로 컬럼 추가
                 db.session.rollback()
                 return _find_or_create_social_user_impl(provider, provider_id, email, name)
             except Exception:
@@ -9308,7 +9331,7 @@ def login():
             if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
                 try:
                     db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
-                    _ensure_user_withdrawn_at_column()
+                    _ensure_user_withdrawn_at_column_standalone()  # 세션과 무관한 별도 연결로 컬럼 추가
                     db.session.rollback()
                     user = User.query.filter_by(email=request.form.get('email')).first()
                 except Exception as retry_e:
