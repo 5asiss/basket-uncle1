@@ -648,50 +648,67 @@ def _ensure_product_naver_columns():
 
 
 def _ensure_user_withdrawn_at_column():
-    """user 테이블에 withdrawn_at 컬럼이 없으면 추가 (회원 탈퇴용). MySQL/PostgreSQL에서 user는 예약어이므로 따옴표 처리."""
+    """user 테이블에 created_at, withdrawn_at 컬럼이 없으면 추가. MySQL/PostgreSQL에서 user는 예약어이므로 따옴표 처리."""
     try:
         insp = inspect(db.engine)
         columns = [c["name"] for c in insp.get_columns("user")]
-        if "withdrawn_at" in columns:
-            return
         dialect_name = (db.engine.dialect.name or "").lower()
-        if dialect_name in ("mysql", "mariadb"):
-            sql = text("ALTER TABLE `user` ADD COLUMN `withdrawn_at` DATETIME")
-        elif dialect_name == "postgresql":
-            sql = text('ALTER TABLE "user" ADD COLUMN withdrawn_at TIMESTAMP')
-        else:
-            sql = text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME")
-        db.session.execute(sql)
-        db.session.commit()
-        print("[DB MIGRATION] user.withdrawn_at 컬럼을 추가했습니다.", flush=True)
+        if "created_at" not in columns:
+            if dialect_name in ("mysql", "mariadb"):
+                db.session.execute(text("ALTER TABLE `user` ADD COLUMN `created_at` DATETIME"))
+            elif dialect_name == "postgresql":
+                db.session.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS created_at TIMESTAMP'))
+            else:
+                db.session.execute(text("ALTER TABLE user ADD COLUMN created_at DATETIME"))
+            db.session.commit()
+            print("[DB MIGRATION] user.created_at 컬럼을 추가했습니다.", flush=True)
+        if "withdrawn_at" not in columns:
+            if dialect_name in ("mysql", "mariadb"):
+                db.session.execute(text("ALTER TABLE `user` ADD COLUMN `withdrawn_at` DATETIME"))
+            elif dialect_name == "postgresql":
+                db.session.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMP'))
+            else:
+                db.session.execute(text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME"))
+            db.session.commit()
+            print("[DB MIGRATION] user.withdrawn_at 컬럼을 추가했습니다.", flush=True)
     except Exception as e:
         try:
             db.session.rollback()
         except Exception:
             pass
-        print(f"[DB MIGRATION] user.withdrawn_at 컬럼 자동 추가 실패: {e}", flush=True)
+        print(f"[DB MIGRATION] user 컬럼 자동 추가 실패: {e}", flush=True)
 
 
 def _ensure_user_withdrawn_at_column_standalone():
-    """요청 세션과 무관하게 별도 연결로 withdrawn_at 컬럼 추가 (로그인 전 선행 호출용)."""
+    """user 테이블에 created_at, withdrawn_at 컬럼이 없으면 추가 (로그인 전 선행 호출용). 서버 DB 스키마 누락 대응."""
     try:
         insp = inspect(db.engine)
         columns = [c["name"] for c in insp.get_columns("user")]
-        if "withdrawn_at" in columns:
-            return True
         dialect_name = (db.engine.dialect.name or "").lower()
+        added = []
         with db.engine.connect() as conn:
-            if dialect_name in ("mysql", "mariadb"):
-                conn.execute(text("ALTER TABLE `user` ADD COLUMN `withdrawn_at` DATETIME"))
-            elif dialect_name == "postgresql":
-                conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMP'))
-            else:
-                conn.execute(text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME"))
-            conn.commit()
-        print("[DB MIGRATION] user.withdrawn_at 컬럼을 추가했습니다. (standalone)", flush=True)
+            if "created_at" not in columns:
+                if dialect_name in ("mysql", "mariadb"):
+                    conn.execute(text("ALTER TABLE `user` ADD COLUMN `created_at` DATETIME"))
+                elif dialect_name == "postgresql":
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS created_at TIMESTAMP'))
+                else:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN created_at DATETIME"))
+                added.append("created_at")
+            if "withdrawn_at" not in columns:
+                if dialect_name in ("mysql", "mariadb"):
+                    conn.execute(text("ALTER TABLE `user` ADD COLUMN `withdrawn_at` DATETIME"))
+                elif dialect_name == "postgresql":
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMP'))
+                else:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME"))
+                added.append("withdrawn_at")
+            if added:
+                conn.commit()
+                print(f"[DB MIGRATION] user 테이블 컬럼 추가됨: {added} (standalone)", flush=True)
         return True
     except Exception as e:
-        print(f"[DB MIGRATION] user.withdrawn_at standalone 실패: {e}", flush=True)
+        print(f"[DB MIGRATION] user standalone 실패: {e}", flush=True)
         return False
 
 
@@ -1569,9 +1586,9 @@ def load_user(user_id):
     except (TypeError, ValueError):
         return None
     except Exception as e:
-        # DB에 withdrawn_at 컬럼이 없어서 쿼리 실패한 경우 마이그레이션 시도 후 재시도
+        # DB 컬럼 누락(created_at, withdrawn_at 등)으로 쿼리 실패 시 마이그레이션 시도 후 재시도
         err_str = str(e).lower()
-        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
+        if "withdrawn_at" in err_str or "created_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "undefinedcolumn" in err_str or "aborted" in err_str:
             try:
                 db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
                 _ensure_user_withdrawn_at_column_standalone()  # 세션과 무관한 별도 연결로 컬럼 추가
@@ -8906,7 +8923,7 @@ def _find_or_create_social_user(provider, provider_id, email, name):
         return _find_or_create_social_user_impl(provider, provider_id, email, name)
     except Exception as e:
         err_str = str(e).lower()
-        if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
+        if "withdrawn_at" in err_str or "created_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "undefinedcolumn" in err_str or "aborted" in err_str:
             try:
                 db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
                 _ensure_user_withdrawn_at_column_standalone()  # 세션과 무관한 별도 연결로 컬럼 추가
@@ -9332,7 +9349,7 @@ def login():
             user = User.query.filter_by(email=request.form.get('email')).first()
         except Exception as e:
             err_str = str(e).lower()
-            if "withdrawn_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "aborted" in err_str:
+            if "withdrawn_at" in err_str or "created_at" in err_str or "no such column" in err_str or "unknown column" in err_str or "does not exist" in err_str or "undefinedcolumn" in err_str or "aborted" in err_str:
                 try:
                     db.session.rollback()  # PostgreSQL: 실패한 트랜잭션 정리
                     _ensure_user_withdrawn_at_column_standalone()  # 세션과 무관한 별도 연결로 컬럼 추가
