@@ -673,18 +673,18 @@ def _ensure_user_withdrawn_at_column():
 
 
 def _ensure_user_withdrawn_at_column_standalone():
-    """요청 세션과 무관하게 별도 연결로 withdrawn_at 컬럼 추가 (로그인 실패 시 재시도용)."""
+    """요청 세션과 무관하게 별도 연결로 withdrawn_at 컬럼 추가 (로그인 전 선행 호출용)."""
     try:
+        insp = inspect(db.engine)
+        columns = [c["name"] for c in insp.get_columns("user")]
+        if "withdrawn_at" in columns:
+            return True
+        dialect_name = (db.engine.dialect.name or "").lower()
         with db.engine.connect() as conn:
-            insp = inspect(conn)
-            columns = [c["name"] for c in insp.get_columns("user")]
-            if "withdrawn_at" in columns:
-                return True
-            dialect_name = (db.engine.dialect.name or "").lower()
             if dialect_name in ("mysql", "mariadb"):
                 conn.execute(text("ALTER TABLE `user` ADD COLUMN `withdrawn_at` DATETIME"))
             elif dialect_name == "postgresql":
-                conn.execute(text('ALTER TABLE "user" ADD COLUMN withdrawn_at TIMESTAMP'))
+                conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS withdrawn_at TIMESTAMP'))
             else:
                 conn.execute(text("ALTER TABLE user ADD COLUMN withdrawn_at DATETIME"))
             conn.commit()
@@ -9038,6 +9038,7 @@ def auth_naver_callback():
         flash("프로필 형식 오류."); return redirect('/login')
     if not pid:
         flash("네이버 프로필을 가져올 수 없습니다."); return redirect('/login')
+    _ensure_user_withdrawn_at_column_standalone()  # User 조회 전에 컬럼 확보
     try:
         user = _find_or_create_social_user('naver', pid, email, name)
         if getattr(user, "withdrawn_at", None):
@@ -9129,6 +9130,7 @@ def auth_google_callback():
         flash("프로필 형식 오류."); return redirect('/login')
     if not pid:
         flash("구글 프로필을 가져올 수 없습니다."); return redirect('/login')
+    _ensure_user_withdrawn_at_column_standalone()  # User 조회 전에 컬럼 확보
     try:
         user = _find_or_create_social_user('google', str(pid), email, name)
         if getattr(user, "withdrawn_at", None):
@@ -9223,6 +9225,7 @@ def auth_kakao_callback():
         flash("카카오 프로필 형식 오류."); return redirect('/login')
     if not pid:
         flash("카카오 프로필을 가져올 수 없습니다."); return redirect('/login')
+    _ensure_user_withdrawn_at_column_standalone()  # User 조회 전에 컬럼 확보
     try:
         user = _find_or_create_social_user('kakao', str(pid), email, name)
         if getattr(user, "withdrawn_at", None):
@@ -9323,6 +9326,7 @@ def auth_status():
 def login():
     """로그인 라우트"""
     if request.method == 'POST':
+        _ensure_user_withdrawn_at_column_standalone()  # 로그인 쿼리 전에 컬럼 확보 (PostgreSQL 등)
         user = None
         try:
             user = User.query.filter_by(email=request.form.get('email')).first()
