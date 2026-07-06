@@ -2259,7 +2259,6 @@ HEADER_HTML = """
                     <a href="/" id="admin-shortcut-header" class="flex items-center gap-2.5 group">
                         <img src="/static/logo/side1.jpg" alt="바구니삼촌" class="h-8 md:h-9 w-auto rounded-lg shadow-sm group-hover:opacity-90 transition" onerror="this.style.display='none'">
                         <span class="font-extrabold text-teal-600 text-base md:text-lg tracking-tight group-hover:text-teal-700 transition">바구니삼촌</span>
-                        <span class="text-[10px] md:text-xs text-stone-500 font-semibold hidden sm:inline ml-0.5">송도 신선식품 직송 서비스</span>
                     </a>
                 </div>
 
@@ -2520,7 +2519,6 @@ FOOTER_HTML = """
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 pb-10 mb-10 border-b border-stone-700/50">
                 <div class="text-left">
                     <p id="admin-shortcut-footer" class="text-teal-400 font-extrabold text-2xl tracking-tight mb-2 cursor-pointer select-none">바구니삼촌</p>
-                    <p id="admin-shortcut-tagline" class="text-xs text-amber-400/90 font-semibold tracking-wide cursor-pointer select-none">송도동 로컬 신선식품 직송 마켓</p>
                 </div>
                 <div class="flex flex-col md:items-end gap-4 w-full md:w-auto">
                     <div class="grid grid-cols-1 md:grid-cols-[auto,1fr] gap-4 md:gap-8 w-full md:w-auto items-start">
@@ -8195,7 +8193,6 @@ def product_detail(pid):
         [r.id for r in product_reviews],
         current_user.id if current_user.is_authenticated else None,
     )
-    category_delivery_desc = get_category_delivery_description(p.category) if p.category else "배송료 문의"
 
     # 인터넷 최저가: API로 최저가순 최대 3건 조회. 없으면 DB 저장값 1건으로 대체
     naver_lowest_list = get_lowest_price_list(p.name, 3)
@@ -8338,20 +8335,8 @@ def product_detail(pid):
                         <p class="text-[10px] md:text-xs text-amber-600 font-bold mt-1">이 상품은 1인당 최대 {{ p.max_purchase_quantity }}개까지 구매 가능합니다.</p>
                         {% endif %}
                     </div>
-                    <div class="bg-blue-50 p-5 lg:p-6 rounded-2xl border border-blue-100 col-span-2 shadow-sm">
-                        <p class="text-[9px] lg:text-[11px] text-blue-400 uppercase mb-1 font-black">직접 배송 (송도전용)</p>
-                        <p class="text-sm md:text-base lg:text-lg font-black text-blue-700">
-                            <i class="fas fa-truck-fast mr-2"></i>바구니삼촌 {{ p.description }} 내 직접 배송
-                        </p>
-                        <p class="text-[10px] text-blue-600 font-bold mt-2">배송료: {{ category_delivery_desc }}</p>
-                    </div>
                 </div>
 
-                <div class="bg-gray-50 p-4 rounded-2xl mb-6 border border-gray-100">
-                    <p class="text-[11px] text-gray-500 leading-relaxed font-bold">
-                        <i class="fas fa-info-circle mr-1"></i> 바구니삼촌은 직접 검수하고 소싱한 정품만을 판매하며, 송도 전 지역 직접 배송을 책임집니다.
-                    </p>
-                </div>
                 {% if p.stock > 0 and not is_expired %}
                 <button onclick="addToCart('{{p.id}}')" class="w-full bg-teal-600 text-white py-5 md:py-7 rounded-[2rem] font-black text-xl md:text-2xl shadow-2xl hover:bg-teal-700 transition active:scale-95 flex items-center justify-center gap-2">
                     <i class="fas fa-shopping-basket"></i> 물건 담기
@@ -8836,7 +8821,6 @@ def product_detail(pid):
                                   user_logged_in=current_user.is_authenticated,
                                   recommend_cats_detail=recommend_cats_detail,
                                   cat_previews_detail=cat_previews_detail,
-                                  category_delivery_desc=category_delivery_desc,
                                   naver_lowest_list=naver_lowest_list,
                                   product_base_url=product_base_url,
                                   seller_category=seller_category,
