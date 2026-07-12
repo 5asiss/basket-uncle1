@@ -8,6 +8,11 @@ TOSS_CLIENT_KEY = (os.getenv("TOSS_CLIENT_KEY") or "").strip() or "test_ck_DpexM
 TOSS_SECRET_KEY = (os.getenv("TOSS_SECRET_KEY") or "").strip() or "test_sk_0RnYX2w532E5k7JYaJye8NeyqApQ"
 TOSS_CONFIRM_KEY = (os.getenv("TOSS_CONFIRM_KEY") or "").strip() or "f888f57918e6b0de7463b6d5ac1edd05adf1cde50a28b2c8699983fa88541dda"
 
+# 무통장 입금 계좌
+BANK_TRANSFER_BANK = os.getenv("BANK_TRANSFER_BANK", "기업은행").strip()
+BANK_TRANSFER_ACCOUNT = os.getenv("BANK_TRANSFER_ACCOUNT", "273-081680-01-024").strip()
+BANK_TRANSFER_HOLDER = os.getenv("BANK_TRANSFER_HOLDER", "금창권").strip()
+
 # 카카오맵(다음지도) - 배송구역 관리 탭
 KAKAO_MAP_APP_KEY = os.getenv("KAKAO_MAP_APP_KEY", "").strip()
 

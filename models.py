@@ -155,6 +155,7 @@ class Order(db.Model):
     settlement_status = db.Column(db.String(20), default='입금대기')
     order_id = db.Column(db.String(100))
     payment_key = db.Column(db.String(200))
+    payment_method = db.Column(db.String(30), nullable=True)  # card, bank
     delivery_address = db.Column(db.String(500))
     delivery_lat = db.Column(db.Float, nullable=True)
     delivery_lng = db.Column(db.Float, nullable=True)

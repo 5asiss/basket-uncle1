@@ -30,6 +30,7 @@ def register_admin_routes(app):
         admin_order_item_status,
         admin_order_items,
         admin_settle_order,
+        admin_confirm_bank_deposit,
         admin_delivery_zone_api,
         admin_member_grade_set,
         admin_member_grade_config,
@@ -153,6 +154,7 @@ def register_admin_routes(app):
     admin_bp.add_url_rule('/admin/order/item_status', view_func=login_required(admin_order_item_status), methods=['POST'])
     admin_bp.add_url_rule('/admin/order/<int:order_id>/items', view_func=login_required(admin_order_items))
     admin_bp.add_url_rule('/admin/order/<int:order_id>/settle', view_func=login_required(admin_settle_order))
+    admin_bp.add_url_rule('/admin/order/<int:order_id>/confirm_deposit', view_func=login_required(admin_confirm_bank_deposit))
 
     # auth
     admin_bp.add_url_rule('/admin/auth-status', view_func=admin_auth_status)

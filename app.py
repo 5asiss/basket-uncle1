@@ -392,9 +392,49 @@ def admin_logi_redirect():
 # 설정·상수 (config.py에서 로드)
 from config import (
     TOSS_CLIENT_KEY, TOSS_SECRET_KEY, TOSS_CONFIRM_KEY,
+    BANK_TRANSFER_BANK, BANK_TRANSFER_ACCOUNT, BANK_TRANSFER_HOLDER,
     KAKAO_MAP_APP_KEY, KAKAO_REST_API_KEY, MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_USE_TLS, DEFAULT_MAIL_FROM,
     GITHUB_BACKUP_TOKEN, GITHUB_BACKUP_REPO,
 )
+
+BANK_TRANSFER_ACCOUNT_LABEL = f"{BANK_TRANSFER_BANK} {BANK_TRANSFER_ACCOUNT} (예금주: {BANK_TRANSFER_HOLDER})"
+
+_ORDER_PAYMENT_METHOD_HTML = f"""
+            <div class="space-y-2 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <p class="text-xs font-semibold text-gray-700 mb-2">결제 수단</p>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-800">
+                    <input type="radio" name="payment_method" value="card" class="payment-method-radio" checked>
+                    <span>카드·간편결제 (토스페이먼츠)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-800">
+                    <input type="radio" name="payment_method" value="bank" class="payment-method-radio">
+                    <span>무통장 입금</span>
+                </label>
+                <div id="bank-transfer-info" class="hidden mt-2 p-3 bg-blue-50 rounded-lg border border-blue-100 text-xs text-blue-900 leading-relaxed">
+                    <p class="font-bold mb-1">입금 계좌</p>
+                    <p class="font-mono">{BANK_TRANSFER_BANK} {BANK_TRANSFER_ACCOUNT}</p>
+                    <p>예금주: {BANK_TRANSFER_HOLDER}</p>
+                    <p class="mt-2 text-blue-700">주문 접수 후 24시간 이내 입금해 주세요. 입금 확인 후 배송이 시작됩니다.</p>
+                </div>
+            </div>
+"""
+
+_ORDER_PAYMENT_METHOD_JS = """
+    document.querySelectorAll('.payment-method-radio').forEach(function(r) {
+        r.addEventListener('change', function() {
+            var info = document.getElementById('bank-transfer-info');
+            var checked = document.querySelector('input[name="payment_method"]:checked');
+            var isBank = checked && checked.value === 'bank';
+            if (info) info.classList.toggle('hidden', !isBank);
+            var btn = document.getElementById('payBtn');
+            if (btn && !btn.disabled) btn.textContent = isBank ? '무통장 입금으로 주문하기' : (btn.dataset.defaultLabel || '결제하기');
+        });
+    });
+    (function() {
+        var btn = document.getElementById('payBtn');
+        if (btn) btn.dataset.defaultLabel = btn.textContent.trim();
+    })();
+"""
 # 로컬 업로드 폴더 (Cloudinary 미사용 시만 활용). app.root_path 기준 절대 경로로 저장해 직접 올린 사진이 항상 /static/uploads/ 에서 노출되도록 함
 UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -4425,22 +4465,14 @@ def index():
 <div class="page-main">
 <div class="hero-wrap">
     <div class="hero-inner">
-        <span class="text-[11px] md:text-xs tracking-[.16em] uppercase text-slate-100 block mb-2">Bright Local Fresh Delivery</span>
+        <span class="text-[11px] md:text-xs tracking-[.16em] uppercase text-slate-100 block mb-2">Winner Finance</span>
         <h1 class="text-2xl md:text-3xl lg:text-4xl font-semibold text-white leading-snug md:leading-snug mb-3">
-            엄선된 제철 농산물,<br class="hidden md:block">당일 배송으로 가장 신선하게 전해드립니다.
+            위너금융<br class="hidden md:block">빠른 환전 · 페소 원화 환전
         </h1>
         <div class="hero-divider"></div>
-        <p class="text-[13px] md:text-sm text-slate-300 mt-1 mb-6 max-w-2xl">
-            송도 지역을 위한 맞춤형 서비스, 효율적인 유통시스템으로 비용을 최소화하고, 최상의 품질을 유지합니다.
+        <p class="text-[13px] md:text-sm text-slate-300 mt-1 mb-2 max-w-2xl">
+            믿고 거래하는 환전. 빠르고 안전한 페소·원화 환전 서비스를 제공합니다.
         </p>
-        <div class="flex flex-col md:flex-row justify-center items-center gap-3 md:gap-4">
-            <a href="#products" class="inline-flex items-center justify-center px-5 md:px-6 py-3 rounded-full bg-gray-900 text-white text-sm md:text-base font-medium hover:bg-black transition">
-                오늘의 신선상품 보기
-            </a>
-            <a href="/about" class="inline-flex items-center justify-center px-4 py-2 text-[13px] md:text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-full transition">
-                바구니삼촌이란?
-            </a>
-        </div>
     </div>
 </div>
 
@@ -4924,22 +4956,14 @@ def index_horizontal():
 <div class="page-main-h">
 <div class="hero-wrap">
     <div class="hero-inner">
-        <span class="text-[11px] md:text-xs tracking-[.16em] uppercase text-slate-100 block mb-2">Bright Local Fresh Delivery</span>
+        <span class="text-[11px] md:text-xs tracking-[.16em] uppercase text-slate-100 block mb-2">Winner Finance</span>
         <h1 class="text-2xl md:text-3xl lg:text-4xl font-semibold text-white leading-snug md:leading-snug mb-3">
-            엄선된 제철 농산물,<br class="hidden md:block">당일 배송으로 가장 신선하게 전해드립니다.
+            위너금융<br class="hidden md:block">빠른 환전 · 페소 원화 환전
         </h1>
         <div class="hero-divider"></div>
-        <p class="text-[13px] md:text-sm text-slate-300 mt-1 mb-6 max-w-2xl">
-            송도 지역을 위한 맞춤형 서비스, 효율적인 유통시스템으로 비용을 최소화하고, 최상의 품질을 유지합니다.
+        <p class="text-[13px] md:text-sm text-slate-300 mt-1 mb-2 max-w-2xl">
+            믿고 거래하는 환전. 빠르고 안전한 페소·원화 환전 서비스를 제공합니다.
         </p>
-        <div class="flex flex-col md:flex-row justify-center items-center gap-3 md:gap-4">
-            <a href="#products" class="inline-flex items-center justify-center px-5 md:px-6 py-3 rounded-full bg-gray-900 text-white text-sm md:text-base font-medium hover:bg-black transition">
-                오늘의 신선상품 보기
-            </a>
-            <a href="/about" class="inline-flex items-center justify-center px-4 py-2 text-[13px] md:text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-full transition">
-                바구니삼촌이란?
-            </a>
-        </div>
     </div>
 </div>
 
@@ -10160,10 +10184,11 @@ def mypage():
         o.enhanced_details = "\\n".join(details_with_price) if details_with_price else "주문 취소됨"
         if o.order_items:
             o.display_summary = ", ".join(f"{oi.product_name}({oi.quantity})" + (" [취소]" if oi.cancelled else "") for oi in o.order_items)
-            o.can_cancel_order = o.status == '결제완료' and not any(not getattr(oi, 'cancelled', False) and getattr(oi, 'item_status', None) in ('배송요청', '배송중', '배송완료') for oi in o.order_items)
+            o.can_cancel_order = o.status in ('결제완료', '입금대기') and not any(not getattr(oi, 'cancelled', False) and getattr(oi, 'item_status', None) in ('배송요청', '배송중', '배송완료') for oi in o.order_items)
         else:
             o.display_summary = (o.product_details or "주문 취소됨")[:80]
-            o.can_cancel_order = (o.status == '결제완료')
+            o.can_cancel_order = (o.status in ('결제완료', '입금대기'))
+        o.deposit_amount = max(0, (o.total_price or 0) - (getattr(o, 'points_used', 0) or 0))
         enhanced_orders.append(o)
     recent_orders = [o for o in enhanced_orders if not o.created_at or o.created_at >= cutoff_7d]
     older_orders = [o for o in enhanced_orders if o.created_at and o.created_at < cutoff_7d]
@@ -10405,11 +10430,18 @@ def mypage():
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 md:gap-3 mb-2 flex-wrap">
                                 <span class="text-[10px] md:text-xs text-gray-400 font-bold">{{ o.created_at.strftime('%Y.%m.%d') }}</span>
-                                <span class="text-[10px] md:text-xs font-black {% if o.status == '결제취소' %}text-red-400{% else %}text-teal-500{% endif %}">[{{ o.status }}]</span>
+                                <span class="text-[10px] md:text-xs font-black {% if o.status == '결제취소' %}text-red-400{% elif o.status == '입금대기' %}text-amber-600{% else %}text-teal-500{% endif %}">[{{ o.status }}]</span>
                             </div>
                             <p class="text-sm md:text-xl font-black text-gray-700 leading-tight break-keep">
                                 {{ (o.display_summary or o.product_details or '주문 취소됨')[:80] }}{% if (o.display_summary or o.product_details or '')|length > 80 %}...{% endif %}
                             </p>
+                            {% if o.status == '입금대기' and getattr(o, 'payment_method', None) == 'bank' %}
+                            <div class="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl text-[11px] text-amber-900 leading-relaxed">
+                                <p class="font-bold mb-1">무통장 입금 대기</p>
+                                <p>{{ BANK_TRANSFER_BANK }} {{ BANK_TRANSFER_ACCOUNT }} ({{ BANK_TRANSFER_HOLDER }})</p>
+                                <p class="font-black mt-1">입금액 {{ "{:,}".format(o.deposit_amount) }}원 · 입금자명은 주문자명과 동일하게</p>
+                            </div>
+                            {% endif %}
                         </div>
                         <div class="flex items-center gap-3 md:gap-4 flex-wrap shrink-0">
                             <span class="text-base md:text-2xl font-black text-gray-800 tracking-tighter">{{ "{:,}".format(o.total_price) }}원</span>
@@ -10461,7 +10493,7 @@ def mypage():
                         <p class="pt-2 border-t border-gray-100 text-[10px] text-amber-600 font-black">배송 요청/진행된 품목이 있어 취소할 수 없습니다.</p>
                         {% endif %}
                     </div>
-                    {% elif o.status == '결제완료' and o.can_cancel_order %}
+                    {% elif o.status in ('결제완료', '입금대기') and o.can_cancel_order %}
                     <div class="border-t border-gray-100 pt-4 mt-4">
                         <form action="/order/cancel/{{ o.id }}" method="POST" class="inline" onsubmit="return confirm('주문 전체를 취소하시겠습니까?');">
                             <button type="submit" class="text-xs font-black text-red-500 bg-red-50 px-4 py-2 rounded-xl border border-red-100 hover:bg-red-100 transition">전체 주문 취소</button>
@@ -10791,7 +10823,7 @@ def mypage():
         })();
     </script>
     """
-    return render_template_string(HEADER_HTML + content + FOOTER_HTML, all_orders=all_orders, recent_orders=recent_orders, older_orders=older_orders, recent_items_with_date=recent_items_with_date, Review=Review, unread_message_count=unread_message_count, push_already_set=push_already_set, need_address=need_address, from_cart=from_cart, mypage_name=mypage_name, mypage_email=mypage_email, mypage_phone=mypage_phone, mypage_address=mypage_address, mypage_address_apt_name=mypage_address_apt_name, mypage_address_detail=mypage_address_detail, mypage_address_in_delivery_zone=mypage_address_in_delivery_zone, mypage_entrance_pw=mypage_entrance_pw, mypage_request_memo=mypage_request_memo, mypage_points=mypage_points)
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML, all_orders=all_orders, recent_orders=recent_orders, older_orders=older_orders, recent_items_with_date=recent_items_with_date, Review=Review, unread_message_count=unread_message_count, push_already_set=push_already_set, need_address=need_address, from_cart=from_cart, mypage_name=mypage_name, mypage_email=mypage_email, mypage_phone=mypage_phone, mypage_address=mypage_address, mypage_address_apt_name=mypage_address_apt_name, mypage_address_detail=mypage_address_detail, mypage_address_in_delivery_zone=mypage_address_in_delivery_zone, mypage_entrance_pw=mypage_entrance_pw, mypage_request_memo=mypage_request_memo, mypage_points=mypage_points, BANK_TRANSFER_BANK=BANK_TRANSFER_BANK, BANK_TRANSFER_ACCOUNT=BANK_TRANSFER_ACCOUNT, BANK_TRANSFER_HOLDER=BANK_TRANSFER_HOLDER)
 def _recalc_order_from_items(order):
     """OrderItem 기준으로 주문 합계·배송비·product_details 재계산 (취소 반영)"""
     remaining = OrderItem.query.filter_by(order_id=order.id, cancelled=False).all()
@@ -10806,14 +10838,8 @@ def _recalc_order_from_items(order):
     for oi in remaining:
         cat_groups.setdefault(oi.product_category, []).append(f"{oi.product_name}({oi.quantity})")
     order.product_details = " | ".join([f"[{cat}] {', '.join(prods)}" for cat, prods in cat_groups.items()])
-    cat_price_sums = {}
-    for oi in remaining:
-        cat_price_sums[oi.product_category] = cat_price_sums.get(oi.product_category, 0) + (oi.price * oi.quantity)
-    cat_item_counts = {}
-    for oi in remaining:
-        cat_item_counts[oi.product_category] = cat_item_counts.get(oi.product_category, 0) + oi.quantity
-    order.delivery_fee, _ = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
-    order.total_price = sum(oi.price * oi.quantity for oi in remaining) + order.delivery_fee
+    order.delivery_fee = 0
+    order.total_price = sum(oi.price * oi.quantity for oi in remaining)
     order.tax_free_amount = sum(oi.price * oi.quantity for oi in remaining if oi.tax_type == '면세')
 
 
@@ -10834,7 +10860,7 @@ def order_cancel_item(order_id, item_id):
     order = Order.query.get_or_404(order_id)
     if order.user_id != current_user.id:
         flash("본인 주문만 취소할 수 있습니다."); return redirect('/mypage')
-    if order.status != '결제완료':
+    if order.status not in ('결제완료', '입금대기'):
         flash("취소 가능한 상태가 아닙니다."); return redirect('/mypage')
     oi = OrderItem.query.filter_by(id=item_id, order_id=order_id).first()
     if not oi or oi.cancelled:
@@ -10886,8 +10912,8 @@ def _do_full_order_cancel(order):
         flash("배송 요청/진행된 품목이 있어 주문 전체 취소가 불가능합니다.")
         return redirect('/mypage')
 
-    # 토스페이먼츠 전액 취소
-    if order.payment_key and order.total_price and order.total_price > 0:
+    # 토스페이먼츠 전액 취소 (카드 결제만)
+    if order.payment_key and order.payment_key != 'BANK_TRANSFER' and order.total_price and order.total_price > 0:
         url = f"https://api.tosspayments.com/v1/payments/{order.payment_key}/cancel"
         body = {"cancelReason": "주문 전액 취소"}
         tax_free = getattr(order, 'tax_free_amount', None) or 0
@@ -10939,7 +10965,7 @@ def _do_full_order_cancel(order):
         except Exception:
             pass
     db.session.commit()
-    flash("결제가 성공적으로 취소되었습니다. 환불은 카드사 정책에 따라 3~7일 소요될 수 있습니다.")
+    flash("주문이 취소되었습니다." + ("" if getattr(order, 'payment_method', None) == 'bank' else " 환불은 카드사 정책에 따라 3~7일 소요될 수 있습니다."))
     return redirect('/mypage')
 
 
@@ -10950,7 +10976,7 @@ def order_cancel(oid):
     order = Order.query.get_or_404(oid)
     if order.user_id != current_user.id:
         return redirect('/mypage')
-    if order.status != '결제완료':
+    if order.status not in ('결제완료', '입금대기'):
         flash("취소 가능한 상태가 아닙니다. 이미 배송이 시작되었을 수 있습니다.")
         return redirect('/mypage')
     return _do_full_order_cancel(order)
@@ -11068,17 +11094,11 @@ def cart():
         flash("주문하려면 배송지 주소를 먼저 입력해 주세요.")
         return redirect(url_for("mypage", need_address=1))
 
-    # 배송비: 카테고리별 설정에 따라 금액/건별 계산
-    cat_price_sums = {}
-    for i in items:
-        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
-    cat_item_counts = {}
-    for i in items:
-        cat_item_counts[i.product_category] = cat_item_counts.get(i.product_category, 0) + i.quantity
-    delivery_fee, delivery_fee_breakdown = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
-    delivery_fee = delivery_fee if items else 0
+    # 카테고리별 배송료 미적용 (장바구니·결제에서 제외)
+    delivery_fee = 0
+    delivery_fee_breakdown = {}
     subtotal = sum(i.price * i.quantity for i in items)
-    total = subtotal + delivery_fee
+    total = subtotal
     
     # 최소 주문 금액·포인트 사용 가능 금액 (장바구니 안내용)
     _, min_order_to_use, max_points_per_order = _get_point_config()
@@ -11144,7 +11164,6 @@ def cart():
             """
         
         # 결제 요약 영역
-        breakdown_text = " · ".join([f"[{c}] {v:,}원" for c, v in (delivery_fee_breakdown or {}).items()]) if delivery_fee_breakdown else ""
         min_order_msg = ""
         if min_order_to_use and min_order_to_use > 0:
             if meets_min_order:
@@ -11168,11 +11187,6 @@ def cart():
                     <span>주문 상품 합계</span>
                     <span>{ "{:,}".format(subtotal) }원</span>
                 </div>
-                <div class="flex justify-between text-sm md:text-base text-gray-600 font-medium">
-                    <span>카테고리별 배송료</span>
-                    <span>+ { "{:,}".format(delivery_fee) }원</span>
-                </div>
-                {f'<p class="text-[11px] text-gray-500">' + breakdown_text + '</p>' if breakdown_text else ''}
                 <div class="flex justify-between items-center pt-5 border-t border-gray-200 mt-5">
                     <span class="text-sm md:text-base text-gray-500 font-medium">최종 결제 금액</span>
                     <span class="text-2xl md:text-3xl text-gray-900 font-semibold tracking-tight">
@@ -11181,12 +11195,6 @@ def cart():
                 </div>
                 {min_order_msg}
                 {point_info}
-                <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
-                    <p class="text-[11px] md:text-xs font-bold text-slate-600 mb-1.5">카테고리 배송료 안내</p>
-                    <p class="text-[11px] md:text-xs text-slate-500 leading-relaxed font-medium">
-                        담긴 상품의 <strong>카테고리별</strong>로 계산된 배송료가 위 금액에 합산됩니다. 예시: [과일·채소] 1,900원 + [생수·음료] 19,000원 + 3,800원 = 총 24,700원처럼, 카테고리마다 기본료·무료조건·추가료가 달라 각각 계산 후 더해집니다. 자세한 조건은 상품 상세 또는 카테고리 페이지에서 확인할 수 있습니다.
-                    </p>
-                </div>
                 <p class="text-[11px] md:text-xs text-gray-500 mt-1 font-medium">다음 단계에서 배송지를 다시 확인하고 수정할 수 있습니다.</p>
             </div>
             
@@ -11227,14 +11235,8 @@ def order_confirm():
     
     addr_for_zone = _normalize_address_for_zone(current_user.address or "")
     zone_type = get_delivery_zone_type(addr_for_zone)
-    cat_price_sums = {}
-    for i in items:
-        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
-    cat_item_counts = {}
-    for i in items:
-        cat_item_counts[i.product_category] = cat_item_counts.get(i.product_category, 0) + i.quantity
-    delivery_fee, delivery_fee_breakdown = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
-    total = sum(i.price * i.quantity for i in items) + delivery_fee
+    delivery_fee = 0
+    total = sum(i.price * i.quantity for i in items)
     
     _, min_order_to_use, max_points_per_order = _get_point_config()
     if min_order_to_use and min_order_to_use > 0 and total < min_order_to_use:
@@ -11312,6 +11314,8 @@ def order_confirm():
                 <label class="flex items-center gap-2 cursor-pointer text-xs text-gray-700"><input type="checkbox" id="consent_third_party_order" class="consent-item rounded border-gray-300 text-gray-800" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
+            {_ORDER_PAYMENT_METHOD_HTML}
+
             <form id="payForm" action="/order/payment" method="POST">
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
                 <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
@@ -11350,6 +11354,7 @@ def order_confirm():
         document.getElementById('points_used_hidden').value = pts;
         document.getElementById('payForm').submit();
     }}
+    {_ORDER_PAYMENT_METHOD_JS}
     var ptsIn = document.getElementById('points_used_input');
     if (ptsIn) {{
         ptsIn.addEventListener('input', function() {{
@@ -11433,6 +11438,8 @@ def order_confirm():
                 <label class="flex items-center gap-2 cursor-pointer text-xs"><input type="checkbox" id="consent_third_party_order" class="consent-item-q rounded border-gray-300 text-teal-600" required><span>개인정보 제3자 제공 동의</span></label>
             </div>
 
+            {_ORDER_PAYMENT_METHOD_HTML}
+
             <form id="payForm" action="/order/payment" method="POST">
                 <input type="hidden" name="points_used" id="points_used_hidden" value="0">
                 <input type="hidden" name="quick_agree" id="quick_agree_hidden" value="0">
@@ -11476,6 +11483,7 @@ def order_confirm():
         document.getElementById('points_used_hidden').value = pts;
         document.getElementById('payForm').submit();
     }}
+    {_ORDER_PAYMENT_METHOD_JS}
     var ptsIn = document.getElementById('points_used_input');
     if (ptsIn) {{
         ptsIn.addEventListener('input', function() {{ var v = parseInt(this.value, 10) || 0; var m = { max_use }; if (v > m) this.value = m; var base = isQuickZone ? totalWithQuick : orderTotal; var final = base - (parseInt(this.value, 10) || 0); var el = document.getElementById('final_amount_display'); if (el) el.textContent = final.toLocaleString() + '원'; }});
@@ -11487,6 +11495,129 @@ def order_confirm():
     </script>
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML, total=total, delivery_fee=delivery_fee, is_songdo=is_songdo, zone_type=zone_type, quick_extra_fee=quick_extra_fee, quick_extra_message=quick_extra_message, total_with_quick=total_with_quick, is_quick_zone=is_quick_zone, user_points=user_points, max_use=max_use, min_order_to_use=min_order_to_use)
+
+
+def _clear_checkout_session():
+    for key in ('points_used', 'quick_extra_fee', 'order_address', 'order_address_apt',
+                'order_address_detail', 'order_entrance_pw', 'save_address_to_profile', 'payment_method'):
+        session.pop(key, None)
+
+
+def _finalize_order_from_cart(user, items, order_id, payment_key=None, order_status='결제완료',
+                              item_status='결제완료', payment_method='card'):
+    """장바구니 기준 주문·정산·재고·포인트 처리. 성공 시 Order 반환, 실패 시 None."""
+    pids = [i.product_id for i in items]
+    products_by_id = {prod.id: prod for prod in Product.query.filter(Product.id.in_(pids)).all()}
+    for i in items:
+        prod = products_by_id.get(i.product_id)
+        if not prod:
+            continue
+        max_q = getattr(prod, 'max_purchase_quantity', None) or 0
+        if max_q > 0 and i.quantity > max_q:
+            flash(f"「{i.product_name}」은(는) 1인당 최대 {max_q}개까지 구매 가능합니다. 장바구니 수량을 확인해 주세요.")
+            return None
+
+    cat_groups = {i.product_category: [] for i in items}
+    for i in items:
+        cat_groups[i.product_category].append(f"{i.product_name}({i.quantity})")
+    details = " | ".join([f"[{cat}] {', '.join(prods)}" for cat, prods in cat_groups.items()])
+
+    delivery_fee = 0
+    points_used = session.get('points_used', 0) or 0
+    quick_extra = session.get('quick_extra_fee', 0) or 0
+    original_total = int(sum(i.price * i.quantity for i in items) + delivery_fee + quick_extra)
+    max_allowed_now = _effective_max_point_use(user, original_total)
+    points_used = min(points_used, max_allowed_now)
+
+    delivery_addr = session.get('order_address') or user.address or ""
+    delivery_apt = (session.get('order_address_apt') or getattr(user, 'address_apt_name', None) or "").strip()
+    delivery_addr_detail = session.get('order_address_detail') or user.address_detail or ""
+    delivery_entrance_pw = session.get('order_entrance_pw') or user.entrance_pw or ""
+    apt_part = f" {delivery_apt} " if delivery_apt else " "
+    delivery_address_str = f"({delivery_addr}){apt_part}{delivery_addr_detail} (현관:{delivery_entrance_pw})"
+
+    delivery_lat = session.get('delivery_lat')
+    delivery_lng = session.get('delivery_lng')
+    if (delivery_lat is None or delivery_lng is None) and delivery_addr:
+        coords = _geocode_address(delivery_addr)
+        if coords:
+            delivery_lat, delivery_lng = float(coords[0]), float(coords[1])
+
+    _utm_src = session.get('utm_source') or getattr(user, 'utm_source', None)
+    _utm_med = session.get('utm_medium') or getattr(user, 'utm_medium', None)
+    _utm_camp = session.get('utm_campaign') or getattr(user, 'utm_campaign', None)
+
+    order = Order(
+        user_id=user.id, customer_name=user.name, customer_phone=user.phone, customer_email=user.email,
+        product_details=details, total_price=original_total, delivery_fee=delivery_fee,
+        tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'),
+        order_id=order_id, payment_key=payment_key, payment_method=payment_method,
+        delivery_address=delivery_address_str,
+        delivery_lat=delivery_lat, delivery_lng=delivery_lng,
+        request_memo=user.request_memo,
+        status=order_status, points_used=points_used, quick_extra_fee=quick_extra,
+        utm_source=_utm_src, utm_medium=_utm_med, utm_campaign=_utm_camp,
+    )
+    db.session.add(order)
+    db.session.flush()
+
+    for i in items:
+        p = Product.query.get(i.product_id)
+        supplier_val = (getattr(p, 'supplier', None) or '').strip() if p else ''
+        db.session.add(OrderItem(
+            order_id=order.id, product_id=i.product_id, product_name=i.product_name,
+            product_category=i.product_category, price=i.price, quantity=i.quantity,
+            tax_type=i.tax_type or '과세', item_status=item_status, supplier=supplier_val or None,
+        ))
+    db.session.flush()
+
+    order_items = OrderItem.query.filter_by(order_id=order.id).order_by(OrderItem.id.asc()).all()
+    delivery_fee_per_settlement = 990
+    for oi in order_items:
+        cat = Category.query.filter_by(name=oi.product_category).first()
+        cat_type = getattr(cat, 'category_type', None) or '입점형'
+        if cat_type == '공급자형':
+            p = Product.query.get(oi.product_id)
+            base_price = (getattr(p, 'supply_price', None) or p.price) if p else oi.price
+            sales_amount = base_price * oi.quantity
+            fee = 0
+            delivery_fee_per = 0
+            total = sales_amount
+        else:
+            sales_amount = oi.price * oi.quantity
+            fee = round(sales_amount * 0.055)
+            delivery_fee_per = delivery_fee_per_settlement
+            total = sales_amount - fee - delivery_fee_per
+        settlement_no = "N" + str(oi.id).zfill(10)
+        tax_exempt_val = (getattr(cat, 'tax_type', None) or '과세') == '면세'
+        db.session.add(Settlement(
+            settlement_no=settlement_no, order_id=order.id, order_item_id=oi.id,
+            sale_dt=order.created_at, category=oi.product_category,
+            tax_exempt=tax_exempt_val,
+            product_name=oi.product_name, sales_amount=sales_amount, fee=fee,
+            delivery_fee=delivery_fee_per, settlement_total=total,
+            category_type=cat_type,
+            settlement_status='입금대기', settled_at=None,
+        ))
+
+    for i in items:
+        p = Product.query.get(i.product_id)
+        if p:
+            p.stock -= i.quantity
+
+    apply_order_points(user, original_total, points_used, order.id)
+    if session.get('save_address_to_profile') and delivery_addr:
+        user.address = delivery_addr
+        user.address_apt_name = delivery_apt or None
+        user.address_detail = delivery_addr_detail
+        user.entrance_pw = delivery_entrance_pw
+
+    _clear_checkout_session()
+    Cart.query.filter_by(user_id=user.id).delete()
+    db.session.commit()
+    return order
+
+
 @app.route('/order/payment', methods=['GET', 'POST'])
 @login_required
 def order_payment():
@@ -11527,14 +11658,8 @@ def order_payment():
         session['delivery_lat'] = None
         session['delivery_lng'] = None
         subtotal = sum(i.price * i.quantity for i in items)
-        cat_price_sums = {}
-        for i in items:
-            cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
-        cat_item_counts = {}
-        for i in items:
-            cat_item_counts[i.product_category] = cat_item_counts.get(i.product_category, 0) + i.quantity
-        delivery_fee, _ = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
-        total = subtotal + delivery_fee
+        delivery_fee = 0
+        total = subtotal
         quick_extra_fee_val = 0
         if zone_type == 'quick' and quick_agree:
             quick_extra_fee_val, _ = get_quick_extra_config()
@@ -11548,6 +11673,10 @@ def order_payment():
             points_used = max_allowed  # 결제 적용: 사용 가능 한도로 제한 (0으로 초기화하지 않음)
         session['points_used'] = points_used
         session['quick_extra_fee'] = quick_extra_fee_val
+        payment_method = request.form.get('payment_method', 'card').strip()
+        session['payment_method'] = payment_method if payment_method in ('card', 'bank') else 'card'
+        if session['payment_method'] == 'bank':
+            return redirect(url_for('order_bank_transfer'))
         return redirect(url_for('order_payment'))
     items = Cart.query.filter_by(user_id=current_user.id).all()
     # 마이페이지와 동일하게: 회원 저장 주소 우선 사용(세션은 이전 결제 시도 값이라 마이페이지 수정 후 불일치 가능)
@@ -11563,13 +11692,7 @@ def order_payment():
         return redirect('/cart')
     
     subtotal = sum(i.price * i.quantity for i in items)
-    cat_price_sums = {}
-    for i in items:
-        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
-    cat_item_counts = {}
-    for i in items:
-        cat_item_counts[i.product_category] = cat_item_counts.get(i.product_category, 0) + i.quantity
-    delivery_fee, _ = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
+    delivery_fee = 0
     points_used = session.get('points_used', 0) or 0
     quick_extra_fee_val = session.get('quick_extra_fee', 0) or 0
     total_before_points = int(subtotal + delivery_fee + quick_extra_fee_val)
@@ -11714,6 +11837,125 @@ def order_payment():
     """
     return render_template_string(HEADER_HTML + content + FOOTER_HTML)
 
+
+@app.route('/order/bank-transfer', methods=['GET', 'POST'])
+@login_required
+def order_bank_transfer():
+    """무통장 입금 주문 접수"""
+    if session.get('payment_method') != 'bank':
+        return redirect(url_for('order_confirm'))
+
+    items = Cart.query.filter_by(user_id=current_user.id).all()
+    effective_addr = _normalize_address_for_zone(current_user.address or "") or _normalize_address_for_zone(session.get('order_address') or "")
+    if not items:
+        flash("장바구니가 비었습니다.")
+        return redirect('/cart')
+    if not effective_addr or not is_address_in_delivery_zone(effective_addr):
+        flash("배송 주소를 확인해 주세요.")
+        return redirect('/order/confirm')
+
+    subtotal = sum(i.price * i.quantity for i in items)
+    delivery_fee = 0
+    points_used = session.get('points_used', 0) or 0
+    quick_extra_fee_val = session.get('quick_extra_fee', 0) or 0
+    original_total = int(subtotal + delivery_fee + quick_extra_fee_val)
+    deposit_amount = max(0, original_total - points_used)
+
+    if request.method == 'POST':
+        order_id = _make_order_virt_id(effective_addr)
+        if deposit_amount <= 0:
+            order_status, item_status, payment_key = '결제완료', '결제완료', None
+        else:
+            order_status, item_status, payment_key = '입금대기', '입금대기', 'BANK_TRANSFER'
+        try:
+            order = _finalize_order_from_cart(
+                current_user, items, order_id, payment_key=payment_key,
+                order_status=order_status, item_status=item_status, payment_method='bank',
+            )
+        except Exception as e:
+            db.session.rollback()
+            flash("주문 저장 중 오류가 발생했습니다. 다시 시도해 주세요.")
+            print(f"order_bank_transfer DB Error: {e}")
+            return redirect('/cart')
+        if not order:
+            return redirect('/cart')
+
+        if order_status == '입금대기':
+            send_message(
+                current_user.id,
+                '무통장 입금 안내',
+                f"주문번호 {order.order_id}\n입금 계좌: {BANK_TRANSFER_ACCOUNT_LABEL}\n입금액: {deposit_amount:,}원\n입금자명은 주문자명과 동일하게 해 주세요.",
+                'order_bank_pending', order.id,
+            )
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+        else:
+            title, body = get_template_content('order_created', order_id=order.order_id)
+            send_message(current_user.id, title, body, 'order_created', order.id)
+            try:
+                send_alimtalk_order_event('order_created', order.customer_phone or current_user.phone, order.customer_name or current_user.name, order.order_id)
+            except Exception:
+                pass
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+        if order_status == '입금대기':
+            bank_deposit_box = f'''<div class="p-4 bg-blue-50 rounded-xl border border-blue-100"><p class="text-[10px] text-blue-500 font-black mb-2">입금 계좌</p><p class="text-sm font-black text-blue-900">{BANK_TRANSFER_BANK} {BANK_TRANSFER_ACCOUNT}</p><p class="text-xs text-blue-800 mt-1">예금주: {BANK_TRANSFER_HOLDER}</p><p class="text-lg font-black text-blue-700 mt-3">입금액 {deposit_amount:,}원</p><p class="text-[11px] text-blue-600 mt-2">입금자명은 주문자명과 동일하게 해 주세요.</p></div>'''
+            status_note = '<p class="text-amber-700 font-bold text-sm mb-6">아래 계좌로 입금해 주시면 확인 후 배송이 시작됩니다.</p>'
+        else:
+            bank_deposit_box = f'<div><p class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">결제 금액</p><p class="text-xl font-black text-teal-600">{original_total:,}원 (포인트 사용)</p></div>'
+            status_note = '<p class="text-teal-700 font-bold text-sm mb-6">포인트로 전액 결제되어 주문이 완료되었습니다.</p>'
+
+        success_content = f"""
+        <div class="max-w-md mx-auto py-16 md:py-24 px-6 text-center font-black">
+            <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-3xl mx-auto mb-8">
+                <i class="fas fa-university"></i>
+            </div>
+            <h2 class="text-2xl md:text-3xl font-black mb-3 text-gray-800">주문이 접수되었습니다</h2>
+            {status_note}
+            <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm mb-8 text-left space-y-4">
+                <div>
+                    <p class="text-[10px] text-gray-400 uppercase tracking-widest mb-1">주문번호</p>
+                    <p class="text-sm font-black text-gray-800">{order.order_id}</p>
+                </div>
+                {bank_deposit_box}
+            </div>
+            <div class="flex flex-col gap-3">
+                <a href="/mypage" class="bg-gray-900 text-white py-4 rounded-2xl font-black">주문 내역 보기</a>
+                <a href="/" class="text-gray-400 font-bold text-sm hover:text-teal-600">메인으로</a>
+            </div>
+        </div>
+        """
+        return render_template_string(HEADER_HTML + success_content + FOOTER_HTML)
+
+    order_name = f"{items[0].product_name} 외 {len(items)-1}건" if len(items) > 1 else items[0].product_name
+    content = f"""
+    <div class="max-w-md mx-auto py-12 md:py-16 px-6">
+        <h1 class="text-xl font-semibold text-gray-900 mb-2 text-center">무통장 입금 주문</h1>
+        <p class="text-sm text-gray-500 text-center mb-8">입금 확인 후 배송이 시작됩니다.</p>
+        <div class="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm mb-6 space-y-3 text-sm">
+            <div class="flex justify-between gap-4"><span class="text-gray-500">주문 상품</span><span class="font-medium text-right">{order_name}</span></div>
+            {f'<div class="flex justify-between gap-4"><span class="text-gray-500">포인트 사용</span><span class="font-medium">- {points_used:,}원</span></div>' if points_used else ''}
+            <div class="flex justify-between gap-4 border-t border-gray-100 pt-3"><span class="text-gray-500">입금 금액</span><span class="text-xl font-bold text-gray-900">{deposit_amount:,}원</span></div>
+        </div>
+        <div class="p-5 bg-blue-50 rounded-2xl border border-blue-100 mb-8 text-sm text-blue-900">
+            <p class="font-bold mb-2">입금 계좌</p>
+            <p class="font-mono text-base">{BANK_TRANSFER_BANK} {BANK_TRANSFER_ACCOUNT}</p>
+            <p class="mt-1">예금주: {BANK_TRANSFER_HOLDER}</p>
+        </div>
+        <form method="POST">
+            <button type="submit" class="w-full bg-gray-900 text-white py-4 rounded-full font-medium hover:bg-black transition">위 계좌로 주문 접수하기</button>
+        </form>
+        <p class="text-center mt-4"><a href="/order/confirm" class="text-xs text-gray-400 hover:text-teal-600">결제 수단 다시 선택</a></p>
+    </div>
+    """
+    return render_template_string(HEADER_HTML + content + FOOTER_HTML)
+
+
 # [수정] 결제 성공 화면 내 '바로가기 추가' 버튼 포함
 @app.route('/payment/success')
 @login_required
@@ -11759,127 +12001,20 @@ def payment_success():
 
     # res.status_code == 200 → 주문 생성
     items = Cart.query.filter_by(user_id=current_user.id).all()
-    if not items: return redirect('/cart') # 중복 새로고침 방지
+    if not items:
+        return redirect('/cart')
 
-    # 구매 제한 수량 검증 (서버 이중 검증)
-    pids = [i.product_id for i in items]
-    products_by_id = {prod.id: prod for prod in Product.query.filter(Product.id.in_(pids)).all()}
-    for i in items:
-        prod = products_by_id.get(i.product_id)
-        if not prod: continue
-        max_q = getattr(prod, 'max_purchase_quantity', None) or 0
-        if max_q > 0 and i.quantity > max_q:
-            flash(f"「{i.product_name}」은(는) 1인당 최대 {max_q}개까지 구매 가능합니다. 장바구니 수량을 확인해 주세요.")
-            return redirect('/cart')
-
-    cat_groups = {i.product_category: [] for i in items}
-    for i in items: cat_groups[i.product_category].append(f"{i.product_name}({i.quantity})")
-    details = " | ".join([f"[{cat}] {', '.join(prods)}" for cat, prods in cat_groups.items()])
-    
-    cat_price_sums = {}
-    for i in items:
-        cat_price_sums[i.product_category] = cat_price_sums.get(i.product_category, 0) + (i.price * i.quantity)
-    cat_item_counts = {}
-    for i in items:
-        cat_item_counts[i.product_category] = cat_item_counts.get(i.product_category, 0) + i.quantity
-    delivery_fee, _ = calc_delivery_fee_for_categories(cat_price_sums, cat_item_counts)
-    points_used = session.get('points_used', 0) or 0
-    quick_extra = session.get('quick_extra_fee', 0) or 0
-    original_total = int(amt) + points_used  # 결제창에 넘긴 금액(amt) + 사용 포인트 = 주문 원금액
-    max_allowed_now = _effective_max_point_use(current_user, original_total)
-    points_used = min(points_used, max_allowed_now)
-
-    # 주문 시 변경한 배송지가 있으면 session 값 사용, 없으면 회원 기본 주소 사용
-    delivery_addr = session.get('order_address') or current_user.address or ""
-    delivery_apt = (session.get('order_address_apt') or getattr(current_user, 'address_apt_name', None) or "").strip()
-    delivery_addr_detail = session.get('order_address_detail') or current_user.address_detail or ""
-    delivery_entrance_pw = session.get('order_entrance_pw') or current_user.entrance_pw or ""
-    apt_part = f" {delivery_apt} " if delivery_apt else " "
-    delivery_address_str = f"({delivery_addr}){apt_part}{delivery_addr_detail} (현관:{delivery_entrance_pw})"
-
-    delivery_lat = session.get('delivery_lat')
-    delivery_lng = session.get('delivery_lng')
-    if (delivery_lat is None or delivery_lng is None) and delivery_addr:
-        coords = _geocode_address(delivery_addr)
-        if coords:
-            delivery_lat, delivery_lng = float(coords[0]), float(coords[1])
-
-    # 주문 저장 후 품목별 OrderItem 생성 (부분 취소 가능하도록). 퀵 추가료는 주문에 기록. UTM: 세션 우선, 없으면 회원 가입 시 유입 경로 사용(재주문도 같은 유입으로 집계).
     try:
-        _utm_src = session.get('utm_source') or getattr(current_user, 'utm_source', None)
-        _utm_med = session.get('utm_medium') or getattr(current_user, 'utm_medium', None)
-        _utm_camp = session.get('utm_campaign') or getattr(current_user, 'utm_campaign', None)
-        order = Order(
-            user_id=current_user.id, customer_name=current_user.name, customer_phone=current_user.phone, customer_email=current_user.email,
-            product_details=details, total_price=original_total, delivery_fee=delivery_fee, tax_free_amount=sum(i.price * i.quantity for i in items if i.tax_type == '면세'),
-            order_id=oid, payment_key=pk, delivery_address=delivery_address_str,
-            delivery_lat=delivery_lat, delivery_lng=delivery_lng,
-            request_memo=current_user.request_memo,
-            status='결제완료', points_used=points_used, quick_extra_fee=quick_extra,
-            utm_source=_utm_src, utm_medium=_utm_med, utm_campaign=_utm_camp
+        order = _finalize_order_from_cart(
+            current_user, items, oid, payment_key=pk,
+            order_status='결제완료', item_status='결제완료', payment_method='card',
         )
-        db.session.add(order)
-        db.session.flush()  # order.id 확보
-        for i in items:
-            p = Product.query.get(i.product_id)
-            supplier_val = (getattr(p, 'supplier', None) or '').strip() if p else ''
-            db.session.add(OrderItem(order_id=order.id, product_id=i.product_id, product_name=i.product_name, product_category=i.product_category, price=i.price, quantity=i.quantity, tax_type=i.tax_type or '과세', item_status='결제완료', supplier=supplier_val or None))
-        db.session.flush()  # OrderItem.id 확보
-
-        order_items = OrderItem.query.filter_by(order_id=order.id).order_by(OrderItem.id.asc()).all()
-        delivery_fee_per_settlement = 990
-        for oi in order_items:
-            cat = Category.query.filter_by(name=oi.product_category).first()
-            cat_type = getattr(cat, 'category_type', None) or '입점형'
-            # 공급자형: 배송비·수수료 없음, 공급가(supply_price) 기준
-            if cat_type == '공급자형':
-                p = Product.query.get(oi.product_id)
-                base_price = (getattr(p, 'supply_price', None) or p.price) if p else oi.price
-                sales_amount = base_price * oi.quantity
-                fee = 0
-                delivery_fee_per = 0
-                total = sales_amount
-            else:
-                sales_amount = oi.price * oi.quantity
-                fee = round(sales_amount * 0.055)
-                delivery_fee_per = delivery_fee_per_settlement
-                total = sales_amount - fee - delivery_fee_per
-            settlement_no = "N" + str(oi.id).zfill(10)
-            tax_exempt_val = (getattr(cat, 'tax_type', None) or '과세') == '면세'
-            db.session.add(Settlement(
-                settlement_no=settlement_no, order_id=order.id, order_item_id=oi.id,
-                sale_dt=order.created_at, category=oi.product_category,
-                tax_exempt=tax_exempt_val,
-                product_name=oi.product_name, sales_amount=sales_amount, fee=fee,
-                delivery_fee=delivery_fee_per, settlement_total=total,
-                category_type=cat_type,
-                settlement_status='입금대기', settled_at=None
-            ))
-
-        for i in items:
-            p = Product.query.get(i.product_id)
-            if p:
-                p.stock -= i.quantity
-
-        apply_order_points(current_user, original_total, points_used, order.id)
-        if session.get('save_address_to_profile') and delivery_addr:
-            current_user.address = delivery_addr
-            current_user.address_apt_name = delivery_apt or None
-            current_user.address_detail = delivery_addr_detail
-            current_user.entrance_pw = delivery_entrance_pw
-        session.pop('points_used', None)
-        session.pop('quick_extra_fee', None)
-        session.pop('order_address', None)
-        session.pop('order_address_apt', None)
-        session.pop('order_address_detail', None)
-        session.pop('order_entrance_pw', None)
-        session.pop('save_address_to_profile', None)
-        Cart.query.filter_by(user_id=current_user.id).delete()
-        db.session.commit()
     except Exception as e:
         db.session.rollback()
         flash("주문 저장 중 오류가 발생했습니다. 결제는 완료되었을 수 있으니 고객센터로 문의해 주세요.")
         print(f"payment_success DB Error: {e}")
+        return redirect('/cart')
+    if not order:
         return redirect('/cart')
 
     title, body = get_template_content('order_created', order_id=oid)
@@ -11994,6 +12129,38 @@ def admin_settle_order(order_id):
         
     # ✅ 사용자가 보던 날짜 필터가 유지되도록 이전 페이지(referrer)로 리다이렉트
     return redirect(request.referrer or url_for('admin.admin_dashboard', tab='orders'))
+
+
+@login_required
+def admin_confirm_bank_deposit(order_id):
+    """무통장 입금 대기 주문을 결제완료로 전환"""
+    if not current_user.is_admin:
+        flash("관리자 권한이 필요합니다.")
+        return redirect('/')
+    order = Order.query.get_or_404(order_id)
+    if order.status != '입금대기' or getattr(order, 'payment_method', None) != 'bank':
+        flash("무통장 입금 확인 대상 주문이 아닙니다.")
+        return redirect(request.referrer or url_for('admin.admin_dashboard', tab='orders'))
+    order.status = '결제완료'
+    for oi in OrderItem.query.filter_by(order_id=order.id, cancelled=False).all():
+        if getattr(oi, 'item_status', None) == '입금대기':
+            oi.item_status = '결제완료'
+    try:
+        db.session.commit()
+        title, body = get_template_content('order_created', order_id=order.order_id)
+        send_message(order.user_id, title, body, 'order_created', order.id)
+        try:
+            send_alimtalk_order_event('order_created', order.customer_phone, order.customer_name, order.order_id)
+        except Exception:
+            pass
+        db.session.commit()
+        flash(f"주문 {order.order_id} 무통장 입금이 확인되어 결제완료 처리되었습니다.")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"처리 오류: {str(e)}")
+    return redirect(request.referrer or url_for('admin.admin_dashboard', tab='orders'))
+
+
 # admin() 함수 내 주문 조회 부분은 기존과 동일하게 유지하되 UI에서 필드를 사용함
 @login_required
 def admin_bulk_request_delivery():
@@ -18236,7 +18403,7 @@ def admin_dashboard():
                             <td class="p-6">
                                 <span class="text-gray-400 text-[11px]">{{ o.created_at.strftime('%m/%d %H:%M') }}</span><br>
                                 <span id="status-{{ o.order_id }}" class="{% if o.status == '결제취소' %}text-red-500{% else %}text-teal-600{% endif %} font-black">[{{ o.status }}]</span><br>
-                                <a href="/admin/order/{{ o.id }}/items" class="text-[10px] text-teal-600 hover:underline font-bold">품목상태</a>{% if o.status != '결제취소' and not getattr(o, 'is_settled', False) %}<br><a href="/admin/order/{{ o.id }}/settle" class="text-[10px] text-amber-600 hover:underline font-bold" onclick="return confirm('이 주문을 입금 승인 처리할까요?');">입금 승인</a>{% endif %}
+                                <a href="/admin/order/{{ o.id }}/items" class="text-[10px] text-teal-600 hover:underline font-bold">품목상태</a>{% if o.status == '입금대기' and getattr(o, 'payment_method', None) == 'bank' %}<br><a href="/admin/order/{{ o.id }}/confirm_deposit" class="text-[10px] text-blue-600 hover:underline font-bold" onclick="return confirm('무통장 입금을 확인하고 결제완료 처리할까요?');">무통장 입금 확인</a>{% elif o.status != '결제취소' and not getattr(o, 'is_settled', False) %}<br><a href="/admin/order/{{ o.id }}/settle" class="text-[10px] text-amber-600 hover:underline font-bold" onclick="return confirm('이 주문을 입금 승인 처리할까요?');">입금 승인</a>{% endif %}
                             </td>
                             <td class="p-6"><b>{{ o.customer_name }}</b><br><span class="text-gray-400">{{ o.customer_phone }}</span></td>
                             <td class="p-6 text-gray-500 text-[11px]">{{ o.delivery_address }}</td>
@@ -25102,6 +25269,10 @@ with app.app_context():
     try:
         db.session.execute(text('ALTER TABLE "order" ADD COLUMN is_settled INTEGER DEFAULT 0'))
         db.session.execute(text('ALTER TABLE "order" ADD COLUMN settled_at DATETIME'))
+        db.session.commit()
+    except: pass
+    try:
+        db.session.execute(text('ALTER TABLE "order" ADD COLUMN payment_method VARCHAR(30)'))
         db.session.commit()
     except: pass
     try:
